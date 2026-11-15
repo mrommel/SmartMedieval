@@ -6,6 +6,99 @@ from ..engine import (
 )
 
 
+class VillageTests(TestCase):
+    def test_house_footprints_block_movement_and_shots_but_lanes_remain_open(self):
+        battlefield = default_map()
+        battlefield["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4}]
+        battlefield["lanes"] = [{"x": 3, "y": 5}, {"x": 4, "y": 5}]
+        validate_map(battlefield)
+        self.assertFalse(is_walkable(4, 4, battlefield))
+        self.assertTrue(is_walkable(4, 5, battlefield))
+        self.assertIsNone(find_path((3, 4), (4, 4), battlefield))
+        self.assertFalse(has_line_of_sight((3, 4), (6, 4), battlefield))
+        self.assertIsNotNone(find_path((3, 4), (6, 4), battlefield))
+        state = initial_state(battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 5, "y": 4}, battlefield)
+        state["units"][2].update(x=3, y=4)
+        state["units"][6].update(x=6, y=4)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+
+    def test_fence_allows_shots_but_blocks_movement_and_grants_cover(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 5, "y": 4, "type": "fence"}]
+        validate_map(battlefield)
+        self.assertFalse(is_walkable(5, 4, battlefield))
+        self.assertTrue(has_line_of_sight((4, 4), (6, 4), battlefield))
+        state = initial_state(battlefield)
+        state["units"][2].update(x=3, y=5)
+        state["units"][3].update(x=4, y=5)
+        state["units"][6].update(x=6, y=5)
+        blocked = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+        self.assertEqual(blocked["history"][-1]["cover"], "fence")
+        self.assertEqual(blocked["units"][6]["health"], 3)
+        hit = apply_action(blocked, {"type": "ranged_attack", "unit_id": 3, "target_id": 6}, battlefield)
+        self.assertEqual(hit["units"][6]["health"], 2)
+
+    def test_house_and_well_provide_cover_while_well_blocks_sight(self):
+        for kind in ("house", "well"):
+            with self.subTest(kind=kind):
+                battlefield = default_map()
+                if kind == "house":
+                    battlefield["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4}]
+                else:
+                    battlefield["objects"] = [{"x": 5, "y": 4, "type": "well"}]
+                validate_map(battlefield)
+                self.assertFalse(has_line_of_sight((4, 4), (6, 4), battlefield))
+                state = initial_state(battlefield)
+                state["units"][2].update(x=3, y=5)
+                state["units"][6].update(x=6, y=5)
+                result = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+                self.assertEqual(result["history"][-1]["cover"], kind)
+
+    def test_rejects_bad_house_lane_and_object_placements(self):
+        valid = {"left": 6, "right": 7, "top": 2, "bottom": 3}
+        for houses in ("house", [valid] * 33, [valid, valid],
+                       [{**valid, "left": True}], [{**valid, "right": 10}],
+                       [{**valid, "top": -1}], [{**valid, "right": 7, "bottom": 2}],
+                       [{**valid, "left": 11, "right": 12}],
+                       [{**valid, "right": 9, "bottom": 6}],
+                       [{**valid, "door": {"x": 6, "y": 3}}]):
+            battlefield = default_map()
+            battlefield["houses"] = houses
+            with self.subTest(houses=houses), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        for lanes in ("road", [{"x": 3, "y": 5}] * 2,
+                      [{"x": True, "y": 5}], [{"x": -1, "y": 5}],
+                      [{"x": 11, "y": 5}], [{"x": 4, "y": 4, "type": "road"}]):
+            battlefield = default_map()
+            battlefield["lanes"] = lanes
+            with self.subTest(lanes=lanes), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield = default_map()
+        battlefield["houses"] = [valid]
+        for field, value in (("objects", [{"x": 6, "y": 2, "type": "fence"}]),
+                             ("elevation", [{"x": 6, "y": 2, "height": 1}]),
+                             ("lanes", [{"x": 6, "y": 2}]),
+                             ("startPositions", [{"x": 6, "y": 2, "type": "vanguard"}]),
+                             ("catapults", [{"x": 6, "y": 2}])):
+            changed = default_map()
+            changed["houses"] = [valid]
+            changed[field] = value
+            with self.subTest(field=field), self.assertRaises(InvalidMap):
+                validate_map(changed)
+        battlefield = default_map()
+        battlefield["lanes"] = [{"x": 3, "y": 5}]
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1, "access": "ramp"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        battlefield = default_map()
+        battlefield["houses"] = [{"left": 10, "right": 12, "top": 0, "bottom": 13}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+
+
 class ThroneRoomTests(TestCase):
     def throne_map(self):
         battlefield = default_map()

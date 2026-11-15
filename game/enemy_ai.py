@@ -28,7 +28,8 @@ def enemy_turn(state, map_data, combat_events=None):
     battlefield = {
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
-                  "strongpoints": map_data.get("strongpoints", []),
+                   "strongpoints": map_data.get("strongpoints", []),
+                   "houses": map_data.get("houses", []), "lanes": map_data.get("lanes", []),
                    "mission": map_data.get("mission", "courtyard"),
                    "breaches": state.get("breaches", [])},
         "units": [
@@ -53,10 +54,13 @@ def enemy_turn(state, map_data, combat_events=None):
                 "one-level step. Wall tiles listed in breaches are open passages. After "
                 "movement, defenders automatically attack when possible: vanguards make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
-                "with walls, trees, and rocks blocking line of sight and movement. Ranged weapons "
+                "with walls, houses, trees, rocks, and wells blocking line of sight and movement. "
+                "House rectangles are solid (not yet enterable); lanes are walkable. Fences block "
+                "movement but not shots. Ranged weapons "
                 "need one or two full turns to reload. Prefer goals that bring ranged defenders "
                 "within a clear shot. Ground-level units beside a wall, tree, or rock on the "
-                "shooter-facing side block the first ranged hit against them each turn; melee "
+                "shooter-facing side (including fences, houses and wells) block the first "
+                "ranged hit against them each turn; melee "
                 "ignores cover. Keep at least one defender near the objective when one is "
                 "already nearby; prioritize attackers occupying the objective. In a capture_king "
                 "mission the king stays on the throne, never moves or attacks, and cannot be "

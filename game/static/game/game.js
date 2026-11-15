@@ -138,7 +138,13 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function isWalkable(x, y) {
-    return x >= 0 && x < COLS && y >= 0 && y < ROWS && !renderer.isWall(x, y) && !objects.has(`${x},${y}`);
+    return x >= 0 && x < COLS && y >= 0 && y < ROWS &&
+      !renderer.isWall(x, y) && !renderer.isHouse(x, y) && !objects.has(`${x},${y}`);
+  }
+
+  function blocksSight(x, y) {
+    return renderer.isWall(x, y) || renderer.isHouse(x, y) ||
+      (objects.has(`${x},${y}`) && objects.get(`${x},${y}`).type !== "fence");
   }
 
   function draw() {
@@ -183,14 +189,14 @@ import { createLaunchUI } from "./launch.js";
       const horizontal = (1 + 2 * ix) * ny;
       const vertical = (1 + 2 * iy) * nx;
       if (horizontal === vertical) {
-        if (ix < nx && iy < ny && (!isWalkable(x + stepX, y) || !isWalkable(x, y + stepY))) return false;
+        if (ix < nx && iy < ny && (blocksSight(x + stepX, y) || blocksSight(x, y + stepY))) return false;
         x += stepX; y += stepY; ix++; iy++;
       } else if (horizontal < vertical) {
         x += stepX; ix++;
       } else {
         y += stepY; iy++;
       }
-      if ((x !== targetX || y !== targetY) && !isWalkable(x, y)) return false;
+      if ((x !== targetX || y !== targetY) && blocksSight(x, y)) return false;
     }
     return true;
   }
@@ -216,8 +222,10 @@ import { createLaunchUI } from "./launch.js";
     cursorStatus.textContent = `${location}: ${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
       : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
-        objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
-        ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" : "open ground")}.`;
+        objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" :
+        renderer.isHouse(cursor.x, cursor.y) ? "house" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
+        ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" :
+        mapData?.lanes?.some(tile => tile.x === cursor.x && tile.y === cursor.y) ? "lane" : "open ground")}.`;
   }
 
   function updateSelection() {

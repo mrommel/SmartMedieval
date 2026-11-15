@@ -5,6 +5,8 @@ export function createBattlefieldRenderer(canvas) {
   let elevation = new Map();
   let raisedTiles = [];
   let objects = new Map();
+  let houses = new Set();
+  let lanes = new Set();
   let breaches = new Set();
   let wallDamage = new Set();
   let tileW = 56, tileH = 28, originX = 0, originY = 0, width = 0, height = 0;
@@ -17,6 +19,13 @@ export function createBattlefieldRenderer(canvas) {
     raisedTiles = map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     objects = new Map((map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
+    houses = new Set();
+    for (const house of map.houses || []) {
+      for (let y = house.top; y <= house.bottom; y++) {
+        for (let x = house.left; x <= house.right; x++) houses.add(`${x},${y}`);
+      }
+    }
+    lanes = new Set((map.lanes || []).map(tile => `${tile.x},${tile.y}`));
     breaches = new Set((map.breaches || []).map(point => `${point.x},${point.y}`));
     wallDamage = new Set((map.wall_damage || []).map(point => `${point.x},${point.y}`));
   }
@@ -53,6 +62,10 @@ export function createBattlefieldRenderer(canvas) {
     });
   }
 
+  function isHouse(x, y) {
+    return houses.has(`${x},${y}`);
+  }
+
   function diamond(x, y, z = tileHeight(x, y)) {
     const p = project(x, y, z);
     return [
@@ -87,7 +100,7 @@ export function createBattlefieldRenderer(canvas) {
         const tile = diamond(x, y, 0);
         const castle = [KEEP, ...strongpoints].some(point =>
           x >= point.left && x <= point.right && y >= point.top && y <= point.bottom);
-        const path = (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
+        const path = lanes.has(`${x},${y}`) || (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
         const palette = path ? colors.path : colors.grass;
         polygon(tile, palette[hash(x, y) % palette.length], castle ? "rgba(53,53,43,.25)" : colors.grassLine, .7);
 
@@ -210,6 +223,36 @@ export function createBattlefieldRenderer(canvas) {
         ctx.closePath();
         ctx.fill();
       }
+    } else if (obj.type === "fence") {
+      ctx.strokeStyle = "#493c30";
+      ctx.lineWidth = Math.max(2, tileW * .055);
+      for (const dx of [-.25, .25]) {
+        ctx.beginPath();
+        ctx.moveTo(p.x + tileW * dx, ground);
+        ctx.lineTo(p.x + tileW * dx, ground - tileH * .8);
+        ctx.stroke();
+      }
+      for (const dy of [.3, .65]) {
+        ctx.beginPath();
+        ctx.moveTo(p.x - tileW * .28, ground - tileH * dy);
+        ctx.lineTo(p.x + tileW * .28, ground - tileH * dy);
+        ctx.stroke();
+      }
+    } else if (obj.type === "well") {
+      ctx.fillStyle = "#494e4a";
+      ctx.beginPath();
+      ctx.ellipse(p.x, ground - tileH * .25, tileW * .25, tileH * .26, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#aba994";
+      ctx.lineWidth = Math.max(2, tileW * .07);
+      ctx.stroke();
+      ctx.strokeStyle = "#6e5038";
+      ctx.beginPath();
+      ctx.moveTo(p.x - tileW * .22, ground - tileH * .23);
+      ctx.lineTo(p.x - tileW * .22, ground - tileH * 1.1);
+      ctx.lineTo(p.x + tileW * .22, ground - tileH * 1.1);
+      ctx.lineTo(p.x + tileW * .22, ground - tileH * .23);
+      ctx.stroke();
     } else {
       polygon([
         [p.x - tileW * .29, ground], [p.x - tileW * .25, ground - tileH * .55],
@@ -222,6 +265,20 @@ export function createBattlefieldRenderer(canvas) {
       ], "#555f57", "#49564e", 1);
     }
     ctx.restore();
+  }
+
+  function drawHouse(x, y) {
+    const base = diamond(x, y, 0);
+    const roof = base.map(([px, py]) => [px, py - tileH * 1.35]);
+    polygon([roof[3], roof[2], base[2], base[3]], "#c2af8c", "#544739");
+    polygon([roof[1], roof[2], base[2], base[1]], "#9b876c", "#544739");
+    polygon(roof, "#884f3e", "#513b35", 1.5);
+    ctx.strokeStyle = "#b67e5c";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(roof[3][0], roof[3][1]);
+    ctx.lineTo(roof[1][0], roof[1][1]);
+    ctx.stroke();
   }
 
   function drawCatapult(catapult) {
@@ -465,6 +522,10 @@ export function createBattlefieldRenderer(canvas) {
       }
     }
     raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
+    houses.forEach(key => {
+      const [x, y] = key.split(",").map(Number);
+      layers.push({ depth: x + y + .25, kind: "house", x, y });
+    });
     objects.forEach(obj => layers.push({ depth: obj.x + obj.y + .3, kind: "object", obj }));
     breaches.forEach(key => {
       const [x, y] = key.split(",").map(Number);
@@ -483,6 +544,7 @@ export function createBattlefieldRenderer(canvas) {
       }
       if (layer.kind === "wall") drawWall(layer.x, layer.y, layer.point);
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
+      else if (layer.kind === "house") drawHouse(layer.x, layer.y);
       else if (layer.kind === "object") drawObject(layer.obj);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
@@ -501,5 +563,5 @@ export function createBattlefieldRenderer(canvas) {
     projectiles = [];
   }
 
-  return { setMap, setLayout, project, tileHeight, isWall, draw, queueProjectiles, clearProjectiles };
+  return { setMap, setLayout, project, tileHeight, isWall, isHouse, draw, queueProjectiles, clearProjectiles };
 }

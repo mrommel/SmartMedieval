@@ -6,11 +6,20 @@ from django.contrib.staticfiles import finders
 from django.test import TestCase
 from django.urls import reverse
 
-from ..engine import default_map, initial_state
+from ..engine import default_map, initial_state, validate_map
 from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameCatalogApiTests(TestCase):
+    def test_seeded_village_has_reachable_map_and_linked_scenario(self):
+        game = SingleGame.objects.get(slug="greywatch-hamlet")
+        scenario = Scenario.objects.get(slug="through-the-hamlet")
+        self.assertEqual(list(scenario.games.all()), [game])
+        self.assertEqual(len(game.map_definition["houses"]), 2)
+        validate_map(game.map_definition)
+        self.assertEqual(len(initial_state(game.map_definition)["units"]), 7)
+        self.assertIn(game.name, [entry["name"] for entry in self.client.get(reverse("single-games-api")).json()])
+
     def test_assault_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0006_tune_greywatch_assault")
         game = SingleGame.objects.get(slug="greywatch-assault")

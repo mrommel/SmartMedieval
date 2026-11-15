@@ -56,7 +56,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
@@ -102,19 +102,34 @@ def validate_map(map_data):
                for other in rectangles):
             raise InvalidMap("Strongpoints cannot overlap the keep or each other.")
         rectangles.append(point)
+    houses = map_data.get("houses", [])
+    if not isinstance(houses, list) or len(houses) > 32:
+        raise InvalidMap("Houses must be a list of at most 32 rectangular footprints.")
+    for house in houses:
+        if (not isinstance(house, dict) or set(house) != {"left", "right", "top", "bottom"}
+                or any(type(value) is not int for value in house.values())
+                or not (0 <= house["left"] < house["right"] < cols
+                        and 0 <= house["top"] < house["bottom"] < rows)
+                or house["right"] - house["left"] > 3 or house["bottom"] - house["top"] > 3
+                or any(house["left"] <= other["right"] and other["left"] <= house["right"]
+                       and house["top"] <= other["bottom"] and other["top"] <= house["bottom"]
+                       for other in rectangles)):
+            raise InvalidMap("Houses must be distinct 2-4 tile rectangles outside keeps and strongpoints.")
+        rectangles.append(house)
     objects = map_data.get("objects", [])
     if not isinstance(objects, list) or len(objects) > 256:
-        raise InvalidMap("Objects must be a list of at most 256 trees and rocks.")
+        raise InvalidMap("Objects must be a list of at most 256 trees, rocks, fences and wells.")
     object_tiles = set()
     for obj in objects:
         if (not isinstance(obj, dict) or set(obj) != {"x", "y", "type"}
                 or type(obj["x"]) is not int or type(obj["y"]) is not int
-                or obj["type"] not in ("tree", "rock")
+                or obj["type"] not in ("tree", "rock", "fence", "well")
                 or not (0 <= obj["x"] < cols and 0 <= obj["y"] < rows)
                 or is_wall(obj["x"], obj["y"], map_data)
+                or is_house(obj["x"], obj["y"], map_data)
                 or (obj["x"], obj["y"]) == (gate["x"], gate["y"])
                 or (obj["x"], obj["y"]) in object_tiles):
-            raise InvalidMap("Objects must be unique open tiles with type tree or rock, away from the gate.")
+            raise InvalidMap("Objects must be unique open tiles with type tree, rock, fence or well, away from the gate.")
         object_tiles.add((obj["x"], obj["y"]))
     elevation = map_data.get("elevation", [])
     if not isinstance(elevation, list) or len(elevation) > cols * rows:
@@ -131,6 +146,18 @@ def validate_map(map_data):
                 or (tile["x"], tile["y"]) in seen):
             raise InvalidMap("Elevated tiles must be unique open tiles with height 1-3 and optional ladder or ramp access.")
         seen.add((tile["x"], tile["y"]))
+    lanes = map_data.get("lanes", [])
+    if not isinstance(lanes, list) or len(lanes) > cols * rows:
+        raise InvalidMap("Lanes must be a list of unique open ground tiles.")
+    seen_lanes = set()
+    for lane in lanes:
+        if (not isinstance(lane, dict) or set(lane) != {"x", "y"}
+                or any(type(value) is not int for value in lane.values())
+                or not is_walkable(lane["x"], lane["y"], map_data)
+                or (lane["x"], lane["y"]) in seen
+                or (lane["x"], lane["y"]) in seen_lanes):
+            raise InvalidMap("Lanes must be unique open ground tiles without elevation.")
+        seen_lanes.add((lane["x"], lane["y"]))
     objective = map_data["objective"]
     if not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
@@ -213,9 +240,21 @@ def is_object(x, y, map_data=MAP):
     return any(obj["x"] == x and obj["y"] == y for obj in map_data.get("objects", ()))
 
 
+def is_house(x, y, map_data=MAP):
+    return any(house["left"] <= x <= house["right"] and house["top"] <= y <= house["bottom"]
+               for house in map_data.get("houses", ()))
+
+
+def blocks_sight(x, y, map_data=MAP):
+    return (is_wall(x, y, map_data) or is_house(x, y, map_data)
+            or any(obj["x"] == x and obj["y"] == y and obj["type"] != "fence"
+                   for obj in map_data.get("objects", ())))
+
+
 def is_walkable(x, y, map_data=MAP):
     return (0 <= x < map_data["cols"] and 0 <= y < map_data["rows"]
-            and not is_wall(x, y, map_data) and not is_object(x, y, map_data))
+            and not is_wall(x, y, map_data) and not is_house(x, y, map_data)
+            and not is_object(x, y, map_data))
 
 
 def elevation_index(map_data):
@@ -261,8 +300,8 @@ def has_line_of_sight(start, end, map_data=MAP):
         if horizontal == vertical:
             # At a corner, either adjoining obstacle blocks the shot.
             if ix < nx and iy < ny and (
-                    is_wall(x + step_x, y, map_data) or is_object(x + step_x, y, map_data)
-                    or is_wall(x, y + step_y, map_data) or is_object(x, y + step_y, map_data)):
+                    blocks_sight(x + step_x, y, map_data)
+                    or blocks_sight(x, y + step_y, map_data)):
                 return False
             x += step_x
             y += step_y
@@ -274,7 +313,7 @@ def has_line_of_sight(start, end, map_data=MAP):
         else:
             y += step_y
             iy += 1
-        if (x, y) != end and (is_wall(x, y, map_data) or is_object(x, y, map_data)):
+        if (x, y) != end and blocks_sight(x, y, map_data):
             return False
     return True
 
@@ -341,6 +380,8 @@ def ranged_cover(attacker, target, map_data):
                 continue
             if is_wall(x, y, map_data):
                 return "wall"
+            if is_house(x, y, map_data):
+                return "house"
             if (x, y) in objects:
                 return objects[x, y]
     return None

@@ -95,7 +95,8 @@ function setup(savedSpeed = null, catalogFetch = null) {
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
     get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
-    frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer
+    frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer,
+    createInput: context.createBattlefieldInput
   };
 }
 
@@ -146,6 +147,75 @@ test("renderer projects raised tiles and draws updated maps independently", () =
     camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
     hasAttackOption: () => false });
   assert.equal(game.draws(), 2);
+});
+
+test("renderer draws village structures and clears house footprints when the map changes", () => {
+  const game = setup();
+  const renderer = game.createRenderer(game.get("battlefield-canvas"));
+  renderer.setLayout({ width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 });
+  const base = { cols: 5, rows: 5, keep: { left: 2, right: 4, top: 2, bottom: 4 },
+    gate: { x: 2, y: 3 }, objective: { x: 3, y: 3 } };
+  renderer.setMap({ ...base, houses: [{ left: 0, right: 1, top: 0, bottom: 1 }],
+    lanes: [{ x: 0, y: 3 }], objects: [{ x: 1, y: 3, type: "fence" },
+      { x: 1, y: 4, type: "well" }] });
+  assert.equal(renderer.isHouse(1, 1), true);
+  assert.equal(renderer.isHouse(2, 1), false);
+  renderer.draw(0, { simulation: { units: [], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
+    hasAttackOption: () => false });
+  assert.equal(game.draws(), 1);
+  renderer.setMap(base);
+  assert.equal(renderer.isHouse(1, 1), false);
+});
+
+test("clicking a house roof picks its footprint rather than ground behind it", () => {
+  const game = setup();
+  const canvas = game.get("battlefield-canvas");
+  const renderer = game.createRenderer(canvas);
+  const layout = { width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 };
+  const map = { cols: 6, rows: 6, keep: { left: 4, right: 5, top: 3, bottom: 5 },
+    gate: { x: 4, y: 4 }, objective: { x: 5, y: 4 },
+    houses: [{ left: 2, right: 3, top: 2, bottom: 3 }] };
+  renderer.setMap(map);
+  renderer.setLayout(layout);
+  let ordered;
+  game.createInput({ canvas, renderer, simulation: { units: [], selected: new Set() },
+    getMap: () => map, getLayout: () => layout, canOrder: () => true,
+    isWalkable: () => true, isAiming: () => false, onAim() {},
+    onMove: (x, y) => { ordered = { x, y }; }, onAttack() {}, onSelection() {},
+    onBlocked() {}, onDraw() {}, onCursor() {} });
+  const roof = renderer.project(2, 2);
+  const event = { button: 0, pointerId: 1, clientX: roof.x, clientY: roof.y - layout.tileH * .85 };
+  canvas.fire("pointerdown", event);
+  canvas.fire("pointerup", event);
+  assert.deepEqual(ordered, { x: 2, y: 2 });
+});
+
+test("keyboard shooting passes fences but not wells or houses; houses block orders", async () => {
+  for (const obstacle of ["fence", "well", "house"]) {
+    const game = setup();
+    game.snapshot.state.units[0].type = "longbow";
+    game.snapshot.state.units.push({ ...game.snapshot.state.units[0],
+      id: 1, x: obstacle === "house" ? 3 : 2, y: 0, side: "defenders", type: "vanguard" });
+    if (obstacle === "house") game.snapshot.map.houses = [{ left: 1, right: 2, top: 0, bottom: 1 }];
+    else game.snapshot.map.objects = [{ x: 1, y: 0, type: obstacle }];
+    await game.get("continue-game").fire("click");
+    const canvas = game.get("battlefield-canvas");
+    const key = name => canvas.fire("keydown", { key: name, shiftKey: false, preventDefault() {} });
+    canvas.fire("focus");
+    key("ArrowRight"); key("ArrowRight");
+    if (obstacle === "house") key("ArrowRight");
+    key("Enter");
+    assert.equal(game.actions.length, obstacle === "fence" ? 1 : 0, obstacle);
+    if (obstacle === "fence") assert.equal(game.actions[0].type, "ranged_attack");
+    if (obstacle === "house") {
+      key("ArrowLeft"); key("ArrowLeft"); key("Enter");
+      assert.equal(game.actions.length, 0, "house tiles are not movement destinations");
+      assert.match(game.get("cursor-status").textContent, /house/);
+    }
+  }
 });
 
 test("renderer draws additional strongpoints and respects each gate after map changes", () => {

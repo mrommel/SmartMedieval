@@ -50,6 +50,19 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
         return { x: tile.x, y: tile.y };
       }
     }
+    const houseTiles = [];
+    for (const house of getMap().houses || []) {
+      for (let y = house.top; y <= house.bottom; y++) {
+        for (let x = house.left; x <= house.right; x++) houseTiles.push({ x, y });
+      }
+    }
+    for (const tile of houseTiles.sort((a, b) => b.x + b.y - a.x - a.y)) {
+      const p = renderer.project(tile.x, tile.y);
+      if (Math.abs(localX - p.x) / (tileW / 2) +
+          Math.abs(localY - (p.y - tileH * .85)) / (tileH / 2) <= 1) {
+        return tile;
+      }
+    }
     const a = (localX - originX) / (tileW / 2);
     const b = (localY - originY) / (tileH / 2);
     return { x: Math.floor((a + b) / 2), y: Math.floor((b - a) / 2) };
