@@ -40,7 +40,8 @@
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
   - [x] Add pause/resume, locally saved animation-speed controls, reduced-motion support, and damage/casualty feedback.
-  - [ ] Add keyboard-accessible battlefield orders and richer combat history.
+  - [x] Add keyboard-accessible battlefield orders.
+  - [ ] Add richer combat history.
 
 ## Asset creation
 

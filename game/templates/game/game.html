@@ -82,13 +82,14 @@
         <div class="daylight"><span aria-hidden="true">◷</span> FIRST LIGHT <i></i> CLEAR SKIES</div>
       </div>
       <div class="canvas-wrap">
-        <canvas id="battlefield-canvas" tabindex="0" aria-label="Battlefield. Click a soldier to select, click open ground to move, or click an adjacent blue defender to attack. Hold shift to select more soldiers. Drag to pan; use the mouse wheel or zoom buttons to zoom."></canvas>
+        <canvas id="battlefield-canvas" tabindex="0" aria-label="Battlefield" aria-describedby="keyboard-help cursor-status"></canvas>
         <div class="camera-controls" aria-label="Camera controls">
           <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
           <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
         </div>
         <div class="objective-label"><span></span> KEEP COURTYARD</div>
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <p id="cursor-status" class="sr-only" aria-live="polite"></p>
         <div class="pause-indicator" id="pause-indicator" hidden>PAUSED · Orders are disabled</div>
         <div class="victory" id="victory" hidden>
           <div class="victory-card">
@@ -126,6 +127,7 @@
         <p>Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
         <p>Defeating an enemy raises the victor's morale; nearby allies lose morale when a soldier falls. At 0–1 morale, units lose one move point next turn; at 5, they gain one. Select one recruit with 5 morale and press Promote to become a veteran: morale returns to 3, with one extra move and fight point each following turn.</p>
         <p>Drag the battlefield to pan. Use the mouse wheel or the zoom buttons to zoom.</p>
+        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, or order movement to open ground. Hold Shift while selecting to add or remove a soldier. Tab to End turn, Promote, or the zoom buttons for other controls.</p>
       </div>
       <div class="playback-settings">
         <label for="animation-speed">Animation speed</label>

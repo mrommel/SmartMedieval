@@ -28,6 +28,7 @@
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
   const selectedStats = document.getElementById("selected-stats");
+  const cursorStatus = document.getElementById("cursor-status");
   const continueButton = document.getElementById("continue-game");
   const launchError = document.getElementById("launch-error");
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -60,6 +61,7 @@
   let animationStarted = false;
   const camera = { x: 0, y: 0, zoom: 1 };
   let activePointer = null;
+  const cursor = { x: 0, y: 0, visible: false };
   let projectiles = [];
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const speedKey = "greywatch.animationSpeed";
@@ -494,6 +496,9 @@
     }
     if (!objectiveDrawn) drawObjective(time);
     drawProjectiles(time);
+    if (cursor.visible) {
+      polygon(diamond(cursor.x, cursor.y), "rgba(241,211,137,.16)", "#ffe2a1", 2);
+    }
     ctx.restore();
   }
 
@@ -615,6 +620,45 @@
     moveSelected(tile.x, tile.y);
   }
 
+  function describeCursor() {
+    const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
+    const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
+    cursorStatus.textContent = `${location}: ${unit
+      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
+      : isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
+        ? "courtyard objective" : "open ground"}.`;
+  }
+
+  function revealCursor() {
+    const point = project(cursor.x, cursor.y);
+    const screenX = point.x * camera.zoom + camera.x;
+    const screenY = (point.y + tileH / 2) * camera.zoom + camera.y;
+    const margin = 32;
+    camera.x += Math.max(margin - screenX, 0) - Math.max(screenX - (width - margin), 0);
+    camera.y += Math.max(margin - screenY, 0) - Math.max(screenY - (height - margin), 0);
+    clampCamera();
+  }
+
+  function handleKeyboardOrder(shiftKey) {
+    const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
+    if (unit?.side === "defenders") {
+      attackSelected(unit);
+    } else if (unit) {
+      if (shiftKey) {
+        if (simulation.selected.has(unit.id)) simulation.selected.delete(unit.id);
+        else simulation.selected.add(unit.id);
+      } else {
+        simulation.selected = new Set([unit.id]);
+      }
+      updateSelection();
+      describeCursor();
+    } else if (!isWalkable(cursor.x, cursor.y)) {
+      showToast("Stone walls bar the way. Enter through the south gate.");
+    } else {
+      moveSelected(cursor.x, cursor.y);
+    }
+  }
+
   function updateSelection() {
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     if (selected.length) showToast(`${selected.length} selected · ${Math.min(...selected.map(unit => unit.move_points))} move points remaining.`);
@@ -651,6 +695,13 @@
     startingAttackerCount = snapshot.map.startPositions.length;
     if (newGame) simulation.selected = new Set([attackers[0].id]);
     else simulation.selected = new Set([...simulation.selected].filter(id => attackers.some(unit => unit.id === id)));
+    if (newGame) {
+      cursor.x = attackers[0]?.x ?? OBJECTIVE.x;
+      cursor.y = attackers[0]?.y ?? OBJECTIVE.y;
+    }
+    cursor.x = Math.max(0, Math.min(COLS - 1, cursor.x));
+    cursor.y = Math.max(0, Math.min(ROWS - 1, cursor.y));
+    describeCursor();
     const roster = [
       { type: "vanguard", name: "Vanguard", icon: "⚔", role: "close-quarters" },
       { type: "longbow", name: "Longbow", icon: "⌁", role: "ranged support" },
@@ -935,6 +986,32 @@
     activePointer = null;
   });
   canvas.addEventListener("pointercancel", () => { activePointer = null; });
+  canvas.addEventListener("focus", () => {
+    cursor.visible = true;
+    describeCursor();
+    draw();
+  });
+  canvas.addEventListener("blur", () => {
+    cursor.visible = false;
+    draw();
+  });
+  canvas.addEventListener("keydown", event => {
+    const directions = {
+      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
+    };
+    if (directions[event.key]) {
+      event.preventDefault();
+      const [dx, dy] = directions[event.key];
+      cursor.x = Math.max(0, Math.min(COLS - 1, cursor.x + dx));
+      cursor.y = Math.max(0, Math.min(ROWS - 1, cursor.y + dy));
+      describeCursor();
+      revealCursor();
+      draw();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!paused && !pendingAction && !simulation.captured && !simulation.defeated) handleKeyboardOrder(event.shiftKey);
+    }
+  });
   canvas.addEventListener("wheel", event => {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();

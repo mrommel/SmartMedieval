@@ -49,6 +49,7 @@ function setup(savedSpeed = null) {
     capture_progress: 0, capture_status: "UNCLAIMED", turn: 1 }
   };
   let postCount = 0;
+  const actions = [];
   let nextFrame;
   const window = {
     devicePixelRatio: 1, localStorage: store,
@@ -65,12 +66,15 @@ function setup(savedSpeed = null) {
     requestAnimationFrame: callback => { nextFrame = callback; },
     setTimeout: () => 1, clearTimeout() {},
     fetch: async (_, options = {}) => {
-      if (options.method === "POST") postCount++;
+      if (options.method === "POST") {
+        postCount++;
+        if (options.body) actions.push(JSON.parse(options.body).action);
+      }
       return { ok: true, headers: { get: () => "application/json" }, json: async () => snapshot };
     }
   });
   return {
-    get, store, draws: () => draws, postCount: () => postCount,
+    get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
     frame: time => nextFrame(time)
   };
 }
@@ -112,4 +116,47 @@ test("speed persists, restores, and off disables per-frame drawing", async () =>
   game.frame(16);
   assert.equal(game.draws(), count);
   assert.equal(setup("0").get("animation-speed").value, "0");
+});
+
+test("keyboard cursor selects groups, moves, attacks, and cannot order while paused", async () => {
+  const game = setup();
+  game.snapshot.state.units.push(
+    { ...game.snapshot.state.units[0], id: 1, x: 0, y: 1 },
+    { ...game.snapshot.state.units[0], id: 2, side: "defenders", x: 1, y: 0 }
+  );
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const key = (name, shiftKey = false) => {
+    let prevented = false;
+    canvas.fire("keydown", { key: name, shiftKey, preventDefault() { prevented = true; } });
+    assert.ok(prevented, `${name} should not scroll or activate another control`);
+  };
+  canvas.fire("focus");
+  assert.match(game.get("cursor-status").textContent, /Tile 1, 1: friendly vanguard #1, selected/);
+  key("ArrowDown");
+  key("Enter", true);
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  key(" ", true);
+  assert.match(game.get("selected-stats").textContent, /#1 recruit/);
+  key("ArrowDown");
+  assert.match(game.get("cursor-status").textContent, /Tile 1, 3: open ground/);
+  key("Enter");
+  assert.equal(game.actions.at(-1).type, "move");
+  assert.equal(game.actions.at(-1).y, 2);
+  await new Promise(setImmediate);
+  key("ArrowUp");
+  key("ArrowUp");
+  key("ArrowRight");
+  assert.match(game.get("cursor-status").textContent, /defender vanguard/);
+  key("Enter");
+  assert.equal(game.actions.at(-1).type, "attack");
+  assert.equal(game.actions.at(-1).target_id, 2);
+  await new Promise(setImmediate);
+  key("ArrowDown");
+  assert.match(game.get("cursor-status").textContent, /Tile 2, 2: wall/);
+  key("Enter");
+  assert.equal(game.actions.length, 2);
+  game.get("pause-game").fire("click");
+  key("Enter");
+  assert.equal(game.actions.length, 2);
 });
