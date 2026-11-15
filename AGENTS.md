@@ -20,6 +20,7 @@ Siege of Greywatch is a Django-served, browser-playable isometric siege prototyp
 - `game/engine.py` owns editable map geometry, both rosters, pathfinding, move-point rules, turns, and capture. `GameInstance` persists state and a revision in SQLite; the current session controls access to the active instance.
 - Catalog entries are exposed at `/api/scenarios/` and `/api/single-games/`. Migration `game/migrations/0001_initial.py` seeds an entry in each catalog. Starting a match uses `POST /api/games/<kind>/<entry_id>/start/`; `GET /api/games/current/` resumes it; `POST /api/games/actions/` applies a revisioned action. POST requests require CSRF.
 - Authenticated staff edit single-game map JSON (cols, rows, keep, gate, objective, startPositions, enemyStartPositions) and link games to scenarios in `/admin/`. Older maps without enemyStartPositions spawn one defender near the objective; existing active matches keep their earlier state until restarted. A scenario launch selects a linked game with `single_game_id` in its JSON POST body; a sole linked game can be launched with `{}`. New instances snapshot the map so later edits do not change active matches.
+- Maps may include `elevation`: unique open `{x, y, height, access?}` tiles, height 1-3 and optional access `ladder` or `ramp`. A height change of one is legal only when the higher tile has access; same-height steps are free of special restrictions. No elevation means a flat legacy map. Units store their current tile height as `z`, and melee requires equal height.
 
 ## Local workflow
 

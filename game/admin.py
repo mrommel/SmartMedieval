@@ -25,6 +25,8 @@ class SingleGameAdmin(admin.ModelAdmin):
             "enemyStartPositions as JSON. Each side needs 1-64 units with x, y and "
             "a type: vanguard, longbow or crossbow. All units must be able to reach "
             "the objective; defenders cannot start on it or on an attacker. "
+            "Optional elevation: [{\"x\": 3, \"y\": 5, \"height\": 1, \"access\": \"ramp\"}]. "
+            "Heights are 1-3; only a ladder or ramp on the higher tile permits a one-level step. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

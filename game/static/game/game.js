@@ -30,6 +30,8 @@
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE;
+  let elevation = new Map();
+  let raisedTiles = [];
   const colors = {
     grass: ["#60815a", "#63845c", "#5d7d57", "#67875e", "#597a55"],
     grassLine: "rgba(36,59,39,.2)",
@@ -88,7 +90,7 @@
     const mapHeight = (COLS + ROWS - 2) * tileH * 0.5;
     const left = originX - mapWidth;
     const right = originX + mapWidth;
-    const top = originY - tileH * 2.7;
+    const top = originY - tileH * (2.7 + Math.max(0, ...raisedTiles.map(tile => tile.height)));
     const bottom = originY + mapHeight + tileH;
     const margin = Math.min(72, width * 0.2, height * 0.2);
     const minX = margin - right * camera.zoom;
@@ -114,8 +116,13 @@
     zoomAt(width / 2, height / 2, factor);
   }
 
-  function project(x, y) {
-    return { x: originX + (x - y) * tileW / 2, y: originY + (x + y) * tileH / 2 };
+  function tileHeight(x, y) {
+    return elevation.get(`${x},${y}`)?.height || 0;
+  }
+
+  function project(x, y, z = tileHeight(x, y)) {
+    return { x: originX + (x - y) * tileW / 2,
+      y: originY + (x + y) * tileH / 2 - z * tileH };
   }
 
   function isWall(x, y) {
@@ -128,8 +135,8 @@
     return x >= 0 && x < COLS && y >= 0 && y < ROWS && !isWall(x, y);
   }
 
-  function diamond(x, y) {
-    const p = project(x, y);
+  function diamond(x, y, z = tileHeight(x, y)) {
+    const p = project(x, y, z);
     return [
       [p.x, p.y],
       [p.x + tileW / 2, p.y + tileH / 2],
@@ -159,7 +166,7 @@
   function drawGround() {
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
-        const tile = diamond(x, y);
+        const tile = diamond(x, y, 0);
         const castle = x >= KEEP.left && x <= KEEP.right && y >= KEEP.top && y <= KEEP.bottom;
         const path = (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
         const palette = path ? colors.path : colors.grass;
@@ -167,7 +174,7 @@
 
         const detail = hash(x + 19, y + 31);
         if (!castle && !path && detail % 9 === 0) {
-          const center = project(x, y);
+          const center = project(x, y, 0);
           ctx.fillStyle = "rgba(202,195,139,.24)";
           ctx.beginPath();
           ctx.ellipse(center.x + (detail % 5) - 2, center.y + tileH * .53, 1.5, 1, 0, 0, Math.PI * 2);
@@ -177,8 +184,22 @@
     }
   }
 
+  function drawRaisedTile(tile) {
+    const top = diamond(tile.x, tile.y);
+    const base = diamond(tile.x, tile.y, 0);
+    polygon([top[3], top[2], base[2], base[3]], "#525c4a", "#394638", .8);
+    polygon([top[1], top[2], base[2], base[1]], "#697058", "#394638", .8);
+    polygon(top, tile.access === "ramp" ? "#9b8e6e" : "#8d9277", "#4e5947", 1);
+    const p = project(tile.x, tile.y);
+    ctx.fillStyle = "#f1dfab";
+    ctx.font = `bold ${Math.max(10, tileW * .19)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(tile.access === "ladder" ? "H" : tile.access === "ramp" ? "↗" : `↑${tile.height}`,
+      p.x, p.y + tileH * .7);
+  }
+
   function drawWall(x, y) {
-    const base = project(x, y);
+    const base = project(x, y, 0);
     const w = tileW * .5;
     const h = tileH * .5;
     const z = tileH * 1.55;
@@ -214,7 +235,7 @@
   }
 
   function drawGate() {
-    const p = project(GATE.x, GATE.y);
+    const p = project(GATE.x, GATE.y, 0);
     const half = tileW * .25;
     const groundY = p.y + tileH * .55;
     ctx.fillStyle = "#342f28";
@@ -423,6 +444,7 @@
         if (isWall(x, y)) layers.push({ depth: x + y, kind: "wall", x, y });
       }
     }
+    raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     layers.sort((a, b) => a.depth - b.depth);
 
@@ -433,6 +455,7 @@
         objectiveDrawn = true;
       }
       if (layer.kind === "wall") drawWall(layer.x, layer.y);
+      else if (layer.kind === "raised") drawRaisedTile(layer.tile);
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
@@ -448,7 +471,8 @@
   function attackSelected(target) {
     const selected = simulation.units.filter(unit => simulation.selected.has(unit.id));
     const melee = selected.find(unit => unit.type === "vanguard" && unit.fight_points > 0 &&
-      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1);
+      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1 &&
+      tileHeight(unit.x, unit.y) === tileHeight(target.x, target.y));
     const ranged = selected.find(unit => unit.type !== "vanguard" && unit.fight_points > 0 &&
       !(unit.reload_turns > 0) && canRangedAttack(unit, target));
     const attacker = melee || ranged;
@@ -493,11 +517,19 @@
   function hasAttackOption(target) {
     return simulation.units.some(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
       unit.fight_points > 0 && (unit.type === "vanguard"
-        ? Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1
+        ? Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1 &&
+          tileHeight(unit.x, unit.y) === tileHeight(target.x, target.y)
         : !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
   }
 
   function pickTile(localX, localY) {
+    for (const tile of [...raisedTiles].sort((a, b) => b.x + b.y - a.x - a.y)) {
+      const p = project(tile.x, tile.y);
+      if (Math.abs(localX - p.x) / (tileW / 2) +
+          Math.abs(localY - p.y - tileH / 2) / (tileH / 2) <= 1) {
+        return { x: tile.x, y: tile.y };
+      }
+    }
     const a = (localX - originX) / (tileW / 2);
     const b = (localY - originY) / (tileH / 2);
     // project() places the top corner of each diamond at (x, y).
@@ -572,6 +604,8 @@
     instanceId = snapshot.id;
     revision = snapshot.revision;
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = snapshot.map);
+    raisedTiles = snapshot.map.elevation || [];
+    elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     simulation.units = snapshot.state.units;
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;

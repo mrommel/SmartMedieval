@@ -49,7 +49,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP):
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     cols, rows = map_data["cols"], map_data["rows"]
     if type(cols) is not int or type(rows) is not int or not (8 <= cols <= 64 and 8 <= rows <= 64):
@@ -69,6 +69,20 @@ def validate_map(map_data):
     gate = map_data["gate"]
     if not is_keep_edge(gate["x"], gate["y"], map_data):
         raise InvalidMap("The gate must lie on the keep wall.")
+    elevation = map_data.get("elevation", [])
+    if not isinstance(elevation, list) or len(elevation) > cols * rows:
+        raise InvalidMap("Elevation must be a list of tiles inside the map.")
+    seen = set()
+    for tile in elevation:
+        if (not isinstance(tile, dict) or set(tile) not in ({"x", "y", "height"},
+                                                           {"x", "y", "height", "access"})
+                or any(type(tile[key]) is not int for key in ("x", "y", "height"))
+                or not 1 <= tile["height"] <= 3
+                or ("access" in tile and tile["access"] not in ("ladder", "ramp"))
+                or not is_walkable(tile["x"], tile["y"], map_data)
+                or (tile["x"], tile["y"]) in seen):
+            raise InvalidMap("Elevated tiles must be unique open tiles with height 1-3 and optional ladder or ramp access.")
+        seen.add((tile["x"], tile["y"]))
     objective = map_data["objective"]
     if not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
@@ -112,6 +126,34 @@ def is_wall(x, y, map_data=MAP):
 
 def is_walkable(x, y, map_data=MAP):
     return 0 <= x < map_data["cols"] and 0 <= y < map_data["rows"] and not is_wall(x, y, map_data)
+
+
+def elevation_index(map_data):
+    return {(tile["x"], tile["y"]): tile for tile in map_data.get("elevation", [])}
+
+
+def tile_height(x, y, map_data=MAP, elevations=None):
+    if elevations is not None:
+        return elevations.get((x, y), {}).get("height", 0)
+    return next((tile["height"] for tile in map_data.get("elevation", [])
+                 if tile["x"] == x and tile["y"] == y), 0)
+
+
+def can_step(start, end, map_data=MAP, elevations=None):
+    if not is_walkable(*end, map_data):
+        return False
+    before = tile_height(*start, map_data, elevations)
+    after = tile_height(*end, map_data, elevations)
+    if before == after:
+        return True
+    if abs(before - after) != 1:
+        return False
+    high = end if after > before else start
+    if elevations is not None:
+        return elevations[high].get("access") in ("ladder", "ramp")
+    return any(tile["x"] == high[0] and tile["y"] == high[1]
+               and tile.get("access") in ("ladder", "ramp")
+               for tile in map_data.get("elevation", []))
 
 
 def has_line_of_sight(start, end, map_data=MAP):
@@ -159,6 +201,7 @@ def can_ranged_attack(attacker, target, map_data=MAP):
 def find_path(start, goal, map_data=MAP, blocked=()):
     if not is_walkable(*goal, map_data) or goal in blocked:
         return None
+    elevations = elevation_index(map_data)
     frontier = deque([start])
     previous = {start: None}
     while frontier:
@@ -167,7 +210,7 @@ def find_path(start, goal, map_data=MAP, blocked=()):
             break
         x, y = current
         for neighbor in neighbors(x, y):
-            if neighbor not in previous and neighbor not in blocked and is_walkable(*neighbor, map_data):
+            if neighbor not in previous and neighbor not in blocked and can_step(current, neighbor, map_data, elevations):
                 previous[neighbor] = current
                 frontier.append(neighbor)
     if goal not in previous:
@@ -209,6 +252,7 @@ def defender_destinations(unit, map_data=MAP):
     frontier = deque([(start, 0)])
     visited = {start}
     destinations = []
+    elevations = elevation_index(map_data)
     while frontier:
         (x, y), distance = frontier.popleft()
         if (x, y) != start and (x, y) != objective:
@@ -216,7 +260,7 @@ def defender_destinations(unit, map_data=MAP):
         if distance == move_allowance(unit):
             continue
         for neighbor in neighbors(x, y):
-            if neighbor not in visited and neighbor != objective and is_walkable(*neighbor, map_data):
+            if neighbor not in visited and neighbor != objective and can_step((x, y), neighbor, map_data, elevations):
                 visited.add(neighbor)
                 frontier.append((neighbor, distance + 1))
     return destinations
@@ -265,12 +309,13 @@ def legacy_enemy_position(map_data):
     occupied = {(point["x"], point["y"]) for point in map_data["startPositions"]}
     frontier = deque([objective])
     visited = {objective}
+    elevations = elevation_index(map_data)
     while frontier:
         x, y = frontier.popleft()
         if (x, y) != objective and (x, y) not in occupied:
             return {"x": x, "y": y, "type": "vanguard"}
         for neighbor in neighbors(x, y):
-            if neighbor not in visited and is_walkable(*neighbor, map_data):
+            if neighbor not in visited and can_step((x, y), neighbor, map_data, elevations):
                 visited.add(neighbor)
                 frontier.append(neighbor)
     raise InvalidMap("The objective needs a reachable free tile for a defender.")
@@ -288,6 +333,7 @@ def initial_state(map_data=MAP):
                 "id": index,
                 "x": point["x"],
                 "y": point["y"],
+                "z": tile_height(point["x"], point["y"], map_data),
                 "type": point["type"],
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
@@ -329,6 +375,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     next_state = {**state, "units": [
         {
             **unit,
+            "z": tile_height(unit["x"], unit["y"], map_data),
             "health": unit.get("health", MAX_HEALTH),
             "max_health": unit.get("max_health", MAX_HEALTH),
             "fight_points": unit.get("fight_points", FIGHT_POINTS),
@@ -384,7 +431,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                     "from": {"x": attacker["x"], "y": attacker["y"]},
                     "to": {"x": target["x"], "y": target["y"]},
                 })
-        elif abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1:
+        elif (abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1
+              or attacker["z"] != target["z"]):
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
         target["health"] -= ATTACK_DAMAGE
@@ -418,6 +466,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             path = find_path((unit["x"], unit["y"]), (x, y), map_data, blocked={objective})
             old_x = unit["x"]
             unit["x"], unit["y"] = path[-1]
+            unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= len(path)
         for defender in [unit for unit in next_state["units"] if unit.get("side") == "defenders"]:
@@ -428,7 +477,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 unit for unit in next_state["units"]
                 if unit.get("side", "attackers") == "attackers"
                 and (can_ranged_attack(defender, unit, map_data) if ranged else
-                     abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1)
+                     (abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1
+                      and unit["z"] == defender["z"]))
             ]
             if not targets:
                 continue
@@ -501,6 +551,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             steps = path[:unit["move_points"]]
             old_x = unit["x"]
             unit["x"], unit["y"] = steps[-1]
+            unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= len(steps)
             moved = True

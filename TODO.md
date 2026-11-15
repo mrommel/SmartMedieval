@@ -24,6 +24,8 @@
   - [ ] Move battlefield rendering behind a renderer module.
   - [ ] Isolate pointer/camera input and launch/catalog UI.
 - [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
+  - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
+  - [ ] Add multiple strongpoints, terrain collision beyond keep walls, and unit spacing.
 - [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.
 - [ ] Complete unit stats and turn-based combat rules.
@@ -51,5 +53,6 @@
 - [x] Add automated tests for morale and promotion as those systems are implemented.
   - [x] Add automated tests for line of sight, ranged combat, and reload timing.
 - [ ] Test game editing and scenario links, server-loaded instances and action updates, turn rules, elevation traversal, unit stats and promotion, and enemy AI.
+  - [x] Add engine tests for elevation validation, climbing, descending, capture, and defender movement.
 - [ ] Test the complete scenario in current desktop and mobile browsers and tune performance and balance.
 - [ ] Document local setup, controls, asset workflow, and production build/deployment steps.

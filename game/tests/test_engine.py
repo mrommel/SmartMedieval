@@ -1,12 +1,68 @@
 from django.test import TestCase
 
 from ..engine import (
-    MAP, InvalidAction, apply_action, default_map, defender_destinations, find_path,
-    has_line_of_sight, initial_state, is_walkable, resolve_defender_goals,
+    MAP, InvalidAction, InvalidMap, apply_action, default_map, defender_destinations, find_path,
+    has_line_of_sight, initial_state, is_walkable, resolve_defender_goals, validate_map,
 )
 
 
 class TurnEngineTests(TestCase):
+    def test_elevation_requires_connector_for_climbing_and_descending(self):
+        battlefield = default_map()
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1},
+                                    {"x": 4, "y": 5, "height": 2, "access": "ladder"}]
+        self.assertIsNone(find_path((2, 5), (4, 5), battlefield))
+        battlefield["elevation"][0]["access"] = "ramp"
+        self.assertEqual(find_path((2, 5), (4, 5), battlefield), [(3, 5), (4, 5)])
+        self.assertEqual(find_path((4, 5), (2, 5), battlefield), [(3, 5), (2, 5)])
+        self.assertIsNone(find_path((2, 5), (4, 5), battlefield,
+                                    blocked={(3, 5)}))
+
+    def test_elevation_moves_and_captures_at_height_with_normal_move_cost(self):
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 5, "type": "vanguard"}]
+        battlefield["objective"] = {"x": 4, "y": 5}
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1, "access": "ramp"},
+                                    {"x": 4, "y": 5, "height": 2, "access": "ladder"}]
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        self.assertEqual(state["units"][0]["z"], 0)
+        climbed = apply_action(state, {"type": "move", "units": [0], "x": 4, "y": 5}, battlefield)
+        self.assertEqual((climbed["units"][0]["x"], climbed["units"][0]["z"],
+                          climbed["units"][0]["move_points"]), (4, 2, 2))
+        self.assertEqual(state["units"][0]["z"], 0)
+        self.assertEqual(apply_action(climbed, {"type": "end_turn"}, battlefield)["capture_progress"], .5)
+        descended = apply_action(climbed, {"type": "move", "units": [0], "x": 2, "y": 5}, battlefield)
+        self.assertEqual((descended["units"][0]["z"], descended["units"][0]["move_points"]), (0, 0))
+
+    def test_invalid_elevation_is_rejected(self):
+        for tiles in ([{"x": 3, "y": 5, "height": 0}],
+                      [{"x": 3, "y": 5, "height": True}],
+                      [{"x": 11, "y": 3, "height": 1}],
+                      [{"x": 3, "y": 5, "height": 1, "access": "stairs"}],
+                      [{"x": 3, "y": 5, "height": 1}] * 2):
+            battlefield = default_map()
+            battlefield["elevation"] = tiles
+            with self.subTest(tiles=tiles), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield = default_map()
+        battlefield["objective"] = {"x": 4, "y": 5}
+        battlefield["elevation"] = [{"x": 4, "y": 5, "height": 1}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+
+    def test_defender_can_descend_and_melee_requires_same_height(self):
+        battlefield = default_map()
+        battlefield["elevation"] = [{"x": 12, "y": 5, "height": 1, "access": "ladder"}]
+        state = initial_state(battlefield)
+        state["units"][0].update(x=12, y=4)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertIn((12, 6), defender_destinations(state["units"][6], battlefield))
+        moved = apply_action(state, {"type": "end_turn"}, battlefield, enemy_orders=[
+            {"unit_id": 6, "x": 12, "y": 6}])
+        self.assertEqual((moved["units"][6]["y"], moved["units"][6]["z"]), (6, 0))
+
     def test_units_start_with_health_and_fight_points(self):
         state = initial_state()
         self.assertEqual(

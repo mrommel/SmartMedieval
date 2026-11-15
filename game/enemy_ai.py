@@ -25,11 +25,12 @@ def enemy_turn(state, map_data, combat_events=None):
         raise EnemyAIError("Enemy AI is not configured. Set SPLASH_API_KEY in .env.", 503)
 
     battlefield = {
-        "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")},
+        "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
+               | {"elevation": map_data.get("elevation", [])},
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
-                "move_points",
+                "move_points", "z",
             )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit")}
             for unit in state["units"]
         ],
@@ -43,7 +44,9 @@ def enemy_turn(state, map_data, combat_events=None):
                 "Each x,y is a goal inside the map, not a final destination. The server moves "
                 "the defender up to its move allowance toward it (normally 4, minus 1 at morale "
                 "0-1 or plus 1 at morale 5), avoiding walls and stopping short of the "
-                "objective. A defender may aim at the objective but cannot occupy it. After "
+                "objective. A defender may aim at the objective but cannot occupy it. Elevated "
+                "tiles have height 1-3; only ladders and ramps on the higher tile permit a "
+                "one-level step. After "
                 "movement, defenders automatically attack when possible: vanguards make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
                 "with walls blocking line of sight. Ranged weapons need one or two full turns to "

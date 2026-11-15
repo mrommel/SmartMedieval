@@ -72,6 +72,29 @@ class GameInstanceApiTests(TestCase):
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))
         self.assertNotIn("test-only-key", request.data.decode())
 
+    def test_elevated_map_is_snapshotted_and_shared_with_defender_ai(self):
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 5, "type": "vanguard"}]
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1, "access": "ramp"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["map"]["elevation"], battlefield["elevation"])
+        moved = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 5}).json()
+        self.assertEqual((moved["state"]["units"][0]["z"],
+                          moved["state"]["units"][0]["move_points"]), (1, 3))
+        battlefield["elevation"] = []
+        self.game.map_definition = battlefield
+        self.game.save()
+        self.assertEqual(self.client.get(reverse("current-game")).json()["map"]["elevation"],
+                         [{"x": 3, "y": 5, "height": 1, "access": "ramp"}])
+        ended = self.action(1, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        request = self.ai.call_args.args[0]
+        ai_map = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertEqual(ai_map["elevation"], started["map"]["elevation"])
+
     def test_attack_action_persists_damage_and_spent_fight_point(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])
