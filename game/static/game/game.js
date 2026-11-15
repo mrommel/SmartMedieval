@@ -190,16 +190,16 @@
     polygon([ground[3], ground[2], [ground[2][0], ground[2][1] + tileH * .23], [ground[3][0], ground[3][1] + tileH * .23]], "#4d5044", "#40483d", .8);
     polygon([ground[1], ground[2], [ground[2][0], ground[2][1] + tileH * .23], [ground[1][0], ground[1][1] + tileH * .23]], "#595b4d", "#40483d", .8);
     polygon([top[0], top[1], top[2], top[3]], colors.wall, "#555747", .8);
-    polygon([top[0], top[3], ground[3], ground[0]], "#a89f83", "#615e4e", .6);
-    polygon([top[0], top[1], ground[1], ground[0]], "#7c7966", "#615e4e", .6);
+    polygon([top[3], top[2], ground[2], ground[3]], "#a89f83", "#615e4e", .6);
+    polygon([top[1], top[2], ground[2], ground[1]], "#7c7966", "#615e4e", .6);
     for (let i = 0; i < 3; i++) {
       const t = (i + 1) / 4;
       const leftX = top[3][0] + (top[2][0] - top[3][0]) * t;
-      const leftY = top[3][1] + (top[2][1] - top[3][1]) * t;
+      const leftY = top[3][1] + (top[2][1] - top[3][1]) * t + z * .35;
       ctx.strokeStyle = "rgba(54,55,47,.42)";
       ctx.beginPath();
       ctx.moveTo(leftX, leftY);
-      ctx.lineTo(leftX + tileW * .13, leftY - tileH * .07);
+      ctx.lineTo(leftX + tileW * .1, leftY + tileH * .1);
       ctx.stroke();
     }
     if ((y === KEEP.top || y === KEEP.bottom) && x % 2 === 0) {
@@ -445,8 +445,10 @@
   function pickTile(localX, localY) {
     const a = (localX - originX) / (tileW / 2);
     const b = (localY - originY) / (tileH / 2);
-    const x = Math.round((a + b) / 2);
-    const y = Math.round((b - a) / 2);
+    // project() places the top corner of each diamond at (x, y).
+    // Inverse coordinates span [x, x + 1) and [y, y + 1) inside it.
+    const x = Math.floor((a + b) / 2);
+    const y = Math.floor((b - a) / 2);
     return { x, y };
   }
 
