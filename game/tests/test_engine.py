@@ -14,6 +14,91 @@ class TurnEngineTests(TestCase):
              state["units"][0]["fight_points"]),
             (3, 3, 1),
         )
+        self.assertTrue(all(unit["morale"] == 3 and unit["rank"] == "recruit"
+                            for unit in state["units"]))
+
+    def test_killing_a_defender_rallies_killer_and_demoralizes_nearby_defenders(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=4, morale=4)
+        state["units"][6].update(health=1)
+        state["units"][7].update(x=12, y=7)
+        result = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(result["units"][0]["morale"], 5)
+        self.assertEqual(next(unit for unit in result["units"] if unit["id"] == 7)["morale"], 2)
+        self.assertEqual(state["units"][0]["morale"], 4)
+        self.assertEqual(state["units"][6]["health"], 1)
+
+    def test_defender_kill_reduces_nearby_attacker_morale_but_not_distant_allies(self):
+        state = initial_state()
+        victim, ally, distant, defender = (state["units"][i] for i in (0, 1, 2, 6))
+        state["units"] = [victim, ally, distant, defender]
+        victim.update(x=12, y=6, health=1)
+        ally.update(x=12, y=7)
+        distant.update(x=2, y=6)
+        result = apply_action(state, {"type": "end_turn"})
+        self.assertEqual({unit["id"]: unit["morale"] for unit in result["units"]},
+                         {1: 2, 2: 3, 6: 4})
+        self.assertFalse(result["defeated"])
+
+    def test_morale_changes_next_turn_movement_for_both_sides(self):
+        state = initial_state()
+        state["units"][0]["morale"] = 0
+        state["units"][1]["morale"] = 5
+        state["units"][6].update(x=2, y=2, morale=5)
+        state["units"][7].update(x=2, y=3, morale=0)
+        result = apply_action(state, {"type": "end_turn"}, enemy_orders=[
+            {"unit_id": 6, "x": 7, "y": 2}, {"unit_id": 7, "x": 5, "y": 3},
+        ])
+        self.assertEqual((result["units"][0]["move_points"], result["units"][1]["move_points"]), (3, 5))
+        self.assertEqual((result["units"][6]["x"], result["units"][6]["move_points"]), (7, 0))
+        self.assertEqual((result["units"][7]["x"], result["units"][7]["move_points"]), (5, 0))
+
+    def test_promotion_requires_full_morale_and_grants_points_next_turn(self):
+        state = initial_state()
+        state["units"][0].update(morale=5, move_points=1, fight_points=0)
+        promoted = apply_action(state, {"type": "promote", "unit_id": 0})
+        self.assertEqual((promoted["units"][0]["rank"], promoted["units"][0]["morale"]), ("veteran", 3))
+        self.assertEqual((promoted["units"][0]["move_points"], promoted["units"][0]["fight_points"]), (1, 0))
+        self.assertEqual(state["units"][0]["rank"], "recruit")
+        following = apply_action(promoted, {"type": "end_turn"})
+        self.assertEqual((following["units"][0]["move_points"], following["units"][0]["fight_points"]), (5, 2))
+        self.assertEqual(apply_action(following, {"type": "end_turn"})["units"][0]["rank"], "veteran")
+
+    def test_veteran_can_spend_both_fight_points_without_bypassing_reload(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=4, rank="veteran", fight_points=2)
+        once = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
+        twice = apply_action(once, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual((twice["units"][0]["fight_points"], twice["units"][6]["health"]), (0, 1))
+        with self.assertRaises(InvalidAction):
+            apply_action(twice, {"type": "attack", "unit_id": 0, "target_id": 6})
+        state["units"][2].update(x=2, y=6, rank="veteran", fight_points=2)
+        state["units"][6].update(x=6, y=6)
+        fired = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        with self.assertRaises(InvalidAction):
+            apply_action(fired, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+
+    def test_invalid_promotions_do_not_change_state(self):
+        state = initial_state()
+        state["units"][0]["morale"] = 5
+        for action in ({"type": "promote", "unit_id": True}, {"type": "promote", "unit_id": 99},
+                       {"type": "promote", "unit_id": 6}, {"type": "promote", "unit_id": 1},
+                       {"type": "promote", "unit_id": 0, "rank": "veteran"}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action)
+        promoted = apply_action(state, {"type": "promote", "unit_id": 0})
+        with self.assertRaises(InvalidAction):
+            apply_action(promoted, {"type": "promote", "unit_id": 0})
+        self.assertEqual(state["units"][0]["rank"], "recruit")
+
+    def test_legacy_units_gain_morale_and_rank_when_next_action_is_applied(self):
+        state = initial_state()
+        for unit in state["units"]:
+            del unit["morale"]
+            del unit["rank"]
+        updated = apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertTrue(all(unit["morale"] == 3 and unit["rank"] == "recruit"
+                            for unit in updated["units"]))
 
     def test_melee_attack_spends_a_fight_point_and_damages_adjacent_defender(self):
         state = initial_state()

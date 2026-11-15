@@ -4,7 +4,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-from .engine import InvalidAction, apply_action, resolve_defender_goals
+from .engine import STARTING_MORALE, InvalidAction, apply_action, resolve_defender_goals
 
 
 AI_URL = "http://127.0.0.1:11435/v1/chat/completions"
@@ -29,7 +29,8 @@ def enemy_turn(state, map_data):
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
-            )}
+                "move_points",
+            )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit")}
             for unit in state["units"]
         ],
     }
@@ -40,7 +41,8 @@ def enemy_turn(state, map_data):
                 "You command only defenders in a turn-based siege. Return a JSON object with an "
                 "'orders' array of {\"unit_id\": integer, \"x\": integer, \"y\": integer}. "
                 "Each x,y is a goal inside the map, not a final destination. The server moves "
-                "the defender up to 4 steps toward it, avoiding walls and stopping short of the "
+                "the defender up to its move allowance toward it (normally 4, minus 1 at morale "
+                "0-1 or plus 1 at morale 5), avoiding walls and stopping short of the "
                 "objective. A defender may aim at the objective but cannot occupy it. After "
                 "movement, defenders automatically attack when possible: vanguards make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "

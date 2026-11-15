@@ -44,6 +44,8 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["state"]["units"][0]["move_points"], 4)
         self.assertEqual(data["state"]["units"][0]["health"], 3)
         self.assertEqual(data["state"]["units"][0]["fight_points"], 1)
+        self.assertEqual(data["state"]["units"][0]["morale"], 3)
+        self.assertEqual(data["state"]["units"][0]["rank"], "recruit")
         self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 2)
         self.assertEqual(GameInstance.objects.count(), 1)
 
@@ -63,6 +65,8 @@ class GameInstanceApiTests(TestCase):
         battlefield = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])
         self.assertEqual(battlefield["map"]["objective"], {"x": 14, "y": 7})
         self.assertEqual([unit["id"] for unit in battlefield["units"] if unit["side"] == "defenders"], [6, 7])
+        self.assertEqual((battlefield["units"][0]["morale"], battlefield["units"][0]["rank"]),
+                         (3, "recruit"))
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))
         self.assertNotIn("test-only-key", request.data.decode())
 
@@ -79,6 +83,25 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(state["units"][6]["health"], 2)
         self.assertEqual(attacked.json()["revision"], 1)
         self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
+
+    def test_promotion_requires_morale_and_persists_veteran_allowances(self):
+        started = self.start().json()
+        self.assertEqual(self.action(0, {"type": "promote", "unit_id": 0}).status_code, 400)
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0]["morale"] = 5
+        instance.save(update_fields=["state"])
+        result = self.action(0, {"type": "promote", "unit_id": 0})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["revision"], 1)
+        self.assertEqual(result.json()["state"]["units"][0]["rank"], "veteran")
+        self.assertEqual(result.json()["state"]["units"][0]["morale"], 3)
+        self.assertEqual(self.action(0, {"type": "promote", "unit_id": 0}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "promote", "unit_id": 0}).status_code, 400)
+        ended = self.action(1, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        self.assertEqual((ended.json()["state"]["units"][0]["move_points"],
+                          ended.json()["state"]["units"][0]["fight_points"]), (5, 2))
+        self.assertEqual(self.client.get(reverse("current-game")).json(), ended.json())
 
     def test_ranged_attack_persists_damage_and_reload_state(self):
         started = self.start().json()

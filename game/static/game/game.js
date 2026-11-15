@@ -23,6 +23,8 @@
   const missionLabel = document.getElementById("mission-label");
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
+  const promoteButton = document.getElementById("promote");
+  const selectedStats = document.getElementById("selected-stats");
   const continueButton = document.getElementById("continue-game");
   const launchError = document.getElementById("launch-error");
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -493,7 +495,18 @@
   function updateSelection() {
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     if (selected.length) showToast(`${selected.length} selected · ${Math.min(...selected.map(unit => unit.move_points))} move points remaining.`);
+    updatePromotion();
     draw();
+  }
+
+  function updatePromotion() {
+    const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
+    const unit = selected.length === 1 ? selected[0] : null;
+    selectedStats.textContent = unit
+      ? `#${unit.id + 1} ${unit.rank || "recruit"} · morale ${unit.morale ?? 3}/5 · ${unit.move_points} MP · ${unit.fight_points} FP`
+      : `${selected.length} soldiers selected · choose one to inspect or promote`;
+    promoteButton.disabled = pendingAction || simulation.captured || simulation.defeated ||
+      !unit || (unit.rank || "recruit") !== "recruit" || (unit.morale ?? 3) < 5;
   }
 
   function applySnapshot(snapshot) {
@@ -551,6 +564,7 @@
     victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken." : "The keep is yours.";
     victoryNode.querySelector("p").textContent = simulation.defeated ? "No attackers remain on the field." : "Your small band has secured the courtyard.";
     endTurnButton.disabled = pendingAction || simulation.captured || simulation.defeated;
+    updatePromotion();
     draw();
   }
 
@@ -577,6 +591,7 @@
     if (pendingAction || !instanceId) return;
     pendingAction = true;
     endTurnButton.disabled = true;
+    promoteButton.disabled = true;
     if (action.type === "end_turn") showToast("Defenders are taking their turn...");
     try {
       const snapshot = await api("/api/games/actions/", { revision, action });
@@ -584,7 +599,7 @@
       applySnapshot(snapshot);
       if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
       else if (simulation.defeated) showToast("Your company has been defeated.");
-      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "ranged_attack" ? "Ranged attack resolved; weapon reloading." : action.type === "attack" ? "Melee attack resolved." : "Order received.");
+      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "ranged_attack" ? "Ranged attack resolved; weapon reloading." : action.type === "attack" ? "Melee attack resolved." : "Order received.");
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -598,6 +613,7 @@
     } finally {
       pendingAction = false;
       endTurnButton.disabled = simulation.captured || simulation.defeated;
+      updatePromotion();
     }
   }
 
@@ -739,6 +755,7 @@
     } finally {
       pendingAction = false;
       endTurnButton.disabled = simulation.captured || simulation.defeated;
+      updatePromotion();
     }
   }
 
@@ -789,6 +806,10 @@
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));
+  promoteButton.addEventListener("click", () => {
+    const [unitId] = simulation.selected;
+    if (unitId !== undefined && !promoteButton.disabled) sendAction({ type: "promote", unit_id: unitId });
+  });
   continueButton.addEventListener("click", async () => {
     try {
       enterGame(await api("/api/games/current/"));

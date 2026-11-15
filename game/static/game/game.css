@@ -134,6 +134,7 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .roster-unit b { font-size: 10px; font-weight: 600; }
 .roster-unit small { color: #98a195; font-size: 8px; }
 .health-dot { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: #87a777; box-shadow: 0 0 5px #87a77788; }
+.selected-stats { margin: 4px 0 11px; color: #d2bd8c; font-size: 10px; }
 .enemy-roster { display: flex; justify-content: space-between; padding: 11px 0 7px; border-top: 1px solid var(--line); color: #b5c9e6; font-size: 8px; font-weight: 700; letter-spacing: .08em; }
 .enemy-roster span { color: #b5c9e6; }
 .howto { padding-top: 14px; }

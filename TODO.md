@@ -28,8 +28,8 @@
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.
 - [ ] Complete unit stats and turn-based combat rules.
   - [x] Add health, one fight point per turn, adjacent melee attacks, defender counterattacks, casualties, and defeat state.
-  - [ ] Add morale and promotion effects to unit stats.
-- [ ] Allow units to promote to higher ranks with increased point allowances.
+  - [x] Add casualty-driven morale and veteran promotion effects to unit stats.
+- [x] Allow recruits with full morale to promote to veteran with increased move and fight allowances.
 - [ ] Extend combat with bow and crossbow ranges, reload times, projectile motion, and line-of-sight checks.
   - [x] Add server-validated bow/crossbow attacks with wall-blocked line of sight, weapon ranges, reloads, and defender ranged attacks.
   - [ ] Animate arrows and bolts as projectiles.
@@ -48,7 +48,7 @@
 ## Release and validation
 
 - [x] Add server-engine and API tests for pathfinding, movement, turn transitions, objective capture, session access, and stale actions, plus Django catalog/page smoke tests.
-- [ ] Add automated tests for morale and promotion as those systems are implemented.
+- [x] Add automated tests for morale and promotion as those systems are implemented.
   - [x] Add automated tests for line of sight, ranged combat, and reload timing.
 - [ ] Test game editing and scenario links, server-loaded instances and action updates, turn rules, elevation traversal, unit stats and promotion, and enemy AI.
 - [ ] Test the complete scenario in current desktop and mobile browsers and tune performance and balance.

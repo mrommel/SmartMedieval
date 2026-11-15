@@ -4,13 +4,14 @@
 
 **Siege of Greywatch** is a browser-playable, isometric medieval siege strategy prototype set in the Northern March in 1348. Lead an attacking company through the keep’s open southern gate and capture its courtyard.
 
-> **Prototype status:** Movement, turn-taking, melee combat, health, fight points, and courtyard capture are playable. Combat currently supports adjacent melee attacks and automatic defender counterattacks; ranged attacks, line of sight, morale, and promotion remain future work.
+> **Prototype status:** Movement, turn-taking, melee and ranged combat, health, morale, veteran promotion, and courtyard capture are playable. Defenders move and attack automatically on end turn. Elevation, projectile animation, and cover remain future work.
 
 ## Play
 
 - Select a soldier with a click. Hold **Shift** while clicking to add or remove soldiers from your selection.
 - Click open ground to order selected soldiers to move; movement spends their move points.
-- Move a selected soldier next to a defender, then click the defender to make a melee attack; each soldier has one fight point per turn. Health bars show remaining health.
+- Move a selected vanguard next to a defender, then click the defender to make a melee attack. Longbows and crossbows can fire at defenders within range through clear lines of sight, then must reload. Recruits have one fight point per turn. Health bars show remaining health.
+- Defeating an enemy raises the victor's morale by one (up to 5); nearby allies of a fallen soldier lose one (down to 0). Morale 0–1 reduces next turn's movement by one; morale 5 increases it by one. Select one recruit with 5 morale and press **Promote** to gain veteran rank, resetting morale to 3 and granting an extra move and fight point from the following turn.
 - Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. Losing all attackers ends the battle.
 - Drag the battlefield to pan. Use the mouse wheel or the **+ / −** buttons to zoom.
 

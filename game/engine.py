@@ -26,6 +26,8 @@ MOVE_POINTS = 4
 MAX_HEALTH = 3
 FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
+STARTING_MORALE = 3
+MAX_MORALE = 5
 RANGED_UNIT_STATS = {
     # End-turn processing ticks cooldowns, including the transition after firing.
     "longbow": {"range": 5, "reload_turns": 2},
@@ -182,6 +184,25 @@ def neighbors(x, y):
     return ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
 
 
+def move_allowance(unit):
+    morale = unit.get("morale", STARTING_MORALE)
+    return MOVE_POINTS + (unit.get("rank") == "veteran") + (morale == MAX_MORALE) - (morale <= 1)
+
+
+def fight_allowance(unit):
+    return FIGHT_POINTS + (unit.get("rank") == "veteran")
+
+
+def record_casualty(state, killer, casualty):
+    """A kill rallies its victor; nearby surviving comrades lose heart."""
+    killer["morale"] = min(MAX_MORALE, killer["morale"] + 1)
+    for unit in state["units"]:
+        if unit is not casualty and unit.get("side", "attackers") == casualty.get("side", "attackers"):
+            if max(abs(unit["x"] - casualty["x"]), abs(unit["y"] - casualty["y"])) <= 3:
+                unit["morale"] = max(0, unit["morale"] - 1)
+    state["units"].remove(casualty)
+
+
 def defender_destinations(unit, map_data=MAP):
     start = (unit["x"], unit["y"])
     objective = (map_data["objective"]["x"], map_data["objective"]["y"])
@@ -192,7 +213,7 @@ def defender_destinations(unit, map_data=MAP):
         (x, y), distance = frontier.popleft()
         if (x, y) != start and (x, y) != objective:
             destinations.append((x, y))
-        if distance == MOVE_POINTS:
+        if distance == move_allowance(unit):
             continue
         for neighbor in neighbors(x, y):
             if neighbor not in visited and neighbor != objective and is_walkable(*neighbor, map_data):
@@ -225,7 +246,7 @@ def resolve_defender_goals(state, goals, map_data=MAP):
             continue
         objective = (map_data["objective"]["x"], map_data["objective"]["y"])
         route = find_path(start, (x, y), map_data, blocked={objective})
-        along_route = [tile for tile in (route or [])[:MOVE_POINTS] if tile in destinations]
+        along_route = [tile for tile in (route or [])[:move_allowance(unit)] if tile in destinations]
         if along_route:
             destination = along_route[-1]
         else:
@@ -275,6 +296,8 @@ def initial_state(map_data=MAP):
                 "max_health": MAX_HEALTH,
                 "fight_points": FIGHT_POINTS,
                 "reload_turns": 0,
+                "morale": STARTING_MORALE,
+                "rank": "recruit",
             }
             for index, point in enumerate(attackers + enemy_positions)
         ],
@@ -298,7 +321,7 @@ def capture_status(state, map_data=MAP):
 
 def apply_action(state, action, map_data=MAP, enemy_orders=()):
     if not isinstance(action, dict) or action.get("type") not in (
-            "move", "attack", "ranged_attack", "end_turn"):
+            "move", "attack", "ranged_attack", "promote", "end_turn"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The courtyard has already been secured.")
@@ -310,9 +333,22 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             "max_health": unit.get("max_health", MAX_HEALTH),
             "fight_points": unit.get("fight_points", FIGHT_POINTS),
             "reload_turns": unit.get("reload_turns", 0),
+            "morale": unit.get("morale", STARTING_MORALE),
+            "rank": unit.get("rank", "recruit"),
         }
         for unit in state["units"]
     ], "defeated": state.get("defeated", False)}
+    if action["type"] == "promote":
+        if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
+            raise InvalidAction("Choose one soldier to promote.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if unit is None or unit["rank"] != "recruit" or unit["morale"] < MAX_MORALE:
+            raise InvalidAction("Only a recruit with five morale can become a veteran.")
+        unit["rank"] = "veteran"
+        unit["morale"] = STARTING_MORALE
+        # New point allowances take effect on the next turn, not mid-turn.
+        return next_state
     if action["type"] in ("attack", "ranged_attack"):
         ranged = action["type"] == "ranged_attack"
         if set(action) != {"type", "unit_id", "target_id"}:
@@ -347,7 +383,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
         attacker["fight_points"] -= 1
         target["health"] -= ATTACK_DAMAGE
         if target["health"] <= 0:
-            next_state["units"].remove(target)
+            record_casualty(next_state, attacker, target)
         return next_state
 
     if action["type"] == "end_turn":
@@ -357,8 +393,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
-            unit["move_points"] = MOVE_POINTS
-            unit["fight_points"] = FIGHT_POINTS
+            unit["move_points"] = move_allowance(unit)
+            unit["fight_points"] = fight_allowance(unit)
             unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         ordered = set()
         for order in enemy_orders:
@@ -396,7 +432,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
                 defender["reload_turns"] = RANGED_UNIT_STATS[defender["type"]]["reload_turns"]
             target["health"] -= ATTACK_DAMAGE
             if target["health"] <= 0:
-                next_state["units"].remove(target)
+                record_casualty(next_state, defender, target)
         next_state["defeated"] = not any(
             unit.get("side", "attackers") == "attackers" for unit in next_state["units"]
         )
@@ -414,8 +450,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
         next_state["turn"] += 1
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
-                unit["move_points"] = MOVE_POINTS
-                unit["fight_points"] = FIGHT_POINTS
+                unit["move_points"] = move_allowance(unit)
+                unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         return next_state
 
