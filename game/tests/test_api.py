@@ -53,7 +53,9 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(moved.status_code, 200)
         self.assertEqual(moved.json()["state"]["units"][0]["x"], 3)
         self.assertEqual(moved.json()["revision"], 1)
-        self.assertEqual(self.client.get(reverse("current-game")).json(), moved.json())
+        self.assertEqual(moved.json()["combat_events"], [])
+        self.assertEqual(self.client.get(reverse("current-game")).json(),
+                         {key: value for key, value in moved.json().items() if key != "combat_events"})
         self.assertEqual(GameInstance.objects.get(pk=data["id"]).state["units"][0]["x"], 3)
 
         next_turn = self.action(1, {"type": "end_turn"})
@@ -82,7 +84,8 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(state["units"][0]["fight_points"], 0)
         self.assertEqual(state["units"][6]["health"], 2)
         self.assertEqual(attacked.json()["revision"], 1)
-        self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
+        self.assertEqual(attacked.json()["combat_events"], [])
+        self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
 
     def test_promotion_requires_morale_and_persists_veteran_allowances(self):
         started = self.start().json()
@@ -95,13 +98,14 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(result.json()["revision"], 1)
         self.assertEqual(result.json()["state"]["units"][0]["rank"], "veteran")
         self.assertEqual(result.json()["state"]["units"][0]["morale"], 3)
+        self.assertEqual(result.json()["combat_events"], [])
         self.assertEqual(self.action(0, {"type": "promote", "unit_id": 0}).status_code, 409)
         self.assertEqual(self.action(1, {"type": "promote", "unit_id": 0}).status_code, 400)
         ended = self.action(1, {"type": "end_turn"})
         self.assertEqual(ended.status_code, 200)
         self.assertEqual((ended.json()["state"]["units"][0]["move_points"],
                           ended.json()["state"]["units"][0]["fight_points"]), (5, 2))
-        self.assertEqual(self.client.get(reverse("current-game")).json(), ended.json())
+        self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
 
     def test_ranged_attack_persists_damage_and_reload_state(self):
         started = self.start().json()
@@ -115,7 +119,33 @@ class GameInstanceApiTests(TestCase):
         units = {unit["id"]: unit for unit in attacked.json()["state"]["units"]}
         self.assertEqual(units[2]["reload_turns"], 2)
         self.assertEqual(units[6]["health"], 2)
-        self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
+        self.assertEqual(attacked.json()["combat_events"], [{
+            "type": "projectile", "weapon": "longbow",
+            "from": {"x": 2, "y": 6}, "to": {"x": 6, "y": 6},
+        }])
+        self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
+        self.assertNotIn("combat_events", GameInstance.objects.get(pk=started["id"]).state)
+
+    def test_defender_turn_reports_multiple_shots_even_when_a_target_dies(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        units = instance.state["units"]
+        units[0].update(x=4, y=6, health=1)
+        units[1].update(x=5, y=7)
+        units[6].update(x=6, y=6, type="longbow")
+        units[7].update(x=7, y=7, type="crossbow")
+        instance.save(update_fields=["state"])
+
+        result = self.action(0, {"type": "end_turn"})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["combat_events"], [
+            {"type": "projectile", "weapon": "longbow",
+             "from": {"x": 6, "y": 6}, "to": {"x": 4, "y": 6}},
+            {"type": "projectile", "weapon": "crossbow",
+             "from": {"x": 7, "y": 7}, "to": {"x": 5, "y": 7}},
+        ])
+        self.assertNotIn(0, [unit["id"] for unit in result.json()["state"]["units"]])
+        self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
 
     def test_rejects_stale_invalid_and_unauthorized_actions(self):
         self.assertEqual(self.client.get(reverse("current-game")).status_code, 404)
@@ -220,13 +250,15 @@ class GameInstanceApiTests(TestCase):
         self.set_ai_orders([{"unit_id": 0, "x": 12, "y": 6}])
         rejected = self.action(1, {"type": "end_turn"})
         self.assertEqual(rejected.status_code, 502)
-        self.assertEqual(self.client.get(reverse("current-game")).json(), turn.json())
+        self.assertEqual(self.client.get(reverse("current-game")).json(),
+                         {key: value for key, value in turn.json().items() if key != "combat_events"})
         self.assertEqual(GameInstance.objects.get(pk=started["id"]).revision, 1)
 
         self.ai.side_effect = URLError("private-network-detail")
         unavailable = self.action(1, {"type": "end_turn"})
         self.assertEqual(unavailable.status_code, 503)
-        self.assertEqual(self.client.get(reverse("current-game")).json(), turn.json())
+        self.assertEqual(self.client.get(reverse("current-game")).json(),
+                         {key: value for key, value in turn.json().items() if key != "combat_events"})
         self.assertNotIn("private-network-detail", json.dumps(unavailable.json()))
 
     def test_existing_map_without_defender_roster_still_starts_a_match(self):

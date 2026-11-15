@@ -124,13 +124,14 @@ def game_action(request):
         return JsonResponse({"error": "A game revision is required."}, status=400)
     if instance.revision != payload["revision"]:
         return JsonResponse({"error": "Game state has changed. Reload the match."}, status=409)
+    combat_events = []
     try:
         action = payload.get("action")
         if (isinstance(action, dict) and action.get("type") == "end_turn"
                 and set(action) == {"type"} and not instance.state["captured"]):
-            state = enemy_turn(instance.state, instance.map_definition)
+            state = enemy_turn(instance.state, instance.map_definition, combat_events=combat_events)
         else:
-            state = apply_action(instance.state, action, instance.map_definition)
+            state = apply_action(instance.state, action, instance.map_definition, combat_events=combat_events)
     except InvalidAction as error:
         return JsonResponse({"error": str(error)}, status=400)
     except EnemyAIError as error:
@@ -144,4 +145,4 @@ def game_action(request):
         return JsonResponse({"error": "Game state has changed. Reload the match."}, status=409)
     instance.state = state
     instance.revision += 1
-    return JsonResponse(serialize_instance(instance))
+    return JsonResponse({**serialize_instance(instance), "combat_events": combat_events})

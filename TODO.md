@@ -32,7 +32,7 @@
 - [x] Allow recruits with full morale to promote to veteran with increased move and fight allowances.
 - [ ] Extend combat with bow and crossbow ranges, reload times, projectile motion, and line-of-sight checks.
   - [x] Add server-validated bow/crossbow attacks with wall-blocked line of sight, weapon ranges, reloads, and defender ranged attacks.
-  - [ ] Animate arrows and bolts as projectiles.
+  - [x] Animate arrows and bolts as projectiles.
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
 

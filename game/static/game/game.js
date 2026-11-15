@@ -55,6 +55,8 @@
   let animationStarted = false;
   const camera = { x: 0, y: 0, zoom: 1 };
   let activePointer = null;
+  let projectiles = [];
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   function resetCamera() {
     camera.x = 0;
@@ -349,6 +351,58 @@
     }
   }
 
+  function drawProjectiles(time) {
+    projectiles = projectiles.filter(shot => time < shot.start + shot.duration);
+    for (const shot of projectiles) {
+      if (time < shot.start) continue;
+      const progress = (time - shot.start) / shot.duration;
+      const from = project(shot.from.x, shot.from.y);
+      const to = project(shot.to.x, shot.to.y);
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const arc = Math.min(tileH * 1.4, Math.hypot(dx, dy) * .16);
+      const x = from.x + dx * progress;
+      const y = from.y + tileH * .1 + dy * progress - arc * 4 * progress * (1 - progress);
+      const angle = Math.atan2(dy - arc * 4 * (1 - 2 * progress), dx);
+      const length = shot.weapon === "longbow" ? tileW * .25 : tileW * .18;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.lineCap = "round";
+      ctx.lineWidth = Math.max(1.5, tileW * .035);
+      ctx.strokeStyle = shot.weapon === "longbow" ? "#f6dfaa" : "#d8e1e4";
+      ctx.beginPath();
+      ctx.moveTo(-length, 0);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-length * .25, -3);
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-length * .25, 3);
+      ctx.stroke();
+      if (shot.weapon === "longbow") {
+        ctx.beginPath();
+        ctx.moveTo(-length * .75, 0);
+        ctx.lineTo(-length, -3);
+        ctx.moveTo(-length * .75, 0);
+        ctx.lineTo(-length, 3);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function queueProjectiles(events) {
+    if (reducedMotion.matches || !events?.length) return;
+    const now = performance.now();
+    for (const [index, event] of events.entries()) {
+      if (event.type !== "projectile") continue;
+      const distance = Math.hypot(event.to.x - event.from.x, event.to.y - event.from.y);
+      projectiles.push({ ...event, start: now + index * 110, duration: 360 + distance * 65 });
+    }
+  }
+
   function draw(time = 0) {
     if (!width || !height) return;
     ctx.clearRect(0, 0, width, height);
@@ -382,6 +436,7 @@
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
+    drawProjectiles(time || performance.now());
     ctx.restore();
   }
 
@@ -513,6 +568,7 @@
 
   function applySnapshot(snapshot) {
     const newGame = instanceId !== snapshot.id;
+    if (newGame) projectiles = [];
     instanceId = snapshot.id;
     revision = snapshot.revision;
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = snapshot.map);
@@ -599,6 +655,7 @@
       const snapshot = await api("/api/games/actions/", { revision, action });
       const wasCaptured = simulation.captured;
       applySnapshot(snapshot);
+      queueProjectiles(snapshot.combat_events);
       if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
       else if (simulation.defeated) showToast("Your company has been defeated.");
       else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "ranged_attack" ? "Ranged attack resolved; weapon reloading." : action.type === "attack" ? "Melee attack resolved." : "Order received.");
@@ -633,6 +690,7 @@
 
   function showLaunchScreen(screen) {
     gameIsVisible = false;
+    projectiles = [];
     startScreen.hidden = screen !== startScreen;
     mainMenu.hidden = screen !== mainMenu;
     catalogScreen.hidden = screen !== catalogScreen;

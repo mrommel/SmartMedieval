@@ -17,10 +17,10 @@ class EnemyAIError(Exception):
         self.status_code = status_code
 
 
-def enemy_turn(state, map_data):
+def enemy_turn(state, map_data, combat_events=None):
     defenders = [unit for unit in state["units"] if unit.get("side") == "defenders"]
     if not defenders:
-        return apply_action(state, {"type": "end_turn"}, map_data)
+        return apply_action(state, {"type": "end_turn"}, map_data, combat_events=combat_events)
     if not settings.ENEMY_AI_API_KEY:
         raise EnemyAIError("Enemy AI is not configured. Set SPLASH_API_KEY in .env.", 503)
 
@@ -82,7 +82,8 @@ def enemy_turn(state, map_data):
         else:
             try:
                 legal_orders = resolve_defender_goals(state, orders, map_data)
-                return apply_action(state, {"type": "end_turn"}, map_data, enemy_orders=legal_orders)
+                return apply_action(state, {"type": "end_turn"}, map_data, enemy_orders=legal_orders,
+                                    combat_events=combat_events)
             except InvalidAction as error:
                 failure = f"Enemy AI returned an invalid order: {error}"
                 if attempt:

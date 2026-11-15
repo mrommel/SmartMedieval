@@ -319,7 +319,7 @@ def capture_status(state, map_data=MAP):
     return "CONTESTED" if state["capture_progress"] else "UNCLAIMED"
 
 
-def apply_action(state, action, map_data=MAP, enemy_orders=()):
+def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "promote", "end_turn"):
         raise InvalidAction("Unknown action.")
@@ -378,6 +378,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
                                      (target["x"], target["y"]), map_data):
                 raise InvalidAction("A wall blocks the line of sight.")
             attacker["reload_turns"] = RANGED_UNIT_STATS[attacker["type"]]["reload_turns"]
+            if combat_events is not None:
+                combat_events.append({
+                    "type": "projectile", "weapon": attacker["type"],
+                    "from": {"x": attacker["x"], "y": attacker["y"]},
+                    "to": {"x": target["x"], "y": target["y"]},
+                })
         elif abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1:
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
@@ -430,6 +436,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             defender["fight_points"] -= 1
             if ranged:
                 defender["reload_turns"] = RANGED_UNIT_STATS[defender["type"]]["reload_turns"]
+                if combat_events is not None:
+                    combat_events.append({
+                        "type": "projectile", "weapon": defender["type"],
+                        "from": {"x": defender["x"], "y": defender["y"]},
+                        "to": {"x": target["x"], "y": target["y"]},
+                    })
             target["health"] -= ATTACK_DAMAGE
             if target["health"] <= 0:
                 record_casualty(next_state, defender, target)
