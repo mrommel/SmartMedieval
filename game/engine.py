@@ -20,6 +20,7 @@ MAP = {
     "enemyStartPositions": [
         {"x": 12, "y": 5, "type": "vanguard"},
         {"x": 16, "y": 8, "type": "longbow"},
+        {"x": 14, "y": 9, "type": "crossbow"},
     ],
     "catapults": [{"x": 3, "y": 7}],
 }

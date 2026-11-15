@@ -64,8 +64,10 @@ class GameInstanceApiTests(TestCase):
     def test_seeded_assault_catapult_actions_persist_and_ai_uses_breaches(self):
         game = SingleGame.objects.get(slug="greywatch-assault")
         self.assertEqual(game.map_definition["catapults"], [{"x": 3, "y": 7}])
+        self.assertEqual(game.map_definition["enemyStartPositions"], MAP["enemyStartPositions"])
         self.game = game
         started = self.start().json()
+        self.assertEqual(started["map"]["enemyStartPositions"], MAP["enemyStartPositions"])
         self.assertEqual(started["state"]["catapults"][0]["ammo"], 3)
         aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 11, "y": 7}
         self.assertEqual(self.action(0, {**aim, "x": True}).status_code, 400)
@@ -131,7 +133,7 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["state"]["units"][0]["morale"], 3)
         self.assertEqual(data["state"]["units"][0]["rank"], "recruit")
         self.assertEqual(data["state"]["history"], [])
-        self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 2)
+        self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 3)
         self.assertEqual(GameInstance.objects.count(), 1)
 
         moved = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
@@ -151,7 +153,7 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(json.loads(request.data)["model"], "unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL")
         battlefield = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])
         self.assertEqual(battlefield["map"]["objective"], {"x": 14, "y": 7})
-        self.assertEqual([unit["id"] for unit in battlefield["units"] if unit["side"] == "defenders"], [6, 7])
+        self.assertEqual([unit["id"] for unit in battlefield["units"] if unit["side"] == "defenders"], [6, 7, 8])
         self.assertEqual((battlefield["units"][0]["morale"], battlefield["units"][0]["rank"]),
                          (3, "recruit"))
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))

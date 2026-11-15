@@ -40,7 +40,8 @@
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
   - [x] Keep a nearby garrison at the objective during AI movement and target capturing attackers first.
   - [x] Add wall, tree, and rock cover against ranged attacks with combat feedback.
-  - [ ] Tune the encounter.
+  - [x] Add a gate-covering crossbow to the seeded assault and test that the gate must be cleared before capture.
+  - [ ] Playtest and tune the encounter on desktop and mobile.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
   - [x] Add pause/resume, locally saved animation-speed controls, reduced-motion support, and damage/casualty feedback.
   - [x] Add keyboard-accessible battlefield orders.

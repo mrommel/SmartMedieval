@@ -761,21 +761,49 @@ class TurnEngineTests(TestCase):
             apply_action(second, {"type": "end_turn"})
 
     def test_spawned_unit_can_reach_objective_and_capture(self):
-        state = initial_state()
+        battlefield = default_map()
+        battlefield["enemyStartPositions"] = battlefield["enemyStartPositions"][:2]
+        state = initial_state(battlefield)
         for _ in range(10):
             state = apply_action(state, {
                 "type": "move", "units": [0],
-                "x": MAP["objective"]["x"], "y": MAP["objective"]["y"],
-            })
+                "x": battlefield["objective"]["x"], "y": battlefield["objective"]["y"],
+            }, battlefield)
             if (state["units"][0]["x"], state["units"][0]["y"]) == (
-                MAP["objective"]["x"], MAP["objective"]["y"]
+                battlefield["objective"]["x"], battlefield["objective"]["y"]
             ):
                 break
-            state = apply_action(state, {"type": "end_turn"})
+            state = apply_action(state, {"type": "end_turn"}, battlefield)
         else:
             self.fail("The courtyard was not reachable from the starting position.")
-        state = apply_action(state, {"type": "end_turn"})
-        state = apply_action(state, {"type": "end_turn"})
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertTrue(state["captured"])
+
+    def test_seeded_gate_guard_forces_combat_but_can_be_cleared(self):
+        battlefield = default_map()
+        validate_map(battlefield)
+        self.assertEqual(battlefield["enemyStartPositions"][2],
+                         {"x": 14, "y": 9, "type": "crossbow"})
+        state = initial_state(battlefield)
+        guard = state["units"][8]
+        self.assertEqual((guard["x"], guard["y"]), (14, 9))
+        # Isolate the gate duel: the other soldiers do not affect its outcome.
+        state["units"] = [state["units"][0], guard]
+        state["units"][0].update(x=14, y=10)
+        move = {"type": "move", "units": [0], "x": 14, "y": 7}
+        with self.assertRaisesRegex(InvalidAction, "blocked"):
+            apply_action(state, move, battlefield)
+        for strike in range(3):
+            state = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 8}, battlefield)
+            if strike < 2:
+                state = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertNotIn(8, [unit["id"] for unit in state["units"]])
+        self.assertEqual(state["units"][0]["health"], 2)
+        state = apply_action(state, move, battlefield)
+        self.assertEqual((state["units"][0]["x"], state["units"][0]["y"]), (14, 7))
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
         self.assertTrue(state["captured"])
 
     def test_invalid_movements_cannot_change_existing_state(self):
@@ -869,6 +897,7 @@ class TurnEngineTests(TestCase):
 
     def test_last_objective_guard_stays_nearby_despite_a_distant_goal(self):
         state = initial_state()
+        state["units"] = [unit for unit in state["units"] if unit["id"] != 8]
         state["units"][6].update(x=14, y=6)
         orders = resolve_defender_goals(state, [{"unit_id": 6, "x": 12, "y": 5}])
         moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
@@ -876,8 +905,16 @@ class TurnEngineTests(TestCase):
         self.assertLessEqual(abs(guard["x"] - 14) + abs(guard["y"] - 7), 2)
         self.assertNotEqual((guard["x"], guard["y"]), (12, 5))
 
+    def test_seeded_crossbow_stays_on_garrison_duty_when_ordered_away(self):
+        state = initial_state()
+        orders = resolve_defender_goals(state, [{"unit_id": 8, "x": 2, "y": 6}])
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
+        guard = next(unit for unit in moved["units"] if unit["id"] == 8)
+        self.assertLessEqual(abs(guard["x"] - 14) + abs(guard["y"] - 7), 2)
+
     def test_objective_guard_can_leave_after_another_takes_over(self):
         state = initial_state()
+        state["units"] = [unit for unit in state["units"] if unit["id"] != 8]
         state["units"][6].update(x=14, y=6)
         orders = resolve_defender_goals(state, [
             {"unit_id": 7, "x": 15, "y": 8}, {"unit_id": 6, "x": 12, "y": 5},
@@ -888,6 +925,7 @@ class TurnEngineTests(TestCase):
 
     def test_two_guards_cannot_both_abandon_the_objective(self):
         state = initial_state()
+        state["units"] = [unit for unit in state["units"] if unit["id"] != 8]
         state["units"][6].update(x=14, y=6)
         state["units"][7].update(x=15, y=7)
         orders = resolve_defender_goals(state, [
@@ -903,6 +941,7 @@ class TurnEngineTests(TestCase):
         for weapon, position in (("vanguard", (14, 6)), ("longbow", (14, 4))):
             with self.subTest(weapon=weapon):
                 state = initial_state()
+                state["units"] = [unit for unit in state["units"] if unit["id"] != 8]
                 state["units"][6].update(x=position[0], y=position[1], type=weapon)
                 state["units"][0].update(x=14, y=7)
                 state["units"][1].update(x=13, y=6, health=1)

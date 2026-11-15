@@ -1,11 +1,45 @@
+from copy import deepcopy
+from importlib import import_module
+
+from django.apps import apps
 from django.contrib.staticfiles import finders
 from django.test import TestCase
 from django.urls import reverse
 
-from ..models import Scenario, SingleGame
+from ..engine import default_map, initial_state
+from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameCatalogApiTests(TestCase):
+    def test_assault_upgrade_preserves_custom_maps_and_active_matches(self):
+        upgrade = import_module("game.migrations.0006_tune_greywatch_assault")
+        game = SingleGame.objects.get(slug="greywatch-assault")
+        old_map = deepcopy(upgrade.PREVIOUS_ASSAULT)
+        game.map_definition = old_map
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(
+            single_game=game, source_game=game,
+            map_definition=deepcopy(old_map), state=initial_state(old_map),
+        )
+
+        upgrade.tune_seeded_assault(apps, None)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition, default_map())
+        self.assertEqual(match.map_definition, old_map)
+        self.assertEqual(len(match.state["units"]), 8)
+        upgrade.tune_seeded_assault(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, default_map())
+
+        custom = deepcopy(old_map)
+        custom["enemyStartPositions"][0]["x"] = 13
+        game.map_definition = custom
+        game.save(update_fields=["map_definition"])
+        upgrade.tune_seeded_assault(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, custom)
+
     def test_seeded_scenario_links_seeded_game(self):
         scenario = Scenario.objects.get(slug="siege-of-greywatch")
         self.assertEqual(
