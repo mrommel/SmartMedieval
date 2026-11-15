@@ -25,7 +25,8 @@
   - [ ] Isolate pointer/camera input and launch/catalog UI.
 - [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
   - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
-  - [ ] Add multiple strongpoints, terrain collision beyond keep walls, and unit spacing.
+  - [x] Keep units on distinct tiles during movement and prevent paths through occupied tiles.
+  - [ ] Add multiple strongpoints and terrain collision beyond keep walls.
 - [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.
 - [ ] Complete unit stats and turn-based combat rules.

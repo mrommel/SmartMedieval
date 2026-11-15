@@ -43,7 +43,7 @@ def enemy_turn(state, map_data, combat_events=None):
                 "'orders' array of {\"unit_id\": integer, \"x\": integer, \"y\": integer}. "
                 "Each x,y is a goal inside the map, not a final destination. The server moves "
                 "the defender up to its move allowance toward it (normally 4, minus 1 at morale "
-                "0-1 or plus 1 at morale 5), avoiding walls and stopping short of the "
+                "0-1 or plus 1 at morale 5), avoiding walls and occupied tiles and stopping short of the "
                 "objective. A defender may aim at the objective but cannot occupy it. Elevated "
                 "tiles have height 1-3; only ladders and ramps on the higher tile permit a "
                 "one-level step. After "

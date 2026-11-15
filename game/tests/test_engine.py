@@ -268,10 +268,47 @@ class TurnEngineTests(TestCase):
         self.assertTrue(all(is_walkable(*point) for point in path))
         self.assertIsNone(find_path((2, 6), (MAP["keep"]["left"], MAP["keep"]["top"])))
 
+    def test_map_rejects_duplicate_start_tiles_on_either_side(self):
+        for side in ("startPositions", "enemyStartPositions"):
+            battlefield = default_map()
+            battlefield[side][1].update(x=battlefield[side][0]["x"],
+                                        y=battlefield[side][0]["y"])
+            with self.subTest(side=side), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+
+    def test_player_cannot_enter_occupied_tile_but_can_use_vacated_tile(self):
+        state = initial_state()
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 7})
+        self.assertEqual((state["units"][0]["x"], state["units"][0]["y"]), (2, 6))
+        moved = apply_action(state, {"type": "move", "units": [1], "x": 4, "y": 7})
+        moved = apply_action(moved, {"type": "move", "units": [0], "x": 3, "y": 7})
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["y"]), (3, 7))
+        self.assertEqual(len({(unit["x"], unit["y"]) for unit in moved["units"]}), len(moved["units"]))
+
+    def test_player_routes_around_units_and_cannot_pass_blocked_gate(self):
+        state = initial_state()
+        state["units"] = [unit for unit in state["units"] if unit["id"] in (0, 1, 6, 7)]
+        state["units"][1].update(x=3, y=6)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 4, "y": 6})
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["y"]), (4, 6))
+        self.assertEqual(moved["units"][0]["move_points"], 0)  # Two steps around the blocker.
+        state["units"][1].update(x=14, y=10)
+        state["units"][0].update(x=14, y=11)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 14, "y": 7})
+
+    def test_group_orders_leave_units_on_distinct_tiles(self):
+        state = initial_state()
+        moved = apply_action(state, {"type": "move", "units": [0, 1], "x": 3, "y": 6})
+        self.assertNotEqual((moved["units"][0]["x"], moved["units"][0]["y"]),
+                            (moved["units"][1]["x"], moved["units"][1]["y"]))
+        self.assertEqual(len({(unit["x"], unit["y"]) for unit in moved["units"]}), len(moved["units"]))
+
     def test_movement_spends_points_and_end_turn_restores_them(self):
         state = initial_state()
         state = apply_action(state, {"type": "move", "units": [0], "x": 8, "y": 6})
-        self.assertEqual((state["units"][0]["x"], state["units"][0]["y"]), (6, 6))
+        self.assertEqual((state["units"][0]["x"], state["units"][0]["y"]), (5, 5))
         self.assertEqual(state["units"][0]["move_points"], 0)
         with self.assertRaises(InvalidAction):
             apply_action(state, {"type": "move", "units": [0], "x": 7, "y": 6})
@@ -371,6 +408,32 @@ class TurnEngineTests(TestCase):
         self.assertEqual(state["turn"], 1)
         self.assertEqual(state["capture_progress"], 0)
         self.assertEqual(state["units"][6]["move_points"], 4)
+
+    def test_defender_orders_cannot_enter_or_cross_occupied_tiles(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=6)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "end_turn"}, enemy_orders=[
+                {"unit_id": 6, "x": 12, "y": 6}])
+        state["units"][0].update(x=2, y=6)
+        state["units"][7].update(x=12, y=6)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "end_turn"}, enemy_orders=[
+                {"unit_id": 6, "x": 12, "y": 6}])
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=[
+            {"unit_id": 7, "x": 13, "y": 6}, {"unit_id": 6, "x": 12, "y": 6}])
+        self.assertEqual((moved["units"][6]["x"], moved["units"][6]["y"]), (12, 6))
+        self.assertEqual(len({(unit["x"], unit["y"]) for unit in moved["units"]}), len(moved["units"]))
+
+    def test_defender_goals_reserve_tiles_for_sequential_orders(self):
+        state = initial_state()
+        state["units"][7].update(x=12, y=6)
+        goals = [{"unit_id": 6, "x": 12, "y": 6}, {"unit_id": 7, "x": 13, "y": 6}]
+        orders = resolve_defender_goals(state, goals)
+        self.assertEqual(len(orders), 2)
+        self.assertNotEqual((orders[0]["x"], orders[0]["y"]), (12, 6))
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
+        self.assertEqual(len({(unit["x"], unit["y"]) for unit in moved["units"]}), len(moved["units"]))
 
     def test_defender_destinations_match_legal_reachable_tiles(self):
         state = initial_state()

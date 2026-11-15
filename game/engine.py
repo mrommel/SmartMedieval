@@ -86,6 +86,7 @@ def validate_map(map_data):
     objective = map_data["objective"]
     if not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
+    occupied = set()
     for name in ("startPositions", "enemyStartPositions"):
         if name not in map_data:
             continue
@@ -98,16 +99,16 @@ def validate_map(map_data):
                     or position["type"] not in ("vanguard", "longbow", "crossbow")
                     or not is_walkable(position["x"], position["y"], map_data)):
                 raise InvalidMap("Every starting unit needs an open tile and a supported type.")
+            tile = (position["x"], position["y"])
+            if tile in occupied:
+                raise InvalidMap("Starting units must have distinct tiles.")
+            occupied.add(tile)
             if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
             if name == "enemyStartPositions" and (position["x"], position["y"]) == (
                     objective["x"], objective["y"]):
                 raise InvalidMap("Defenders cannot start on the objective.")
-    if "enemyStartPositions" in map_data:
-        attacker_tiles = {(point["x"], point["y"]) for point in map_data["startPositions"]}
-        if any((point["x"], point["y"]) in attacker_tiles for point in map_data["enemyStartPositions"]):
-            raise InvalidMap("Defenders cannot start on an attacker tile.")
-    else:
+    if "enemyStartPositions" not in map_data:
         legacy_enemy_position(map_data)
 
 
@@ -246,7 +247,7 @@ def record_casualty(state, killer, casualty):
     state["units"].remove(casualty)
 
 
-def defender_destinations(unit, map_data=MAP):
+def defender_destinations(unit, map_data=MAP, blocked=()):
     start = (unit["x"], unit["y"])
     objective = (map_data["objective"]["x"], map_data["objective"]["y"])
     frontier = deque([(start, 0)])
@@ -260,7 +261,8 @@ def defender_destinations(unit, map_data=MAP):
         if distance == move_allowance(unit):
             continue
         for neighbor in neighbors(x, y):
-            if neighbor not in visited and neighbor != objective and can_step((x, y), neighbor, map_data, elevations):
+            if (neighbor not in visited and neighbor not in blocked and neighbor != objective
+                    and can_step((x, y), neighbor, map_data, elevations)):
                 visited.add(neighbor)
                 frontier.append((neighbor, distance + 1))
     return destinations
@@ -272,6 +274,7 @@ def resolve_defender_goals(state, goals, map_data=MAP):
         raise InvalidAction("Invalid defender goals.")
     orders = []
     seen = set()
+    positions = {unit["id"]: (unit["x"], unit["y"]) for unit in state["units"]}
     for goal in goals:
         if not isinstance(goal, dict) or set(goal) != {"unit_id", "x", "y"}:
             raise InvalidAction("Invalid defender goal.")
@@ -282,14 +285,15 @@ def resolve_defender_goals(state, goals, map_data=MAP):
             raise InvalidAction("Invalid defender goal.")
         seen.add(unit_id)
         unit = defenders[unit_id]
-        start = (unit["x"], unit["y"])
+        start = positions[unit_id]
         if (x, y) == start:
             continue
-        destinations = defender_destinations(unit, map_data)
+        blocked = set(positions.values()) - {start}
+        destinations = defender_destinations(unit, map_data, blocked)
         if not destinations:
             continue
         objective = (map_data["objective"]["x"], map_data["objective"]["y"])
-        route = find_path(start, (x, y), map_data, blocked={objective})
+        route = find_path(start, (x, y), map_data, blocked=blocked | {objective})
         along_route = [tile for tile in (route or [])[:move_allowance(unit)] if tile in destinations]
         if along_route:
             destination = along_route[-1]
@@ -300,6 +304,7 @@ def resolve_defender_goals(state, goals, map_data=MAP):
                                   abs(tile[0] - start[0]) + abs(tile[1] - start[1])),
             )
         orders.append({"unit_id": unit_id, "x": destination[0], "y": destination[1]})
+        positions[unit_id] = destination
     return orders
 
 
@@ -460,10 +465,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("Invalid defender destination.")
             ordered.add(unit_id)
             unit = defenders[unit_id]
-            if (x, y) not in defender_destinations(unit, map_data):
+            start = (unit["x"], unit["y"])
+            blocked = {(other["x"], other["y"]) for other in next_state["units"] if other is not unit}
+            if (x, y) not in defender_destinations(unit, map_data, blocked):
                 raise InvalidAction("Invalid defender destination.")
             objective = (map_data["objective"]["x"], map_data["objective"]["y"])
-            path = find_path((unit["x"], unit["y"]), (x, y), map_data, blocked={objective})
+            path = find_path(start, (x, y), map_data, blocked=blocked | {objective})
             old_x = unit["x"]
             unit["x"], unit["y"] = path[-1]
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
@@ -538,15 +545,16 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     moved = False
     for index, unit_id in enumerate(ids):
         unit = units[unit_id]
+        blocked = {(other["x"], other["y"]) for other in next_state["units"] if other is not unit}
         # Spread group destinations like the prototype, falling back to the clicked tile.
         if len(ids) == 1:
             target = (x, y)
         else:
             angle = 2 * pi * index / len(ids)
             target = (x + round(cos(angle)), y + round(sin(angle)))
-            if not is_walkable(*target, map_data):
+            if not is_walkable(*target, map_data) or target in blocked:
                 target = (x, y)
-        path = find_path((unit["x"], unit["y"]), target, map_data)
+        path = find_path((unit["x"], unit["y"]), target, map_data, blocked=blocked)
         if path:
             steps = path[:unit["move_points"]]
             old_x = unit["x"]
