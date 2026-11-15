@@ -27,6 +27,8 @@ class SingleGameAdmin(admin.ModelAdmin):
             "the objective; defenders cannot start on it or on an attacker. "
             "Optional elevation: [{\"x\": 3, \"y\": 5, \"height\": 1, \"access\": \"ramp\"}]. "
             "Heights are 1-3; only a ladder or ramp on the higher tile permits a one-level step. "
+            "Optional objects: [{\"x\": 4, \"y\": 5, \"type\": \"tree\"}]. Trees and rocks "
+            "block movement and shots; keep them off walls, gates, elevated tiles, units and the objective. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

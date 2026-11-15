@@ -71,6 +71,49 @@ class TurnEngineTests(TestCase):
         self.assertIsNone(find_path((2, 5), (4, 5), battlefield,
                                     blocked={(3, 5)}))
 
+    def test_map_objects_block_movement_and_both_sides_ranged_attacks(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 4, "y": 5, "type": "tree"},
+                                  {"x": 5, "y": 6, "type": "rock"}]
+        validate_map(battlefield)
+        self.assertFalse(is_walkable(4, 5, battlefield))
+        self.assertIsNone(find_path((3, 5), (4, 5), battlefield))
+        self.assertNotIn((5, 6), defender_destinations({"x": 6, "y": 6}, battlefield))
+        self.assertFalse(has_line_of_sight((3, 5), (5, 5), battlefield))
+        self.assertFalse(has_line_of_sight((4, 6), (6, 6), battlefield))
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][2], state["units"][6]]
+        state["units"][0].update(x=3, y=5)
+        state["units"][1].update(x=5, y=5, type="longbow")
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+        ended = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(ended["units"][0]["health"], 3)
+        self.assertEqual(ended["units"][1]["fight_points"], 1)
+
+    def test_map_objects_reject_invalid_placements_and_blocked_routes(self):
+        battlefield = default_map()
+        for objects in ("tree", [{"x": 2, "y": 4, "type": "water"}],
+                        [{"x": True, "y": 4, "type": "tree"}],
+                        [{"x": 11, "y": 3, "type": "rock"}],
+                        [{"x": 14, "y": 10, "type": "rock"}],
+                        [{"x": 14, "y": 7, "type": "tree"}],
+                        [{"x": 2, "y": 6, "type": "tree"}],
+                        [{"x": 3, "y": 5, "type": "rock"}] * 2):
+            battlefield["objects"] = objects
+            with self.subTest(objects=objects), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield["objects"] = [{"x": 3, "y": 5, "type": "tree"}]
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 14, "y": 11, "type": "rock"},
+                                  {"x": 13, "y": 10, "type": "tree"},
+                                  {"x": 15, "y": 10, "type": "tree"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+
     def test_elevation_moves_and_captures_at_height_with_normal_move_cost(self):
         battlefield = default_map()
         battlefield["startPositions"] = [{"x": 2, "y": 5, "type": "vanguard"}]

@@ -96,6 +96,23 @@ class GameInstanceApiTests(TestCase):
         ai_map = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])["map"]
         self.assertEqual(ai_map["elevation"], started["map"]["elevation"])
 
+    def test_map_objects_remain_in_active_match_after_editor_changes(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 3, "y": 6, "type": "tree"},
+                                  {"x": 5, "y": 6, "type": "rock"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["map"]["objects"], battlefield["objects"])
+        battlefield["objects"] = []
+        self.game.map_definition = battlefield
+        self.game.save()
+        self.assertEqual(self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).status_code, 400)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["map"]["objects"],
+                         started["map"]["objects"])
+        self.assertEqual(self.start().json()["map"]["objects"], [])
+
     def test_attack_action_persists_damage_and_spent_fight_point(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])

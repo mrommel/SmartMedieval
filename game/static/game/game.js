@@ -37,6 +37,7 @@
   let COLS, ROWS, KEEP, GATE, OBJECTIVE;
   let elevation = new Map();
   let raisedTiles = [];
+  let objects = new Map();
   const colors = {
     grass: ["#60815a", "#63845c", "#5d7d57", "#67875e", "#597a55"],
     grassLine: "rgba(36,59,39,.2)",
@@ -170,7 +171,7 @@
   }
 
   function isWalkable(x, y) {
-    return x >= 0 && x < COLS && y >= 0 && y < ROWS && !isWall(x, y);
+    return x >= 0 && x < COLS && y >= 0 && y < ROWS && !isWall(x, y) && !objects.has(`${x},${y}`);
   }
 
   function diamond(x, y, z = tileHeight(x, y)) {
@@ -296,6 +297,42 @@
       ctx.lineTo(p.x + i * tileW * .12, groundY - 2);
       ctx.stroke();
     }
+  }
+
+  function drawObject(obj) {
+    const p = project(obj.x, obj.y, 0);
+    const ground = p.y + tileH * .55;
+    ctx.save();
+    ctx.fillStyle = "rgba(28,39,28,.32)";
+    ctx.beginPath();
+    ctx.ellipse(p.x, ground + tileH * .12, tileW * .31, tileH * .22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (obj.type === "tree") {
+      ctx.fillStyle = "#594b37";
+      ctx.fillRect(p.x - tileW * .055, ground - tileH * 1.05, tileW * .11, tileH * 1.1);
+      for (const [dy, size, color] of [
+        [1.95, .34, "#344f3c"], [1.45, .4, "#48654a"], [1, .32, "#587650"]
+      ]) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(p.x, ground - tileH * (dy + .8));
+        ctx.lineTo(p.x - tileW * size, ground - tileH * (dy - .35));
+        ctx.lineTo(p.x + tileW * size, ground - tileH * (dy - .35));
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else {
+      polygon([
+        [p.x - tileW * .29, ground], [p.x - tileW * .25, ground - tileH * .55],
+        [p.x - tileW * .06, ground - tileH * .8], [p.x + tileW * .23, ground - tileH * .55],
+        [p.x + tileW * .3, ground - tileH * .05]
+      ], "#767c72", "#49564e", 1);
+      polygon([
+        [p.x - tileW * .06, ground - tileH * .8], [p.x + tileW * .23, ground - tileH * .55],
+        [p.x + tileW * .3, ground - tileH * .05], [p.x, ground - tileH * .13]
+      ], "#555f57", "#49564e", 1);
+    }
+    ctx.restore();
   }
 
   function drawObjective(time) {
@@ -482,6 +519,7 @@
       }
     }
     raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
+    objects.forEach(obj => layers.push({ depth: obj.x + obj.y + .3, kind: "object", obj }));
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     layers.sort((a, b) => a.depth - b.depth);
 
@@ -493,6 +531,7 @@
       }
       if (layer.kind === "wall") drawWall(layer.x, layer.y);
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
+      else if (layer.kind === "object") drawObject(layer.obj);
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
@@ -535,14 +574,14 @@
       const horizontal = (1 + 2 * ix) * ny;
       const vertical = (1 + 2 * iy) * nx;
       if (horizontal === vertical) {
-        if (ix < nx && iy < ny && (isWall(x + stepX, y) || isWall(x, y + stepY))) return false;
+        if (ix < nx && iy < ny && (!isWalkable(x + stepX, y) || !isWalkable(x, y + stepY))) return false;
         x += stepX; y += stepY; ix++; iy++;
       } else if (horizontal < vertical) {
         x += stepX; ix++;
       } else {
         y += stepY; iy++;
       }
-      if ((x !== targetX || y !== targetY) && isWall(x, y)) return false;
+      if ((x !== targetX || y !== targetY) && !isWalkable(x, y)) return false;
     }
     return true;
   }
@@ -615,7 +654,7 @@
     }
     const tile = pickTile(px, py);
     if (!isWalkable(tile.x, tile.y)) {
-      showToast("Stone walls bar the way. Enter through the south gate.");
+      showToast("An obstacle bars the way. Choose an open tile.");
       return;
     }
     moveSelected(tile.x, tile.y);
@@ -626,8 +665,8 @@
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
-      : isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
-        ? "courtyard objective" : "open ground"}.`;
+      : objects.get(`${cursor.x},${cursor.y}`)?.type || (isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
+        ? "courtyard objective" : "open ground")}.`;
   }
 
   function revealCursor() {
@@ -654,7 +693,7 @@
       updateSelection();
       describeCursor();
     } else if (!isWalkable(cursor.x, cursor.y)) {
-      showToast("Stone walls bar the way. Enter through the south gate.");
+      showToast("An obstacle bars the way. Choose an open tile.");
     } else {
       moveSelected(cursor.x, cursor.y);
     }
@@ -711,6 +750,7 @@
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = snapshot.map);
     raisedTiles = snapshot.map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
+    objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;

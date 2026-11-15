@@ -50,7 +50,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     cols, rows = map_data["cols"], map_data["rows"]
     if type(cols) is not int or type(rows) is not int or not (8 <= cols <= 64 and 8 <= rows <= 64):
@@ -70,6 +70,20 @@ def validate_map(map_data):
     gate = map_data["gate"]
     if not is_keep_edge(gate["x"], gate["y"], map_data):
         raise InvalidMap("The gate must lie on the keep wall.")
+    objects = map_data.get("objects", [])
+    if not isinstance(objects, list) or len(objects) > 256:
+        raise InvalidMap("Objects must be a list of at most 256 trees and rocks.")
+    object_tiles = set()
+    for obj in objects:
+        if (not isinstance(obj, dict) or set(obj) != {"x", "y", "type"}
+                or type(obj["x"]) is not int or type(obj["y"]) is not int
+                or obj["type"] not in ("tree", "rock")
+                or not (0 <= obj["x"] < cols and 0 <= obj["y"] < rows)
+                or is_wall(obj["x"], obj["y"], map_data)
+                or (obj["x"], obj["y"]) == (gate["x"], gate["y"])
+                or (obj["x"], obj["y"]) in object_tiles):
+            raise InvalidMap("Objects must be unique open tiles with type tree or rock, away from the gate.")
+        object_tiles.add((obj["x"], obj["y"]))
     elevation = map_data.get("elevation", [])
     if not isinstance(elevation, list) or len(elevation) > cols * rows:
         raise InvalidMap("Elevation must be a list of tiles inside the map.")
@@ -80,6 +94,7 @@ def validate_map(map_data):
                 or any(type(tile[key]) is not int for key in ("x", "y", "height"))
                 or not 1 <= tile["height"] <= 3
                 or ("access" in tile and tile["access"] not in ("ladder", "ramp"))
+                or (tile["x"], tile["y"]) in object_tiles
                 or not is_walkable(tile["x"], tile["y"], map_data)
                 or (tile["x"], tile["y"]) in seen):
             raise InvalidMap("Elevated tiles must be unique open tiles with height 1-3 and optional ladder or ramp access.")
@@ -126,8 +141,13 @@ def is_wall(x, y, map_data=MAP):
     )
 
 
+def is_object(x, y, map_data=MAP):
+    return any(obj["x"] == x and obj["y"] == y for obj in map_data.get("objects", ()))
+
+
 def is_walkable(x, y, map_data=MAP):
-    return 0 <= x < map_data["cols"] and 0 <= y < map_data["rows"] and not is_wall(x, y, map_data)
+    return (0 <= x < map_data["cols"] and 0 <= y < map_data["rows"]
+            and not is_wall(x, y, map_data) and not is_object(x, y, map_data))
 
 
 def elevation_index(map_data):
@@ -159,7 +179,7 @@ def can_step(start, end, map_data=MAP, elevations=None):
 
 
 def has_line_of_sight(start, end, map_data=MAP):
-    """Return whether a tile-center ray reaches its target without crossing a wall."""
+    """Return whether a tile-center ray reaches its target without crossing cover."""
     x, y = start
     target_x, target_y = end
     dx, dy = target_x - x, target_y - y
@@ -171,9 +191,10 @@ def has_line_of_sight(start, end, map_data=MAP):
         horizontal = (1 + 2 * ix) * ny
         vertical = (1 + 2 * iy) * nx
         if horizontal == vertical:
-            # At a corner, either adjoining wall blocks the shot.
+            # At a corner, either adjoining obstacle blocks the shot.
             if ix < nx and iy < ny and (
-                    is_wall(x + step_x, y, map_data) or is_wall(x, y + step_y, map_data)):
+                    is_wall(x + step_x, y, map_data) or is_object(x + step_x, y, map_data)
+                    or is_wall(x, y + step_y, map_data) or is_object(x, y + step_y, map_data)):
                 return False
             x += step_x
             y += step_y
@@ -185,7 +206,7 @@ def has_line_of_sight(start, end, map_data=MAP):
         else:
             y += step_y
             iy += 1
-        if (x, y) != end and is_wall(x, y, map_data):
+        if (x, y) != end and (is_wall(x, y, map_data) or is_object(x, y, map_data)):
             return False
     return True
 
@@ -458,7 +479,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("That defender is outside this weapon's range.")
             if not has_line_of_sight((attacker["x"], attacker["y"]),
                                      (target["x"], target["y"]), map_data):
-                raise InvalidAction("A wall blocks the line of sight.")
+                raise InvalidAction("An obstacle blocks the line of sight.")
             attacker["reload_turns"] = RANGED_UNIT_STATS[attacker["type"]]["reload_turns"]
             if combat_events is not None:
                 combat_events.append({

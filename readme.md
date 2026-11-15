@@ -33,6 +33,8 @@ To edit game definitions and link single games to scenarios, create a staff acco
 
 Maps may include an optional `elevation` list of unique open tiles, for example `[{"x": 3, "y": 5, "height": 1, "access": "ramp"}, {"x": 4, "y": 5, "height": 2, "access": "ladder"}]`. Heights range from 1 to 3; `access` is optional and accepts `ramp` or `ladder`. Equal-height neighbors connect normally, but changing height by one requires access on the **higher** tile. Larger jumps are impassable. Place connectors so every starting unit can reach the objective. Existing maps without `elevation` remain flat; active matches keep their snapshotted maps until restarted.
 
+Maps may also include up to 256 `objects`, such as `[{"x": 4, "y": 5, "type": "tree"}, {"x": 5, "y": 6, "type": "rock"}]`. Both types block movement and line of sight. Place them on distinct ground tiles, away from walls, the gate, elevation, starting units, and the objective; all units must still be able to reach the objective. Older maps without objects remain unchanged, and running matches retain their snapshot after edits.
+
 Defender AI uses a local OpenAI-compatible service at `http://127.0.0.1:11435/v1`. Configure `SPLASH_API_KEY` in a local `.env` file when using that service; do not commit credentials.
 
 ## Development checks

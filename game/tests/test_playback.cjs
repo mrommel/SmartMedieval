@@ -176,3 +176,18 @@ test("keyboard cursor selects groups, moves, attacks, and cannot order while pau
   key("Enter");
   assert.equal(game.actions.length, 2);
 });
+
+test("trees and rocks are described and reject keyboard movement orders", async () => {
+  const game = setup();
+  game.snapshot.map.objects = [{ x: 1, y: 0, type: "tree" }, { x: 1, y: 1, type: "rock" }];
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /tree/);
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  canvas.fire("keydown", { key: "ArrowDown", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /rock/);
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  assert.equal(game.actions.length, 0);
+});
