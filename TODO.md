@@ -46,6 +46,34 @@
   - [x] Add keyboard-accessible battlefield orders.
   - [x] Add richer combat history: persist the latest 100 attacks and promotions, including casualties and morale changes, and show them in the battlefield sidebar.
 
+## Medieval tactical expansion (inspired by UFO: Enemy Unknown)
+
+- [ ] Add a throne-room mission where attackers must reach the throne and capture the living king; make the king a unit, define capture range/action and guards, and distinguish capture from killing him in victory/defeat rules.
+- [ ] Add catapults as crewed siege equipment with limited ammunition, aiming, firing and reload costs, projectile impacts, and damage to units or fortifications.
+- [ ] Add an editable medieval village with houses, lanes, fences, wells, and other cover; define movement, visibility, and combat interactions for its structures.
+- [ ] Let units enter and navigate houses and castles across multiple floors, including basements and dungeons; connect levels with doors, stairs, ladders, and passages, and account for walls and floors in movement and line of sight.
+- [ ] Make multi-level interiors readable and selectable in the isometric view with roof/floor cutaways and floor controls; allow routes from outside to rooms, upper floors, and underground spaces.
+- [ ] Add discoverable hidden doors and passages, plus traps that can be spotted, disarmed, avoided, or triggered; include their effects in server-validated movement and enemy behavior.
+- [ ] Let units pick up, drop, carry, and equip items from ground tiles, with inventory limits and turn-based action costs; make dropped gear recoverable after a casualty.
+- [ ] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
+- [ ] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage.
+- [ ] Make carried weight (including armor, weapons, and potions) affect movement-point costs or allowances, with clear limits and feedback before issuing orders.
+- [ ] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.
+- [ ] Give ground types such as roads, grass, mud, and swamp different movement costs and traversal rules for foot units and horses; have pathfinding choose routes by move-point cost, not just tile count.
+- [ ] Preview the exact path, terrain costs, and turns required while hovering or selecting a destination; update the preview for occupancy, equipment weight, and mounted status, and distinguish unreachable tiles.
+- [ ] Let units reserve move/fight points for reactions during the enemy turn, such as a bow shot or melee strike when a visible enemy enters range; show the reserved cost and eligible trigger area.
+- [ ] Add fog of war and night battles: reveal only what allied units can see, and let torches, watchfires, and daylight affect detection and ambushes without revealing hidden enemies to the player.
+- [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
+- [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
+- [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.
+- [ ] Support withdrawing surviving units through a designated exit and show a mission debrief with casualties, rescued villagers, prisoners, and recovered equipment.
+- [ ] Add nonlethal capture of enemy commanders; use prisoners and recovered gear to reveal enemy plans or unlock new tactics and equipment through medieval interrogation and smithing.
+- [ ] Carry surviving units, their experience, wounds, and equipment between linked battles so retreat and recovery have lasting consequences.
+- [ ] Add a manageable camp or fortress with a smithy, infirmary, stores, and training ground for preparing units and crafting equipment between missions.
+- [ ] Add a regional campaign in which protecting villages earns supplies and noble support while ignored raids escalate and threaten later missions.
+
+Mechanics references: [UFO: Enemy Unknown gameplay](https://en.wikipedia.org/wiki/X-COM:_UFO_Defense#Gameplay), [terror missions](https://www.ufopaedia.org/Terror_Mission), [research](https://www.ufopaedia.org/Research), and [persistent soldiers](https://www.ufopaedia.org/Soldiers).
+
 ## Asset creation
 
 - [ ] Set an original visual direction, palette, tile scale, and asset naming/manifest conventions.
