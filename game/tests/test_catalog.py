@@ -1,3 +1,4 @@
+from django.contrib.staticfiles import finders
 from django.test import TestCase
 from django.urls import reverse
 
@@ -83,3 +84,5 @@ class GameCatalogApiTests(TestCase):
         self.assertContains(response, "static/game/site.webmanifest")
         self.assertContains(response, 'id="pause-game" type="button" aria-pressed="false"')
         self.assertContains(response, '<label for="animation-speed">Animation speed</label>')
+        self.assertContains(response, "static/game/game.js")
+        self.assertIsNotNone(finders.find("game/renderer.js"))

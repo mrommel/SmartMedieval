@@ -189,6 +189,34 @@ class GameInstanceApiTests(TestCase):
         self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
         self.assertNotIn("combat_events", GameInstance.objects.get(pk=started["id"]).state)
 
+    def test_cover_blocks_one_shot_across_saved_actions(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 5, "y": 4, "type": "rock"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][2].update(x=3, y=5)
+        instance.state["units"][6].update(x=6, y=5)
+        instance.save(update_fields=["state"])
+
+        action = lambda unit_id: {"type": "ranged_attack", "unit_id": unit_id, "target_id": 6}
+        blocked = self.action(0, action(2))
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(blocked.json()["state"]["units"][6]["health"], 3)
+        self.assertEqual(blocked.json()["state"]["history"][0]["cover"], "rock")
+        self.assertEqual(blocked.json()["state"]["units"][6]["cover_turn"], 1)
+        self.assertEqual(len(blocked.json()["combat_events"]), 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["history"],
+                         blocked.json()["state"]["history"])
+
+        second = self.action(1, action(3))
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["state"]["units"][6]["health"], 2)
+        self.assertEqual(second.json()["state"]["history"][1]["damage"], 1)
+        self.assertNotIn("cover", second.json()["state"]["history"][1])
+
     def test_defender_turn_reports_multiple_shots_even_when_a_target_dies(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])

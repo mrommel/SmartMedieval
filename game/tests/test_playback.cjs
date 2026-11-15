@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const path = require("node:path");
 
 const script = fs.readFileSync(path.join(__dirname, "../static/game/game.js"), "utf8");
+const rendererScript = fs.readFileSync(path.join(__dirname, "../static/game/renderer.js"), "utf8");
 
 function element() {
   const listeners = {};
@@ -61,7 +62,7 @@ function setup(savedSpeed = null) {
     querySelector: () => ({ content: "csrf" }),
     querySelectorAll: () => []
   };
-  vm.runInNewContext(script, {
+  const context = {
     document, window, performance: { now: () => 0 },
     requestAnimationFrame: callback => { nextFrame = callback; },
     setTimeout: () => 1, clearTimeout() {},
@@ -72,12 +73,54 @@ function setup(savedSpeed = null) {
       }
       return { ok: true, headers: { get: () => "application/json" }, json: async () => snapshot };
     }
-  });
+  };
+  vm.runInNewContext(rendererScript.replace("export function", "function") +
+    "\nthis.createBattlefieldRenderer = createBattlefieldRenderer;", context);
+  vm.runInNewContext(script.replace('import { createBattlefieldRenderer } from "./renderer.js";', ""), context);
   return {
     get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
-    frame: time => nextFrame(time)
+    frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer
   };
 }
+
+test("renderer projects raised tiles and draws updated maps independently", () => {
+  const game = setup();
+  const renderer = game.createRenderer(game.get("battlefield-canvas"));
+  renderer.setLayout({ width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 });
+  renderer.setMap({ cols: 4, rows: 4, keep: { left: 1, right: 2, top: 1, bottom: 2 },
+    gate: { x: 1, y: 2 }, objective: { x: 2, y: 2 },
+    elevation: [{ x: 0, y: 1, height: 1, access: "ramp" }],
+    objects: [{ x: 3, y: 1, type: "tree" }] });
+  assert.equal(renderer.tileHeight(0, 1), 1);
+  assert.equal(renderer.project(0, 1).y, 86);
+  assert.equal(renderer.isWall(2, 1), true);
+  assert.equal(renderer.isWall(1, 2), false);
+  renderer.draw(0, { simulation: { units: [], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
+    hasAttackOption: () => false });
+  assert.equal(game.draws(), 1);
+  renderer.setMap({ cols: 4, rows: 4, keep: { left: 1, right: 2, top: 1, bottom: 2 },
+    gate: { x: 1, y: 2 }, objective: { x: 2, y: 2 } });
+  assert.equal(renderer.project(0, 1).y, 114);
+  renderer.draw(0, { simulation: { units: [], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
+    hasAttackOption: () => false });
+  assert.equal(game.draws(), 2);
+});
+
+test("pointer orders still pick the raised surface rather than its ground tile", async () => {
+  const game = setup();
+  game.snapshot.map.elevation = [{ x: 0, y: 1, height: 1, access: "ramp" }];
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const event = { button: 0, pointerId: 1, clientX: 268, clientY: 187.2 };
+  canvas.fire("pointerdown", event);
+  canvas.fire("pointerup", event);
+  assert.equal(game.actions.at(-1).type, "move");
+  assert.equal(game.actions.at(-1).x, 0);
+  assert.equal(game.actions.at(-1).y, 1);
+});
 
 test("pause blocks orders and freezes the animation clock until resumed", async () => {
   const game = setup();
@@ -132,6 +175,12 @@ test("combat history renders on resume and updates after an action", async () =>
   await game.get("end-turn").fire("click");
   assert.equal(list.children.length, 2);
   assert.match(list.children[1].textContent, /Turn 2.*shot attacker vanguard #1 for 1 damage \(fallen\).*Morale: #2 \+1/);
+  game.snapshot.state.history.push({ turn: 3, type: "ranged_attack", actor_id: 1,
+    actor_side: "defenders", actor_type: "longbow", target_id: 0,
+    target_side: "attackers", target_type: "vanguard", damage: 0, killed: false,
+    cover: "wall", morale_changes: [] });
+  await game.get("end-turn").fire("click");
+  assert.match(list.children[2].textContent, /0 damage \(wall cover blocked the shot\)/);
 });
 
 test("keyboard cursor selects groups, moves, attacks, and cannot order while paused", async () => {

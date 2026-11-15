@@ -259,6 +259,25 @@ def fight_allowance(unit):
     return FIGHT_POINTS + (unit.get("rank") == "veteran")
 
 
+def ranged_cover(attacker, target, map_data):
+    """Find ground cover adjoining the target on the shooter's side."""
+    if target["z"] != 0:
+        return None
+    objects = {(obj["x"], obj["y"]): obj["type"] for obj in map_data.get("objects", ())}
+    for x in range(target["x"] - 1, target["x"] + 2):
+        for y in range(target["y"] - 1, target["y"] + 2):
+            if (x, y) == (target["x"], target["y"]):
+                continue
+            if ((x - target["x"]) * (attacker["x"] - target["x"])
+                    + (y - target["y"]) * (attacker["y"] - target["y"]) <= 0):
+                continue
+            if is_wall(x, y, map_data):
+                return "wall"
+            if (x, y) in objects:
+                return objects[x, y]
+    return None
+
+
 def record_casualty(state, killer, casualty):
     """A kill rallies its victor; nearby surviving comrades lose heart."""
     morale_changes = []
@@ -277,10 +296,14 @@ def record_casualty(state, killer, casualty):
     return morale_changes
 
 
-def record_attack(state, attacker, target, ranged):
+def record_attack(state, attacker, target, ranged, map_data=MAP):
     """Resolve damage and retain a compact, chronological account of combat."""
-    damage = min(ATTACK_DAMAGE, target["health"])
-    target["health"] -= ATTACK_DAMAGE
+    cover = (ranged_cover(attacker, target, map_data)
+             if ranged and target.get("cover_turn") != state["turn"] else None)
+    if cover:
+        target["cover_turn"] = state["turn"]
+    damage = min(0 if cover else ATTACK_DAMAGE, target["health"])
+    target["health"] -= damage
     killed = target["health"] <= 0
     morale_changes = record_casualty(state, attacker, target) if killed else []
     state["history"] = (state["history"] + [{
@@ -289,7 +312,7 @@ def record_attack(state, attacker, target, ranged):
         "actor_type": attacker["type"], "target_id": target["id"],
         "target_side": target.get("side", "attackers"), "target_type": target["type"],
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
-    }])[-HISTORY_LIMIT:]
+    } | ({"cover": cover} if cover else {})])[-HISTORY_LIMIT:]
 
 
 def defender_destinations(unit, map_data=MAP, blocked=()):
@@ -502,7 +525,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
               or attacker["z"] != target["z"]):
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
-        record_attack(next_state, attacker, target, ranged)
+        record_attack(next_state, attacker, target, ranged, map_data)
         return next_state
 
     if action["type"] == "end_turn":
@@ -563,7 +586,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                         "from": {"x": defender["x"], "y": defender["y"]},
                         "to": {"x": target["x"], "y": target["y"]},
                     })
-            record_attack(next_state, defender, target, ranged)
+            record_attack(next_state, defender, target, ranged, map_data)
         next_state["defeated"] = not any(
             unit.get("side", "attackers") == "attackers" for unit in next_state["units"]
         )

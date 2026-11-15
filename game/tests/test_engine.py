@@ -325,6 +325,68 @@ class TurnEngineTests(TestCase):
             1,
         )
 
+    def test_gate_walls_block_first_ranged_hit_from_outside_not_inside(self):
+        state = initial_state()
+        state["units"][2].update(x=14, y=11)
+        state["units"][6].update(x=14, y=9)
+        blocked = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertEqual(blocked["units"][6]["health"], 3)
+        self.assertEqual(blocked["units"][2]["fight_points"], 0)
+        self.assertEqual(blocked["units"][2]["reload_turns"], 2)
+        self.assertEqual(blocked["history"][-1]["cover"], "wall")
+        self.assertEqual(blocked["history"][-1]["damage"], 0)
+        self.assertNotIn("cover_turn", state["units"][6])
+
+        state["units"][2].update(x=14, y=8)
+        clear = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertEqual(clear["units"][6]["health"], 2)
+        self.assertNotIn("cover", clear["history"][-1])
+
+    def test_tree_and_rock_cover_block_only_one_ranged_shot_per_turn(self):
+        for kind in ("tree", "rock"):
+            with self.subTest(kind=kind):
+                battlefield = default_map()
+                battlefield["objects"] = [{"x": 5, "y": 4, "type": kind}]
+                state = initial_state(battlefield)
+                state["units"][2].update(x=3, y=5)
+                state["units"][6].update(x=6, y=5)
+                action = lambda unit_id: {"type": "ranged_attack", "unit_id": unit_id, "target_id": 6}
+                state = apply_action(state, action(2), battlefield)
+                self.assertEqual(state["history"][-1]["cover"], kind)
+                state = apply_action(state, action(3), battlefield)
+                self.assertEqual(state["units"][6]["health"], 2)
+                self.assertNotIn("cover", state["history"][-1])
+                state = apply_action(state, {"type": "end_turn"}, battlefield)
+                state = apply_action(state, {"type": "end_turn"}, battlefield)
+                state = apply_action(state, action(2), battlefield)
+                self.assertEqual(state["history"][-1]["cover"], kind)
+                self.assertEqual(state["units"][6]["health"], 2)
+
+    def test_cover_protects_attackers_but_not_against_melee_or_on_high_ground(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 5, "y": 4, "type": "tree"}]
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][0], state["units"][6]]
+        state["units"][0].update(x=6, y=5)
+        state["units"][1].update(x=3, y=5, type="longbow")
+        blocked = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(blocked["units"][0]["health"], 3)
+        self.assertEqual(blocked["history"][-1]["cover"], "tree")
+
+        state["units"][1].update(x=6, y=6, type="vanguard")
+        struck = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(struck["units"][0]["health"], 2)
+        self.assertNotIn("cover", struck["history"][-1])
+
+        raised = default_map()
+        raised["objects"] = battlefield["objects"]
+        raised["elevation"] = [{"x": 6, "y": 5, "height": 1, "access": "ramp"}]
+        state = initial_state(raised)
+        state["units"][2].update(x=3, y=5)
+        state["units"][6].update(x=6, y=5, z=1)
+        result = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, raised)
+        self.assertEqual(result["units"][6]["health"], 2)
+
     def test_defender_counterattacks_and_can_defeat_the_attacking_company(self):
         state = initial_state()
         attacker, defender = state["units"][0], state["units"][6]

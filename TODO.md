@@ -21,7 +21,7 @@
 
 - [ ] Separate simulation state, input, pathfinding, rendering, and UI so each can evolve without coupling.
   - [x] Move prototype state, movement, capture, and pathfinding out of the browser UI into a testable server engine.
-  - [ ] Move battlefield rendering behind a renderer module.
+  - [x] Move battlefield rendering behind a renderer module.
   - [ ] Isolate pointer/camera input and launch/catalog UI.
 - [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
   - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
@@ -39,7 +39,8 @@
   - [x] Animate arrows and bolts as projectiles.
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
   - [x] Keep a nearby garrison at the objective during AI movement and target capturing attackers first.
-  - [ ] Add cover and wall advantages and tune the encounter.
+  - [x] Add wall, tree, and rock cover against ranged attacks with combat feedback.
+  - [ ] Tune the encounter.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
   - [x] Add pause/resume, locally saved animation-speed controls, reduced-motion support, and damage/casualty feedback.
   - [x] Add keyboard-accessible battlefield orders.
