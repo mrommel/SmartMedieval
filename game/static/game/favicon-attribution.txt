@@ -1,0 +1,4 @@
+Favicon artwork: Twitter Twemoji, graphic 1f3f0.svg.
+Copyright 2020 Twitter, Inc. and other contributors.
+Source: https://github.com/twitter/twemoji/blob/v14.0.2/assets/svg/1f3f0.svg
+License: CC BY 4.0, https://creativecommons.org/licenses/by/4.0/

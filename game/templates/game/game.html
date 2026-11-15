@@ -1,0 +1,133 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17231f">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Siege of Greywatch</title>
+  <link rel="icon" href="{% static 'game/favicon.ico' %}" sizes="any">
+  <link rel="icon" type="image/png" sizes="16x16" href="{% static 'game/favicon-16x16.png' %}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'game/favicon-32x32.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'game/apple-touch-icon.png' %}">
+  <link rel="manifest" href="{% static 'game/site.webmanifest' %}">
+  <link rel="stylesheet" href="{% static 'game/game.css' %}">
+  <script src="{% static 'game/game.js' %}" type="module"></script>
+</head>
+<body>
+  <div class="experience">
+    <section class="launch-screen" id="start-screen" aria-labelledby="start-title">
+      <div class="launch-card">
+        <a class="brand launch-brand" href="/" aria-label="Siege of Greywatch home">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span><strong>GREYWATCH</strong><small>THE BORDERLANDS · 1348</small></span>
+        </a>
+        <p class="eyebrow">A MEDIEVAL SIEGE STRATEGY GAME</p>
+        <h1 id="start-title">Siege of Greywatch</h1>
+        <p class="launch-copy">Lead your company through the southern gate and claim the keep.</p>
+        <button class="launch-primary" id="play-game" type="button">Play game</button>
+        <button class="launch-primary" id="continue-game" type="button" hidden>Continue game</button>
+        <p id="launch-error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <section class="launch-screen" id="main-menu" aria-labelledby="menu-title" hidden>
+      <div class="launch-card menu-card">
+        <p class="eyebrow">GREYWATCH · MAIN MENU</p>
+        <h1 id="menu-title">Choose your battle</h1>
+        <p class="launch-copy">Begin a story-led scenario or jump into a standalone game.</p>
+        <div class="menu-options">
+          <button class="menu-option" type="button" data-catalog="scenarios">
+            <span class="menu-option-icon" aria-hidden="true">✦</span>
+            <span><strong>Scenarios</strong><small>Follow a siege story</small></span>
+            <span class="menu-chevron" aria-hidden="true">›</span>
+          </button>
+          <button class="menu-option" type="button" data-catalog="single-games">
+            <span class="menu-option-icon" aria-hidden="true">⚔</span>
+            <span><strong>Single games</strong><small>Choose a standalone battle</small></span>
+            <span class="menu-chevron" aria-hidden="true">›</span>
+          </button>
+        </div>
+        {% if request.user.is_staff %}
+        <a class="menu-back" href="{% url 'admin:index' %}">Edit games &amp; scenarios</a>
+        {% endif %}
+        <button class="menu-back" id="menu-back" type="button">Back</button>
+      </div>
+    </section>
+
+    <section class="launch-screen" id="catalog-screen" aria-labelledby="catalog-title" hidden>
+      <div class="launch-card catalog-card">
+        <button class="menu-back" id="catalog-back" type="button">‹ Main menu</button>
+        <p class="eyebrow" id="catalog-kicker">AVAILABLE BATTLES</p>
+        <h1 id="catalog-title">Scenarios</h1>
+        <div class="catalog-list" id="catalog-list" aria-live="polite"></div>
+      </div>
+    </section>
+
+  <div class="game-shell" id="game-screen" hidden>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Siege of Greywatch home">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span><strong>GREYWATCH</strong><small>THE BORDERLANDS · 1348</small></span>
+      </a>
+      <div class="mission"><span class="mission-dot"></span><span id="mission-label">ASSAULT THE STRONGPOINT</span></div>
+      <button class="restart-button" id="main-menu-button" type="button">Main menu</button>
+      <button class="restart-button" id="restart" type="button"><span aria-hidden="true">↻</span> Restart</button>
+    </header>
+
+    <section class="battlefield" aria-label="Isometric siege battlefield">
+      <div class="battlefield-heading">
+        <div><p class="eyebrow">THE NORTHERN MARCH</p><h1 id="game-title">Siege of Greywatch</h1></div>
+        <div class="daylight"><span aria-hidden="true">◷</span> FIRST LIGHT <i></i> CLEAR SKIES</div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="battlefield-canvas" tabindex="0" aria-label="Battlefield. Click a soldier to select, then click the ground to move. Blue soldiers are defenders and cannot be selected. Hold shift to select more soldiers. Drag to pan; use the mouse wheel or zoom buttons to zoom."></canvas>
+        <div class="camera-controls" aria-label="Camera controls">
+          <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+          <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+        </div>
+        <div class="objective-label"><span></span> KEEP COURTYARD</div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <div class="victory" id="victory" hidden>
+          <div class="victory-card">
+            <span class="victory-kicker">GREYWATCH HAS FALLEN</span>
+            <h2>The keep is yours.</h2>
+            <p>Your small band has secured the courtyard.</p>
+            <button id="victory-restart" type="button">Play again</button>
+          </div>
+        </div>
+        <div class="map-coordinates" aria-hidden="true">N 51° 42′ &nbsp; W 02° 18′</div>
+      </div>
+      <footer class="battlefield-footer">
+        <div class="army-readout"><span class="readout-icon">♟</span><span><b id="soldier-count">06 / 06</b><small>YOUR COMPANY</small></span></div>
+        <div class="objective-readout">
+          <div class="objective-copy"><span><i></i> OBJECTIVE</span><b id="objective-status">UNCLAIMED</b></div>
+          <div class="progress-track"><div id="capture-progress"></div></div>
+        </div>
+        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="end-turn" type="button">End turn</button></div>
+        <div class="order-readout"><span class="order-key">LMB</span><span>SELECT &amp; ORDER</span><span class="order-key">SHIFT</span><span>ADD TO GROUP</span></div>
+      </footer>
+    </section>
+
+    <aside class="briefing">
+      <div class="briefing-title"><span>FIELD NOTES</span><span class="note-seal">✳</span></div>
+      <p class="briefing-copy" id="briefing-copy">A lean garrison holds the keep. Get your company through the open south gate and occupy the courtyard.</p>
+      <div class="roster">
+        <div class="roster-heading">YOUR COMPANY <span id="roster-count">6 SOLDIERS</span></div>
+        <div id="roster-list"></div>
+        <div class="enemy-roster">GREYWATCH GARRISON <span id="enemy-count">0 DEFENDERS</span></div>
+      </div>
+      <div class="howto">
+        <div class="roster-heading">HOW TO PLAY</div>
+        <p><kbd>Click</kbd> a soldier to select. <kbd>Shift</kbd> + click to add or remove a soldier.</p>
+        <p>Click open ground to spend selected soldiers' move points. End the turn to let the blue defenders move, restore your points, and advance courtyard capture. Defenders cannot fight or occupy the objective yet.</p>
+        <p>Drag the battlefield to pan. Use the mouse wheel or the zoom buttons to zoom.</p>
+      </div>
+      <div class="field-quote"><span>“</span><p>Hold the gate. Take the yard.<br>We have no men to spare.</p><small>— CAPTAIN ALDWYN</small></div>
+    </aside>
+    <div class="page-foot"><span>AN ISOMETRIC SIEGE PROTOTYPE</span><span>GREYWATCH · 1348</span></div>
+  </div>
+  </div>
+</body>
+</html>
