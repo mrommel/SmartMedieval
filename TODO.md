@@ -27,6 +27,7 @@
   - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
   - [x] Keep units on distinct tiles during movement and prevent paths through occupied tiles.
   - [ ] Add multiple strongpoints and terrain collision beyond keep walls.
+  - [ ] Add editable map objects such as trees and rocks, with rendering and appropriate movement and line-of-sight collision.
 - [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.
 - [ ] Complete unit stats and turn-based combat rules.
@@ -44,7 +45,7 @@
 ## Asset creation
 
 - [ ] Set an original visual direction, palette, tile scale, and asset naming/manifest conventions.
-- [ ] Create terrain, road, wall, gate, tower, castle moat, drawbridge, battlements, courtyard, and objective art as modular isometric tiles.
+- [ ] Create terrain, road, wall, gate, tower, castle moat, drawbridge, battlements, courtyard, objective, tree, and rock art as modular isometric tiles and objects.
 - [ ] Create original directional attacker/defender sprites with idle, walk, attack, hit, and defeat animations.
 - [ ] Create weapons, arrows/bolts, selection indicators, health bars, UI icons, and lightweight combat audio.
 - [ ] Keep editable source assets, optimized browser exports, and a record of licenses/attributions for any external material.
