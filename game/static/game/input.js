@@ -52,6 +52,7 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     }
     const houseTiles = [];
     for (const house of getMap().houses || []) {
+      if (house.door) continue; // Roof-cutaway interiors are picked at ground level.
       for (let y = house.top; y <= house.bottom; y++) {
         for (let x = house.left; x <= house.right; x++) houseTiles.push({ x, y });
       }

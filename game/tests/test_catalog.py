@@ -16,9 +16,39 @@ class GameCatalogApiTests(TestCase):
         scenario = Scenario.objects.get(slug="through-the-hamlet")
         self.assertEqual(list(scenario.games.all()), [game])
         self.assertEqual(len(game.map_definition["houses"]), 2)
+        self.assertEqual([house["door"] for house in game.map_definition["houses"]],
+                         [{"x": 7, "y": 4}, {"x": 7, "y": 10}])
         validate_map(game.map_definition)
         self.assertEqual(len(initial_state(game.map_definition)["units"]), 7)
         self.assertIn(game.name, [entry["name"] for entry in self.client.get(reverse("single-games-api")).json()])
+
+    def test_house_door_upgrade_preserves_custom_maps_and_active_matches(self):
+        upgrade = import_module("game.migrations.0008_hamlet_house_doors")
+        game = SingleGame.objects.get(slug="greywatch-hamlet")
+        upgraded = deepcopy(game.map_definition)
+        previous = deepcopy(upgrade.PREVIOUS_HAMLET)
+        game.map_definition = previous
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(
+            single_game=game, source_game=game,
+            map_definition=deepcopy(previous), state=initial_state(previous),
+        )
+        upgrade.open_seeded_houses(apps, None)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition, upgraded)
+        self.assertEqual(match.map_definition, previous)
+        upgrade.open_seeded_houses(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, upgraded)
+
+        custom = deepcopy(previous)
+        custom["houses"][0]["left"] = 5
+        game.map_definition = custom
+        game.save(update_fields=["map_definition"])
+        upgrade.open_seeded_houses(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, custom)
 
     def test_assault_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0006_tune_greywatch_assault")

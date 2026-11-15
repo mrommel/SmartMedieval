@@ -139,11 +139,29 @@ import { createLaunchUI } from "./launch.js";
 
   function isWalkable(x, y) {
     return x >= 0 && x < COLS && y >= 0 && y < ROWS &&
-      !renderer.isWall(x, y) && !renderer.isHouse(x, y) && !objects.has(`${x},${y}`);
+      !renderer.isWall(x, y) && (!renderer.isHouse(x, y) || renderer.isEnterableHouse(x, y)) &&
+      !objects.has(`${x},${y}`);
   }
 
-  function blocksSight(x, y) {
-    return renderer.isWall(x, y) || renderer.isHouse(x, y) ||
+  function houseAt(x, y) {
+    return mapData?.houses?.findIndex(house => house.door && x >= house.left && x <= house.right &&
+      y >= house.top && y <= house.bottom) ?? -1;
+  }
+
+  function canMeleeAttack(attacker, target) {
+    if (Math.abs(attacker.x - target.x) + Math.abs(attacker.y - target.y) !== 1 ||
+        renderer.tileHeight(attacker.x, attacker.y) !== renderer.tileHeight(target.x, target.y)) return false;
+    const from = houseAt(attacker.x, attacker.y), to = houseAt(target.x, target.y);
+    if (from === to) return true;
+    if (from >= 0 && to >= 0) return false;
+    const house = mapData.houses[from < 0 ? to : from];
+    return (from < 0 ? target.x === house.door.x && target.y === house.door.y :
+      attacker.x === house.door.x && attacker.y === house.door.y);
+  }
+
+  function blocksSight(x, y, interior = -1) {
+    return renderer.isWall(x, y) || (renderer.isHouse(x, y) &&
+      (interior < 0 || houseAt(x, y) !== interior)) ||
       (objects.has(`${x},${y}`) && objects.get(`${x},${y}`).type !== "fence");
   }
 
@@ -163,8 +181,7 @@ import { createLaunchUI } from "./launch.js";
     }
     const selected = simulation.units.filter(unit => simulation.selected.has(unit.id));
     const melee = selected.find(unit => unit.type === "vanguard" && unit.fight_points > 0 &&
-      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1 &&
-      renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(target.x, target.y));
+      canMeleeAttack(unit, target));
     const ranged = selected.find(unit => unit.type !== "vanguard" && unit.fight_points > 0 &&
       !(unit.reload_turns > 0) && canRangedAttack(unit, target));
     const attacker = melee || ranged;
@@ -178,6 +195,8 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function hasLineOfSight(start, end) {
+    const interior = houseAt(...start);
+    if (interior !== houseAt(...end)) return false;
     let [x, y] = start;
     const [targetX, targetY] = end;
     const dx = targetX - x, dy = targetY - y;
@@ -189,14 +208,14 @@ import { createLaunchUI } from "./launch.js";
       const horizontal = (1 + 2 * ix) * ny;
       const vertical = (1 + 2 * iy) * nx;
       if (horizontal === vertical) {
-        if (ix < nx && iy < ny && (blocksSight(x + stepX, y) || blocksSight(x, y + stepY))) return false;
+        if (ix < nx && iy < ny && (blocksSight(x + stepX, y, interior) || blocksSight(x, y + stepY, interior))) return false;
         x += stepX; y += stepY; ix++; iy++;
       } else if (horizontal < vertical) {
         x += stepX; ix++;
       } else {
         y += stepY; iy++;
       }
-      if ((x !== targetX || y !== targetY) && blocksSight(x, y)) return false;
+      if ((x !== targetX || y !== targetY) && blocksSight(x, y, interior)) return false;
     }
     return true;
   }
@@ -211,8 +230,7 @@ import { createLaunchUI } from "./launch.js";
   function hasAttackOption(target) {
     return simulation.units.some(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
       unit.fight_points > 0 && (unit.type === "vanguard"
-        ? Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1 &&
-          renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(target.x, target.y)
+        ? canMeleeAttack(unit, target)
         : !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
   }
 
@@ -223,6 +241,8 @@ import { createLaunchUI } from "./launch.js";
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
       : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
         objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" :
+        renderer.isHouseDoor(cursor.x, cursor.y) ? "house door" :
+        renderer.isEnterableHouse(cursor.x, cursor.y) ? "house interior" :
         renderer.isHouse(cursor.x, cursor.y) ? "house" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
         ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" :
         mapData?.lanes?.some(tile => tile.x === cursor.x && tile.y === cursor.y) ? "lane" : "open ground")}.`;
@@ -291,7 +311,7 @@ import { createLaunchUI } from "./launch.js";
     document.getElementById("objective-name").textContent = throneMission ? "THRONE ROOM" : "KEEP COURTYARD";
     document.getElementById("mission-help").textContent = throneMission
       ? "Reach the throne room. Defeat guards beside the king, then select a vanguard on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
-      : "Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
+      : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));

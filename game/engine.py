@@ -106,8 +106,9 @@ def validate_map(map_data):
     if not isinstance(houses, list) or len(houses) > 32:
         raise InvalidMap("Houses must be a list of at most 32 rectangular footprints.")
     for house in houses:
-        if (not isinstance(house, dict) or set(house) != {"left", "right", "top", "bottom"}
-                or any(type(value) is not int for value in house.values())
+        if (not isinstance(house, dict) or set(house) not in (
+                {"left", "right", "top", "bottom"}, {"left", "right", "top", "bottom", "door"})
+                or any(type(house[key]) is not int for key in ("left", "right", "top", "bottom"))
                 or not (0 <= house["left"] < house["right"] < cols
                         and 0 <= house["top"] < house["bottom"] < rows)
                 or house["right"] - house["left"] > 3 or house["bottom"] - house["top"] > 3
@@ -115,6 +116,12 @@ def validate_map(map_data):
                        and house["top"] <= other["bottom"] and other["top"] <= house["bottom"]
                        for other in rectangles)):
             raise InvalidMap("Houses must be distinct 2-4 tile rectangles outside keeps and strongpoints.")
+        if "door" in house:
+            door = house["door"]
+            if (not isinstance(door, dict) or set(door) != {"x", "y"}
+                    or type(door["x"]) is not int or type(door["y"]) is not int
+                    or not is_rectangle_edge(door["x"], door["y"], house)):
+                raise InvalidMap("A house door needs a perimeter tile.")
         rectangles.append(house)
     objects = map_data.get("objects", [])
     if not isinstance(objects, list) or len(objects) > 256:
@@ -131,6 +138,11 @@ def validate_map(map_data):
                 or (obj["x"], obj["y"]) in object_tiles):
             raise InvalidMap("Objects must be unique open tiles with type tree, rock, fence or well, away from the gate.")
         object_tiles.add((obj["x"], obj["y"]))
+    for house in houses:
+        if "door" in house and not any(
+                is_walkable(x, y, map_data) for x, y in neighbors(house["door"]["x"], house["door"]["y"])
+                if not is_house(x, y, map_data)):
+            raise InvalidMap("A house door needs an unobstructed exterior neighbor.")
     elevation = map_data.get("elevation", [])
     if not isinstance(elevation, list) or len(elevation) > cols * rows:
         raise InvalidMap("Elevation must be a list of tiles inside the map.")
@@ -142,6 +154,7 @@ def validate_map(map_data):
                 or not 1 <= tile["height"] <= 3
                 or ("access" in tile and tile["access"] not in ("ladder", "ramp"))
                 or (tile["x"], tile["y"]) in object_tiles
+                or is_house(tile["x"], tile["y"], map_data)
                 or not is_walkable(tile["x"], tile["y"], map_data)
                 or (tile["x"], tile["y"]) in seen):
             raise InvalidMap("Elevated tiles must be unique open tiles with height 1-3 and optional ladder or ramp access.")
@@ -153,13 +166,14 @@ def validate_map(map_data):
     for lane in lanes:
         if (not isinstance(lane, dict) or set(lane) != {"x", "y"}
                 or any(type(value) is not int for value in lane.values())
+                or is_house(lane["x"], lane["y"], map_data)
                 or not is_walkable(lane["x"], lane["y"], map_data)
                 or (lane["x"], lane["y"]) in seen
                 or (lane["x"], lane["y"]) in seen_lanes):
             raise InvalidMap("Lanes must be unique open ground tiles without elevation.")
         seen_lanes.add((lane["x"], lane["y"]))
     objective = map_data["objective"]
-    if not is_walkable(objective["x"], objective["y"], map_data):
+    if is_house(objective["x"], objective["y"], map_data) or not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
     if mission == "capture_king" and not (keep["left"] < objective["x"] < keep["right"]
                                           and keep["top"] < objective["y"] < keep["bottom"]):
@@ -179,6 +193,7 @@ def validate_map(map_data):
                     or position["type"] not in (("vanguard", "longbow", "crossbow", "king")
                                                 if name == "enemyStartPositions" and mission == "capture_king"
                                                 else ("vanguard", "longbow", "crossbow"))
+                    or is_house(position["x"], position["y"], map_data)
                     or not is_walkable(position["x"], position["y"], map_data)):
                 raise InvalidMap("Every starting unit needs an open tile and a supported type.")
             tile = (position["x"], position["y"])
@@ -204,6 +219,7 @@ def validate_map(map_data):
     for point in catapults:
         if (not isinstance(point, dict) or set(point) != {"x", "y"}
                 or type(point["x"]) is not int or type(point["y"]) is not int
+                or is_house(point["x"], point["y"], map_data)
                 or not is_walkable(point["x"], point["y"], map_data)
                 or tile_height(point["x"], point["y"], map_data) != 0
                 or (point["x"], point["y"]) == (objective["x"], objective["y"])
@@ -245,15 +261,22 @@ def is_house(x, y, map_data=MAP):
                for house in map_data.get("houses", ()))
 
 
-def blocks_sight(x, y, map_data=MAP):
-    return (is_wall(x, y, map_data) or is_house(x, y, map_data)
+def house_at(x, y, map_data=MAP):
+    return next((index for index, house in enumerate(map_data.get("houses", ()))
+                 if house["left"] <= x <= house["right"] and house["top"] <= y <= house["bottom"]
+                 and "door" in house), None)
+
+
+def blocks_sight(x, y, map_data=MAP, interior=None):
+    return (is_wall(x, y, map_data) or (is_house(x, y, map_data)
+            and (interior is None or house_at(x, y, map_data) != interior))
             or any(obj["x"] == x and obj["y"] == y and obj["type"] != "fence"
                    for obj in map_data.get("objects", ())))
 
 
 def is_walkable(x, y, map_data=MAP):
     return (0 <= x < map_data["cols"] and 0 <= y < map_data["rows"]
-            and not is_wall(x, y, map_data) and not is_house(x, y, map_data)
+            and not is_wall(x, y, map_data) and (not is_house(x, y, map_data) or house_at(x, y, map_data) is not None)
             and not is_object(x, y, map_data))
 
 
@@ -271,6 +294,14 @@ def tile_height(x, y, map_data=MAP, elevations=None):
 def can_step(start, end, map_data=MAP, elevations=None):
     if not is_walkable(*end, map_data):
         return False
+    before_house = house_at(*start, map_data)
+    after_house = house_at(*end, map_data)
+    if before_house != after_house:
+        if before_house is not None and after_house is not None:
+            return False
+        house = map_data["houses"][before_house if before_house is not None else after_house]
+        if (start if before_house is not None else end) != (house["door"]["x"], house["door"]["y"]):
+            return False
     before = tile_height(*start, map_data, elevations)
     after = tile_height(*end, map_data, elevations)
     if before == after:
@@ -287,6 +318,9 @@ def can_step(start, end, map_data=MAP, elevations=None):
 
 def has_line_of_sight(start, end, map_data=MAP):
     """Return whether a tile-center ray reaches its target without crossing cover."""
+    interior = house_at(*start, map_data)
+    if interior != house_at(*end, map_data):
+        return False
     x, y = start
     target_x, target_y = end
     dx, dy = target_x - x, target_y - y
@@ -300,8 +334,8 @@ def has_line_of_sight(start, end, map_data=MAP):
         if horizontal == vertical:
             # At a corner, either adjoining obstacle blocks the shot.
             if ix < nx and iy < ny and (
-                    blocks_sight(x + step_x, y, map_data)
-                    or blocks_sight(x, y + step_y, map_data)):
+                    blocks_sight(x + step_x, y, map_data, interior)
+                    or blocks_sight(x, y + step_y, map_data, interior)):
                 return False
             x += step_x
             y += step_y
@@ -313,7 +347,7 @@ def has_line_of_sight(start, end, map_data=MAP):
         else:
             y += step_y
             iy += 1
-        if (x, y) != end and blocks_sight(x, y, map_data):
+        if (x, y) != end and blocks_sight(x, y, map_data, interior):
             return False
     return True
 
@@ -368,7 +402,7 @@ def fight_allowance(unit):
 
 def ranged_cover(attacker, target, map_data):
     """Find ground cover adjoining the target on the shooter's side."""
-    if target["z"] != 0:
+    if target["z"] != 0 or house_at(target["x"], target["y"], map_data) is not None:
         return None
     objects = {(obj["x"], obj["y"]): obj["type"] for obj in map_data.get("objects", ())}
     for x in range(target["x"] - 1, target["x"] + 2):
@@ -644,7 +678,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             if combat_events is not None:
                 combat_events.append({"type": "projectile", "weapon": "catapult",
                                       "from": {"x": catapult["x"], "y": catapult["y"]}, "to": target})
-            victim = next((other for other in next_state["units"] if (other["x"], other["y"]) == (x, y)), None)
+            victim = next((other for other in next_state["units"] if (other["x"], other["y"]) == (x, y)
+                           and house_at(x, y, map_data) is None), None)
             if victim:
                 record_attack(next_state, unit, victim, False, map_data, damage=2, weapon="catapult")
                 if map_data.get("mission") == "capture_king" and victim["type"] == "king" and victim["health"] <= 0:
@@ -746,7 +781,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                     "to": {"x": target["x"], "y": target["y"]},
                 })
         elif (abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1
-              or attacker["z"] != target["z"]):
+              or attacker["z"] != target["z"]
+              or not can_step((attacker["x"], attacker["y"]), (target["x"], target["y"]), map_data)):
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
         record_attack(next_state, attacker, target, ranged, map_data)
@@ -798,7 +834,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 if unit.get("side", "attackers") == "attackers"
                 and (can_ranged_attack(defender, unit, map_data) if ranged else
                      (abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1
-                      and unit["z"] == defender["z"]))
+                      and unit["z"] == defender["z"]
+                      and can_step((defender["x"], defender["y"]), (unit["x"], unit["y"]), map_data)))
             ]
             if not targets:
                 continue

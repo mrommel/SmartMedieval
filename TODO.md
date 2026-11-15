@@ -53,6 +53,7 @@
 - [x] Add catapults as crewed siege equipment with limited ammunition, aiming, firing and reload costs, projectile impacts, and damage to units or fortifications.
 - [x] Add an editable medieval village with houses, lanes, fences, wells, and other cover; define movement, visibility, and combat interactions for its structures (solid houses; entering buildings is the next milestone).
 - [ ] Let units enter and navigate houses and castles across multiple floors, including basements and dungeons; connect levels with doors, stairs, ladders, and passages, and account for walls and floors in movement and line of sight.
+  - [x] Add optional perimeter doors and walkable ground-floor house interiors with doorway-only movement, wall-aware combat and cutaway rendering; retain solid legacy houses.
 - [ ] Make multi-level interiors readable and selectable in the isometric view with roof/floor cutaways and floor controls; allow routes from outside to rooms, upper floors, and underground spaces.
 - [ ] Add discoverable hidden doors and passages, plus traps that can be spotted, disarmed, avoided, or triggered; include their effects in server-validated movement and enemy behavior.
 - [ ] Let units pick up, drop, carry, and equip items from ground tiles, with inventory limits and turn-based action costs; make dropped gear recoverable after a casualty.

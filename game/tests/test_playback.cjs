@@ -169,6 +169,82 @@ test("renderer draws village structures and clears house footprints when the map
   assert.equal(renderer.isHouse(1, 1), false);
 });
 
+test("enterable houses render as cutaway floors and pick tiles at ground level", () => {
+  const game = setup();
+  const canvas = game.get("battlefield-canvas");
+  const renderer = game.createRenderer(canvas);
+  const layout = { width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 };
+  const map = { cols: 6, rows: 6, keep: { left: 4, right: 5, top: 3, bottom: 5 },
+    gate: { x: 4, y: 4 }, objective: { x: 5, y: 4 },
+    houses: [{ left: 2, right: 3, top: 2, bottom: 3, door: { x: 2, y: 3 } }] };
+  renderer.setMap(map);
+  renderer.setLayout(layout);
+  assert.equal(renderer.isEnterableHouse(3, 2), true);
+  assert.equal(renderer.isHouseDoor(2, 3), true);
+  renderer.draw(0, { simulation: { units: [{ id: 1, x: 3, y: 2, health: 3,
+    max_health: 3, type: "vanguard", side: "attackers" }], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false }, hasAttackOption: () => false });
+  assert.equal(game.draws(), 1);
+  let ordered;
+  game.createInput({ canvas, renderer, simulation: { units: [], selected: new Set() },
+    getMap: () => map, getLayout: () => layout, canOrder: () => true,
+    isWalkable: () => true, isAiming: () => false, onAim() {},
+    onMove: (x, y) => { ordered = { x, y }; }, onAttack() {}, onSelection() {},
+    onBlocked() {}, onDraw() {}, onCursor() {} });
+  const floor = renderer.project(2, 3);
+  const event = { button: 0, pointerId: 1, clientX: floor.x, clientY: floor.y + layout.tileH / 2 };
+  canvas.fire("pointerdown", event);
+  canvas.fire("pointerup", event);
+  assert.deepEqual(ordered, { x: 2, y: 3 });
+  renderer.setMap({ ...map, houses: [] });
+  assert.equal(renderer.isEnterableHouse(3, 2), false);
+  assert.equal(renderer.isHouseDoor(2, 3), false);
+});
+
+test("keyboard can issue orders to a house door and interior", async () => {
+  const game = setup();
+  game.snapshot.map = { cols: 8, rows: 8,
+    keep: { left: 4, right: 7, top: 4, bottom: 7 }, gate: { x: 5, y: 7 },
+    objective: { x: 5, y: 5 }, startPositions: [{ x: 0, y: 2 }],
+    houses: [{ left: 1, right: 2, top: 2, bottom: 3, door: { x: 1, y: 2 } }] };
+  game.snapshot.state.units[0].y = 2;
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /house door/);
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  assert.equal(game.actions.at(-1).x, 1);
+  await new Promise(setImmediate);
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /house interior/);
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  assert.equal(game.actions.at(-1).x, 2);
+});
+
+test("combat previews allow doorway melee but not shots or melee through house walls", async () => {
+  for (const [weapon, y, expected] of [
+    ["vanguard", 2, "attack"], ["vanguard", 3, null], ["longbow", 2, null]
+  ]) {
+    const game = setup();
+    game.snapshot.map.houses = [{ left: 1, right: 2, top: 2, bottom: 3,
+      door: { x: 1, y: 2 } }];
+    game.snapshot.map.startPositions = [{ x: 0, y }];
+    game.snapshot.state.units[0].x = 0;
+    game.snapshot.state.units[0].y = y;
+    game.snapshot.state.units[0].type = weapon;
+    game.snapshot.state.units.push({ ...game.snapshot.state.units[0],
+      id: 1, x: 1, side: "defenders", type: "vanguard" });
+    await game.get("continue-game").fire("click");
+    const canvas = game.get("battlefield-canvas");
+    canvas.fire("focus");
+    canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+    canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+    assert.equal(game.actions.at(-1)?.type ?? null, expected, `${weapon} at row ${y}`);
+  }
+});
+
 test("clicking a house roof picks its footprint rather than ground behind it", () => {
   const game = setup();
   const canvas = game.get("battlefield-canvas");

@@ -6,6 +6,8 @@ export function createBattlefieldRenderer(canvas) {
   let raisedTiles = [];
   let objects = new Map();
   let houses = new Set();
+  let interiors = new Map();
+  let doors = new Set();
   let lanes = new Set();
   let breaches = new Set();
   let wallDamage = new Set();
@@ -20,9 +22,15 @@ export function createBattlefieldRenderer(canvas) {
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     objects = new Map((map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     houses = new Set();
-    for (const house of map.houses || []) {
+    interiors = new Map();
+    doors = new Set();
+    for (const [index, house] of (map.houses || []).entries()) {
+      if (house.door) doors.add(`${house.door.x},${house.door.y}`);
       for (let y = house.top; y <= house.bottom; y++) {
-        for (let x = house.left; x <= house.right; x++) houses.add(`${x},${y}`);
+        for (let x = house.left; x <= house.right; x++) {
+          houses.add(`${x},${y}`);
+          if (house.door) interiors.set(`${x},${y}`, index);
+        }
       }
     }
     lanes = new Set((map.lanes || []).map(tile => `${tile.x},${tile.y}`));
@@ -66,6 +74,14 @@ export function createBattlefieldRenderer(canvas) {
     return houses.has(`${x},${y}`);
   }
 
+  function isEnterableHouse(x, y) {
+    return interiors.has(`${x},${y}`);
+  }
+
+  function isHouseDoor(x, y) {
+    return doors.has(`${x},${y}`);
+  }
+
   function diamond(x, y, z = tileHeight(x, y)) {
     const p = project(x, y, z);
     return [
@@ -104,6 +120,16 @@ export function createBattlefieldRenderer(canvas) {
         const palette = path ? colors.path : colors.grass;
         polygon(tile, palette[hash(x, y) % palette.length], castle ? "rgba(53,53,43,.25)" : colors.grassLine, .7);
 
+        if (isEnterableHouse(x, y)) {
+          polygon(tile, "#b3a17e", "#6e5945", 1);
+          const center = project(x, y, 0);
+          ctx.fillStyle = isHouseDoor(x, y) ? "#f6d689" : "#796c54";
+          ctx.font = `bold ${Math.max(10, tileW * .2)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText(isHouseDoor(x, y) ? "D" : "·", center.x, center.y + tileH * .7);
+          continue;
+        }
+
         const detail = hash(x + 19, y + 31);
         if (!castle && !path && detail % 9 === 0) {
           const center = project(x, y, 0);
@@ -112,6 +138,28 @@ export function createBattlefieldRenderer(canvas) {
           ctx.ellipse(center.x + (detail % 5) - 2, center.y + tileH * .53, 1.5, 1, 0, 0, Math.PI * 2);
           ctx.fill();
         }
+      }
+    }
+  }
+
+  function drawInteriorWalls() {
+    for (const [key, room] of interiors) {
+      const [x, y] = key.split(",").map(Number);
+      const tile = diamond(x, y, 0);
+      // Diamond sides correspond to west, north, east and south neighbors.
+      for (const [nx, ny, first, last] of [
+        [x - 1, y, 3, 0], [x, y - 1, 0, 1],
+        [x + 1, y, 1, 2], [x, y + 1, 2, 3]
+      ]) {
+        if (interiors.get(`${nx},${ny}`) === room) continue;
+        if (doors.has(key) && !houses.has(`${nx},${ny}`) && !isWall(nx, ny) &&
+            !objects.has(`${nx},${ny}`)) continue;
+        ctx.strokeStyle = "#594635";
+        ctx.lineWidth = Math.max(2, tileW * .055);
+        ctx.beginPath();
+        ctx.moveTo(...tile[first]);
+        ctx.lineTo(...tile[last]);
+        ctx.stroke();
       }
     }
   }
@@ -510,6 +558,7 @@ export function createBattlefieldRenderer(canvas) {
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
     drawGround();
+    drawInteriorWalls();
     drawGate(GATE);
     strongpoints.forEach(point => drawGate(point.gate));
 
@@ -523,6 +572,7 @@ export function createBattlefieldRenderer(canvas) {
     }
     raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
     houses.forEach(key => {
+      if (interiors.has(key)) return;
       const [x, y] = key.split(",").map(Number);
       layers.push({ depth: x + y + .25, kind: "house", x, y });
     });
@@ -563,5 +613,6 @@ export function createBattlefieldRenderer(canvas) {
     projectiles = [];
   }
 
-  return { setMap, setLayout, project, tileHeight, isWall, isHouse, draw, queueProjectiles, clearProjectiles };
+  return { setMap, setLayout, project, tileHeight, isWall, isHouse, isEnterableHouse, isHouseDoor,
+    draw, queueProjectiles, clearProjectiles };
 }

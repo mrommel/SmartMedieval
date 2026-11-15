@@ -35,6 +35,25 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_seeded_hamlet_house_entry_persists_and_ai_receives_doors(self):
+        self.game = SingleGame.objects.get(slug="greywatch-hamlet")
+        started = self.start().json()
+        self.assertEqual(started["map"]["houses"][0]["door"], {"x": 7, "y": 4})
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0].update(x=7, y=5)
+        instance.save(update_fields=["state"])
+        door = self.action(0, {"type": "move", "units": [0], "x": 7, "y": 4})
+        self.assertEqual(door.status_code, 200)
+        inside = self.action(1, {"type": "move", "units": [0], "x": 7, "y": 3})
+        self.assertEqual(inside.status_code, 200)
+        self.assertEqual((inside.json()["state"]["units"][0]["y"],
+                          inside.json()["state"]["units"][0]["move_points"]), (3, 2))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], inside.json()["state"])
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.action(2, {"type": "end_turn"}).status_code, 200)
+        ai_input = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual(ai_input["map"]["houses"][0]["door"], {"x": 7, "y": 4})
+
     def test_seeded_throne_room_capture_survives_reload_and_is_session_owned(self):
         throne = SingleGame.objects.get(slug="greywatch-throne-room")
         self.assertIn(throne.pk, [game["id"] for game in self.client.get(reverse("single-games-api")).json()])

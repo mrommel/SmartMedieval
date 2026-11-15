@@ -1,12 +1,121 @@
 from django.test import TestCase
 
 from ..engine import (
-    HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, capture_status, default_map, defender_destinations, find_path,
+    HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
     has_line_of_sight, initial_state, is_walkable, resolve_defender_goals, validate_map,
 )
 
 
 class VillageTests(TestCase):
+    def enterable_map(self):
+        battlefield = default_map()
+        battlefield["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4,
+                                   "door": {"x": 4, "y": 4}}]
+        return battlefield
+
+    def test_enterable_houses_require_valid_access_and_keep_legacy_houses_solid(self):
+        battlefield = self.enterable_map()
+        validate_map(battlefield)
+        self.assertTrue(is_walkable(5, 3, battlefield))
+        self.assertEqual(find_path((4, 5), (5, 4), battlefield), [(4, 4), (5, 4)])
+        self.assertIn((4, 4), find_path((5, 5), (5, 4), battlefield))
+        solid = default_map()
+        solid["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4}]
+        self.assertFalse(is_walkable(5, 3, solid))
+        self.assertFalse(has_line_of_sight((3, 4), (6, 4), solid))
+        adjacent = self.enterable_map()
+        adjacent["houses"].append({"left": 6, "right": 7, "top": 3, "bottom": 4,
+                                   "door": {"x": 7, "y": 4}})
+        validate_map(adjacent)
+        self.assertFalse(can_step((5, 4), (6, 4), adjacent))
+        self.assertNotEqual(find_path((5, 4), (6, 4), adjacent)[0], (6, 4))
+        malformed = self.enterable_map()
+        malformed["houses"].append("invalid")
+        with self.assertRaises(InvalidMap):
+            validate_map(malformed)
+        for door in ({"x": 6, "y": 4}, {"x": 4, "y": 5}, {"x": True, "y": 4},
+                     {"x": 4}, "north", None):
+            broken = self.enterable_map()
+            broken["houses"][0]["door"] = door
+            with self.subTest(door=door), self.assertRaises(InvalidMap):
+                validate_map(broken)
+        enclosed = self.enterable_map()
+        enclosed["objects"] = [{"x": 4, "y": 5, "type": "rock"},
+                               {"x": 3, "y": 4, "type": "rock"}]
+        with self.assertRaisesRegex(InvalidMap, "unobstructed"):
+            validate_map(enclosed)
+
+    def test_doorways_cost_normal_move_points_and_block_occupied_routes(self):
+        battlefield = self.enterable_map()
+        state = initial_state(battlefield)
+        state["units"][0].update(x=4, y=5)
+        entered = apply_action(state, {"type": "move", "units": [0], "x": 5, "y": 4}, battlefield)
+        self.assertEqual((entered["units"][0]["x"], entered["units"][0]["y"],
+                          entered["units"][0]["move_points"]), (5, 4, 2))
+        self.assertEqual((state["units"][0]["x"], state["units"][0]["move_points"]), (4, 4))
+        exited = apply_action(entered, {"type": "move", "units": [0], "x": 4, "y": 5}, battlefield)
+        self.assertEqual((exited["units"][0]["x"], exited["units"][0]["y"],
+                          exited["units"][0]["move_points"]), (4, 5, 0))
+        state["units"][1].update(x=4, y=4)
+        self.assertIsNone(find_path((4, 5), (5, 4), battlefield, blocked={(4, 4)}))
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 5, "y": 4}, battlefield)
+
+    def test_house_walls_separate_combat_except_melee_at_the_door(self):
+        battlefield = self.enterable_map()
+        battlefield["houses"].append({"left": 7, "right": 8, "top": 3, "bottom": 4,
+                                      "door": {"x": 7, "y": 4}})
+        validate_map(battlefield)
+        self.assertTrue(has_line_of_sight((4, 3), (5, 4), battlefield))
+        self.assertFalse(has_line_of_sight((4, 5), (4, 4), battlefield))
+        self.assertFalse(has_line_of_sight((4, 3), (7, 3), battlefield))
+        self.assertFalse(has_line_of_sight((3, 3), (6, 3), battlefield))
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][0], state["units"][2], state["units"][6]]
+        state["units"][0].update(x=5, y=5)
+        state["units"][1].update(x=3, y=4)
+        state["units"][2].update(x=5, y=4)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+        state["units"][0].update(x=4, y=5)
+        state["units"][2].update(x=4, y=4)
+        hit = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertEqual(hit["units"][-1]["health"], 2)
+        state["units"][0].update(x=5, y=4)
+        state["units"][1].update(x=4, y=3)
+        state["units"][2].update(x=5, y=3)
+        shot = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+        self.assertEqual(shot["units"][-1]["health"], 2)
+
+    def test_defender_can_enter_and_exit_but_cannot_attack_through_walls(self):
+        battlefield = self.enterable_map()
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][0], state["units"][6]]
+        state["units"][0].update(x=5, y=5)
+        state["units"][1].update(x=4, y=5, type="vanguard")
+        self.assertIn((4, 4), defender_destinations(state["units"][1], battlefield))
+        state["units"][1].update(x=5, y=4)
+        self.assertNotIn((5, 5), defender_destinations(state["units"][1], battlefield, blocked={(4, 4)}))
+        held = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(held["units"][0]["health"], 3)
+        state["units"][1].update(x=4, y=4)
+        state["units"][0].update(x=4, y=5)
+        struck = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(struck["units"][0]["health"], 2)
+
+    def test_roof_shields_occupants_from_catapult_stones(self):
+        battlefield = self.enterable_map()
+        state = initial_state(battlefield)
+        state["units"][6].update(x=4, y=4)
+        state["units"][1]["fight_points"] = 2
+        aimed = apply_action(state, {"type": "aim_catapult", "unit_id": 1,
+                                     "catapult_id": 0, "x": 4, "y": 4}, battlefield)
+        fired = apply_action(aimed, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0}, battlefield)
+        self.assertEqual(fired["units"][6]["health"], 3)
+        self.assertEqual(fired["history"][-1]["type"], "catapult_miss")
+
     def test_house_footprints_block_movement_and_shots_but_lanes_remain_open(self):
         battlefield = default_map()
         battlefield["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4}]
@@ -64,7 +173,7 @@ class VillageTests(TestCase):
                        [{**valid, "top": -1}], [{**valid, "right": 7, "bottom": 2}],
                        [{**valid, "left": 11, "right": 12}],
                        [{**valid, "right": 9, "bottom": 6}],
-                       [{**valid, "door": {"x": 6, "y": 3}}]):
+                       [{**valid, "door": {"x": 8, "y": 3}}]):
             battlefield = default_map()
             battlefield["houses"] = houses
             with self.subTest(houses=houses), self.assertRaises(InvalidMap):
