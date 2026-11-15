@@ -4,7 +4,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-from .engine import STARTING_MORALE, InvalidAction, apply_action, resolve_defender_goals
+from .engine import STARTING_MORALE, InvalidAction, apply_action, battle_map, resolve_defender_goals
 
 
 AI_URL = "http://127.0.0.1:11435/v1/chat/completions"
@@ -29,7 +29,8 @@ def enemy_turn(state, map_data, combat_events=None):
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
                   "strongpoints": map_data.get("strongpoints", []),
-                  "mission": map_data.get("mission", "courtyard")},
+                   "mission": map_data.get("mission", "courtyard"),
+                   "breaches": state.get("breaches", [])},
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
@@ -49,7 +50,7 @@ def enemy_turn(state, map_data, combat_events=None):
                 "0-1 or plus 1 at morale 5), avoiding walls and occupied tiles and stopping short of the "
                 "objective. A defender may aim at the objective but cannot occupy it. Elevated "
                 "tiles have height 1-3; only ladders and ramps on the higher tile permit a "
-                "one-level step. After "
+                "one-level step. Wall tiles listed in breaches are open passages. After "
                 "movement, defenders automatically attack when possible: vanguards make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
                 "with walls, trees, and rocks blocking line of sight and movement. Ranged weapons "
@@ -94,7 +95,7 @@ def enemy_turn(state, map_data, combat_events=None):
                 raise EnemyAIError(failure) from error
         else:
             try:
-                legal_orders = resolve_defender_goals(state, orders, map_data)
+                legal_orders = resolve_defender_goals(state, orders, battle_map(map_data, state))
                 return apply_action(state, {"type": "end_turn"}, map_data, enemy_orders=legal_orders,
                                     combat_events=combat_events)
             except InvalidAction as error:

@@ -19,6 +19,8 @@ import { createLaunchUI } from "./launch.js";
   const endTurnButton = document.getElementById("end-turn");
   const promoteButton = document.getElementById("promote");
   const captureButton = document.getElementById("capture-king");
+  const aimButton = document.getElementById("aim-catapult");
+  const fireButton = document.getElementById("fire-catapult");
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
@@ -29,7 +31,8 @@ import { createLaunchUI } from "./launch.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  const simulation = { units: [], catapults: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
   let revision = 0;
@@ -62,14 +65,40 @@ import { createLaunchUI } from "./launch.js";
 
   function updateControls() {
     const ended = simulation.captured || simulation.defeated;
+    const crew = selectedCrew();
     endTurnButton.disabled = pendingAction || paused || ended;
     promoteButton.disabled = pendingAction || paused || ended ||
       !promotionCandidate();
     captureButton.disabled = pendingAction || paused || ended || captureCandidate() === null;
+    aimButton.hidden = fireButton.hidden = !simulation.catapults.length;
+    aimButton.disabled = pendingAction || paused || ended || !crew || !crew.unit.fight_points || !crew.catapult.ammo;
+    fireButton.disabled = pendingAction || paused || ended || !crew || !crew.unit.fight_points ||
+      !crew.catapult.ammo || !crew.catapult.aim || crew.catapult.reload_turns > 0;
+    aimButton.setAttribute("aria-pressed", String(aimingCatapult));
+    aimButton.textContent = aimingCatapult ? "Cancel aim" : "Aim catapult";
     pauseButton.disabled = ended;
     pauseButton.textContent = paused ? "Resume" : "Pause";
     pauseButton.setAttribute("aria-pressed", String(paused));
     pauseIndicator.hidden = !paused || ended;
+  }
+
+  function selectedCrew() {
+    if (simulation.selected.size !== 1) return null;
+    const unit = simulation.units.find(item => simulation.selected.has(item.id) && item.side !== "defenders");
+    const catapult = simulation.catapults.find(item => unit && item.x === unit.x && item.y === unit.y);
+    return catapult ? { unit, catapult } : null;
+  }
+
+  function aimCatapultAt(x, y) {
+    const crew = selectedCrew();
+    if (!aimingCatapult || !crew) return;
+    const distance = Math.max(Math.abs(x - crew.catapult.x), Math.abs(y - crew.catapult.y));
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS || distance < 2 || distance > 10) {
+      showToast("Aim between 2 and 10 tiles from the catapult.");
+      return;
+    }
+    aimingCatapult = false;
+    sendAction({ type: "aim_catapult", unit_id: crew.unit.id, catapult_id: crew.catapult.id, x, y });
   }
 
   function promotionCandidate() {
@@ -186,7 +215,8 @@ import { createLaunchUI } from "./launch.js";
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
-      : objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
+      : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
+        objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
         ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" : "open ground")}.`;
   }
 
@@ -200,8 +230,10 @@ import { createLaunchUI } from "./launch.js";
   function updatePromotion() {
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     const unit = selected.length === 1 ? selected[0] : null;
+    const crew = selectedCrew();
     selectedStats.textContent = unit
-      ? `#${unit.id + 1} ${unit.rank || "recruit"} · morale ${unit.morale ?? 3}/5 · ${unit.move_points} MP · ${unit.fight_points} FP`
+      ? `#${unit.id + 1} ${unit.rank || "recruit"} · morale ${unit.morale ?? 3}/5 · ${unit.move_points} MP · ${unit.fight_points} FP${crew ?
+        ` · catapult ${crew.catapult.ammo} stones${crew.catapult.aim ? ` · aimed at ${crew.catapult.aim.x + 1}, ${crew.catapult.aim.y + 1}` : ""}${crew.catapult.reload_turns ? ` · reload ${crew.catapult.reload_turns}` : ""}` : ""}`
       : `${selected.length} soldiers selected · choose one to inspect or promote`;
     updateControls();
   }
@@ -221,11 +253,15 @@ import { createLaunchUI } from "./launch.js";
         item.textContent = `Turn ${event.turn} · ${actor} promoted to veteran (morale ${event.morale_change}).`;
       } else if (event.type === "capture") {
         item.textContent = `Turn ${event.turn} · ${actor} captured the living king.`;
+      } else if (event.type === "aim_catapult") {
+        item.textContent = `Turn ${event.turn} · ${actor} aimed the catapult at ${event.x + 1}, ${event.y + 1}.`;
+      } else if (event.type === "catapult_wall" || event.type === "catapult_miss") {
+        item.textContent = `Turn ${event.turn} · ${actor} fired at ${event.x + 1}, ${event.y + 1}: ${event.type === "catapult_miss" ? "missed" : event.breached ? "breached the wall" : "damaged the wall"}.`;
       } else {
         const target = `${event.target_side === "defenders" ? "defender" : "attacker"} ${event.target_type} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
@@ -238,6 +274,7 @@ import { createLaunchUI } from "./launch.js";
       renderer.clearProjectiles();
       paused = false;
     }
+    aimingCatapult = false;
     instanceId = snapshot.id;
     revision = snapshot.revision;
     mapData = snapshot.map;
@@ -248,9 +285,10 @@ import { createLaunchUI } from "./launch.js";
       ? "Reach the throne room. Defeat guards beside the king, then select a vanguard on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
       : "Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
-    renderer.setMap(mapData);
+    renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
+    simulation.catapults = snapshot.state.catapults || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;
     simulation.captureProgress = snapshot.state.capture_progress;
@@ -360,7 +398,7 @@ import { createLaunchUI } from "./launch.js";
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
       if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.type === "king") ? "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : "Order received."));
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -433,6 +471,7 @@ import { createLaunchUI } from "./launch.js";
     getLayout: () => ({ width, height, tileW, tileH, originX, originY }),
     canOrder: () => gameIsVisible && !simulation.captured && !simulation.defeated && !pendingAction && !paused,
     isWalkable, onMove: moveSelected, onAttack: attackSelected, onSelection: updateSelection,
+    isAiming: () => aimingCatapult, onAim: aimCatapultAt,
     onBlocked: () => showToast("An obstacle bars the way. Choose an open tile."),
     onDraw: draw, onCursor: describeCursor });
   const launchUI = createLaunchUI({ api, onStart: launchGame,
@@ -441,6 +480,7 @@ import { createLaunchUI } from "./launch.js";
       gameIsVisible = false;
       input.cancelPointer();
       renderer.clearProjectiles();
+      aimingCatapult = false;
     } });
   function restart() {
     if (!instanceId) return;
@@ -452,6 +492,15 @@ import { createLaunchUI } from "./launch.js";
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));
+  aimButton.addEventListener("click", () => {
+    aimingCatapult = !aimingCatapult;
+    updateControls();
+    if (aimingCatapult) showToast("Select a target tile (including walls) on the battlefield. Aiming costs one fight point.");
+  });
+  fireButton.addEventListener("click", () => {
+    const crew = selectedCrew();
+    if (crew && !fireButton.disabled) sendAction({ type: "fire_catapult", unit_id: crew.unit.id, catapult_id: crew.catapult.id });
+  });
   pauseButton.addEventListener("click", () => {
     if (simulation.captured || simulation.defeated) return;
     paused = !paused;

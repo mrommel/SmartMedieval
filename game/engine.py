@@ -21,6 +21,7 @@ MAP = {
         {"x": 12, "y": 5, "type": "vanguard"},
         {"x": 16, "y": 8, "type": "longbow"},
     ],
+    "catapults": [{"x": 3, "y": 7}],
 }
 MOVE_POINTS = 4
 MAX_HEALTH = 3
@@ -29,6 +30,10 @@ ATTACK_DAMAGE = 1
 STARTING_MORALE = 3
 MAX_MORALE = 5
 HISTORY_LIMIT = 100
+CATAPULT_AMMO = 3
+CATAPULT_RANGE = 10
+CATAPULT_RELOAD = 2
+WALL_HEALTH = 2
 RANGED_UNIT_STATS = {
     # End-turn processing ticks cooldowns, including the transition after firing.
     "longbow": {"range": 5, "reload_turns": 2},
@@ -49,7 +54,7 @@ def default_map():
 
 
 def validate_map(map_data):
-    required = set(MAP) - {"enemyStartPositions"}
+    required = set(MAP) - {"enemyStartPositions", "catapults"}
     if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     mission = map_data.get("mission", "courtyard")
@@ -164,6 +169,19 @@ def validate_map(map_data):
                 raise InvalidMap("Defenders cannot start on the objective.")
     if mission == "capture_king" and (kings != 1 or guards < 1):
         raise InvalidMap("A throne-room mission needs exactly one king and at least one guard.")
+    catapults = map_data.get("catapults", [])
+    if not isinstance(catapults, list) or len(catapults) > 16:
+        raise InvalidMap("Catapults must be a list of at most 16 open ground tiles.")
+    seen_catapults = set()
+    for point in catapults:
+        if (not isinstance(point, dict) or set(point) != {"x", "y"}
+                or type(point["x"]) is not int or type(point["y"]) is not int
+                or not is_walkable(point["x"], point["y"], map_data)
+                or tile_height(point["x"], point["y"], map_data) != 0
+                or (point["x"], point["y"]) == (objective["x"], objective["y"])
+                or (point["x"], point["y"]) in seen_catapults):
+            raise InvalidMap("Catapults need distinct open ground tiles away from the objective.")
+        seen_catapults.add((point["x"], point["y"]))
     if "enemyStartPositions" not in map_data:
         legacy_enemy_position(map_data)
 
@@ -179,9 +197,15 @@ def is_rectangle_edge(x, y, rectangle):
 
 
 def is_wall(x, y, map_data=MAP):
-    return any(is_rectangle_edge(x, y, point) and (x, y) != (gate["x"], gate["y"])
+    return (x, y) not in map_data.get("breaches", ()) and any(
+               is_rectangle_edge(x, y, point) and (x, y) != (gate["x"], gate["y"])
                for point, gate in [(map_data["keep"], map_data["gate"])]
                + [(point, point["gate"]) for point in map_data.get("strongpoints", ())])
+
+
+def battle_map(map_data, state):
+    """Use breached walls for all movement, cover and line-of-sight decisions."""
+    return {**map_data, "breaches": {(point["x"], point["y"]) for point in state.get("breaches", [])}}
 
 
 def is_object(x, y, map_data=MAP):
@@ -339,13 +363,13 @@ def record_casualty(state, killer, casualty):
     return morale_changes
 
 
-def record_attack(state, attacker, target, ranged, map_data=MAP):
+def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_DAMAGE, weapon=None):
     """Resolve damage and retain a compact, chronological account of combat."""
     cover = (ranged_cover(attacker, target, map_data)
              if ranged and target.get("cover_turn") != state["turn"] else None)
     if cover:
         target["cover_turn"] = state["turn"]
-    damage = min(0 if cover else ATTACK_DAMAGE, target["health"])
+    damage = min(0 if cover else damage, target["health"])
     target["health"] -= damage
     killed = target["health"] <= 0
     morale_changes = record_casualty(state, attacker, target) if killed else []
@@ -355,6 +379,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP):
         "actor_type": attacker["type"], "target_id": target["id"],
         "target_side": target.get("side", "attackers"), "target_type": target["type"],
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"weapon": weapon} if weapon else {}),
     } | ({"cover": cover} if cover else {})])[-HISTORY_LIMIT:]
 
 
@@ -479,6 +504,13 @@ def initial_state(map_data=MAP):
         "captured": False,
         "defeated": False,
         "history": [],
+        "catapults": [
+            {"id": index, "x": point["x"], "y": point["y"], "ammo": CATAPULT_AMMO,
+             "reload_turns": 0, "aim": None}
+            for index, point in enumerate(map_data.get("catapults", []))
+        ],
+        "wall_damage": [],
+        "breaches": [],
     }
 
 
@@ -507,11 +539,13 @@ def king_is_guarded(state):
 
 def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
-            "move", "attack", "ranged_attack", "capture", "promote", "end_turn"):
+            "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
+            "aim_catapult", "fire_catapult"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
 
+    map_data = battle_map(map_data, state)
     next_state = {**state, "units": [
         {
             **unit,
@@ -524,7 +558,77 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "rank": unit.get("rank", "recruit"),
         }
         for unit in state["units"]
-    ], "defeated": state.get("defeated", False), "history": list(state.get("history", []))}
+    ], "defeated": state.get("defeated", False), "history": list(state.get("history", [])),
+        "catapults": [
+            {**catapult, "aim": catapult.get("aim"), "reload_turns": catapult.get("reload_turns", 0)}
+            for catapult in state.get("catapults", [])
+        ], "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
+        "breaches": [dict(point) for point in state.get("breaches", [])]}
+    if action["type"] in ("aim_catapult", "fire_catapult"):
+        aiming = action["type"] == "aim_catapult"
+        if (set(action) != ({"type", "unit_id", "catapult_id", "x", "y"} if aiming else
+                            {"type", "unit_id", "catapult_id"})
+                or type(action["unit_id"]) is not int or type(action["catapult_id"]) is not int
+                or (aiming and (type(action["x"]) is not int or type(action["y"]) is not int))):
+            raise InvalidAction("Choose a soldier, catapult and valid target tile.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        catapult = next((item for item in next_state["catapults"] if item["id"] == action["catapult_id"]), None)
+        if (not unit or not catapult or (unit["x"], unit["y"]) != (catapult["x"], catapult["y"])
+                or unit["fight_points"] < 1):
+            raise InvalidAction("A soldier on the catapult needs a fight point to crew it.")
+        if catapult["ammo"] < 1:
+            raise InvalidAction("The catapult is out of ammunition.")
+        if aiming:
+            x, y = action["x"], action["y"]
+            distance = max(abs(x - catapult["x"]), abs(y - catapult["y"]))
+            if not (0 <= x < map_data["cols"] and 0 <= y < map_data["rows"] and 2 <= distance <= CATAPULT_RANGE):
+                raise InvalidAction("Aim at a tile between 2 and 10 tiles from the catapult.")
+            catapult["aim"] = {"x": x, "y": y}
+            unit["fight_points"] -= 1
+            next_state["history"] = (next_state["history"] + [{
+                "turn": state["turn"], "type": "aim_catapult", "actor_id": unit["id"],
+                "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+            }])[-HISTORY_LIMIT:]
+        else:
+            if catapult["aim"] is None or catapult["reload_turns"]:
+                raise InvalidAction("Aim the catapult and wait for it to reload before firing.")
+            target = catapult["aim"]
+            x, y = target["x"], target["y"]
+            unit["fight_points"] -= 1
+            catapult["ammo"] -= 1
+            catapult["reload_turns"] = CATAPULT_RELOAD
+            catapult["aim"] = None
+            if combat_events is not None:
+                combat_events.append({"type": "projectile", "weapon": "catapult",
+                                      "from": {"x": catapult["x"], "y": catapult["y"]}, "to": target})
+            victim = next((other for other in next_state["units"] if (other["x"], other["y"]) == (x, y)), None)
+            if victim:
+                record_attack(next_state, unit, victim, False, map_data, damage=2, weapon="catapult")
+                if map_data.get("mission") == "capture_king" and victim["type"] == "king" and victim["health"] <= 0:
+                    next_state["defeated"] = True
+                if not any(other.get("side", "attackers") == "attackers" for other in next_state["units"]):
+                    next_state["defeated"] = True
+            elif is_wall(x, y, map_data):
+                damaged = next((point for point in next_state["wall_damage"] if (point["x"], point["y"]) == (x, y)), None)
+                if damaged is None:
+                    damaged = {"x": x, "y": y, "damage": 0}
+                    next_state["wall_damage"].append(damaged)
+                damaged["damage"] += 1
+                if damaged["damage"] >= WALL_HEALTH:
+                    next_state["breaches"].append({"x": x, "y": y})
+                    next_state["wall_damage"].remove(damaged)
+                next_state["history"] = (next_state["history"] + [{
+                    "turn": state["turn"], "type": "catapult_wall", "actor_id": unit["id"],
+                    "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+                    "breached": damaged["damage"] >= WALL_HEALTH,
+                }])[-HISTORY_LIMIT:]
+            else:
+                next_state["history"] = (next_state["history"] + [{
+                    "turn": state["turn"], "type": "catapult_miss", "actor_id": unit["id"],
+                    "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+                }])[-HISTORY_LIMIT:]
+        return next_state
     if action["type"] == "capture":
         if (map_data.get("mission") != "capture_king" or set(action) != {"type", "unit_id"}
                 or type(action["unit_id"]) is not int):
@@ -611,6 +715,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     if action["type"] == "end_turn":
         if set(action) != {"type"}:
             raise InvalidAction("Invalid end-turn action.")
+        for catapult in next_state["catapults"]:
+            catapult["reload_turns"] = max(0, catapult["reload_turns"] - 1)
         defenders = {unit["id"]: unit for unit in next_state["units"]
                      if unit.get("side") == "defenders" and unit.get("type") != "king"}
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):

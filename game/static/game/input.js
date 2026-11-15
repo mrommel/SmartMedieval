@@ -1,5 +1,5 @@
 export function createBattlefieldInput({ canvas, renderer, simulation, getMap, getLayout,
-  canOrder, isWalkable, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor }) {
+  canOrder, isWalkable, isAiming, onAim, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor }) {
   const camera = { x: 0, y: 0, zoom: 1 };
   const cursor = { x: 0, y: 0, visible: false };
   let activePointer = null;
@@ -75,6 +75,11 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     const rect = canvas.getBoundingClientRect();
     const px = (event.clientX - rect.left - camera.x) / camera.zoom;
     const py = (event.clientY - rect.top - camera.y) / camera.zoom;
+    if (isAiming()) {
+      const tile = pickTile(px, py);
+      onAim(tile.x, tile.y);
+      return;
+    }
     const { tileW, tileH } = getLayout();
     let clicked = null;
     let nearest = Infinity;
@@ -120,6 +125,10 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   }
 
   function keyboardOrder(shiftKey) {
+    if (isAiming()) {
+      onAim(cursor.x, cursor.y);
+      return;
+    }
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
     if (unit?.side === "defenders") onAttack(unit);
     else if (unit) {

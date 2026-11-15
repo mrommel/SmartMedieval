@@ -347,3 +347,35 @@ test("trees and rocks are described and reject keyboard movement orders", async 
   canvas.fire("keydown", { key: "Enter", preventDefault() {} });
   assert.equal(game.actions.length, 0);
 });
+
+test("catapult crew can aim at walls using the keyboard and fire when ready", async () => {
+  const game = setup();
+  game.snapshot.map.catapults = [{ x: 0, y: 0 }];
+  game.snapshot.state.catapults = [{ id: 0, x: 0, y: 0, ammo: 3,
+    reload_turns: 0, aim: null }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("aim-catapult").hidden, false);
+  assert.equal(game.get("aim-catapult").disabled, false);
+  assert.equal(game.get("fire-catapult").disabled, true);
+  assert.match(game.get("selected-stats").textContent, /catapult 3 stones/);
+  game.get("aim-catapult").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "Enter"]) {
+    canvas.fire("keydown", { key, preventDefault() {} });
+  }
+  assert.equal(game.actions.at(-1).type, "aim_catapult");
+  assert.equal(game.actions.at(-1).x, 2);
+  assert.equal(game.actions.at(-1).y, 1);
+  await new Promise(setImmediate);
+  game.snapshot.state.catapults[0].aim = { x: 2, y: 1 };
+  await game.get("end-turn").fire("click");
+  assert.equal(game.get("fire-catapult").disabled, false);
+  await game.get("fire-catapult").fire("click");
+  assert.equal(game.actions.at(-1).type, "fire_catapult");
+  assert.equal(game.actions.at(-1).catapult_id, 0);
+  assert.equal(game.actions.at(-1).unit_id, 0);
+  await new Promise(setImmediate);
+  game.snapshot.state.breaches = [{ x: 2, y: 1 }];
+  await game.get("end-turn").fire("click");
+  assert.match(game.get("cursor-status").textContent, /open ground/);
+});

@@ -118,6 +118,120 @@ class ThroneRoomTests(TestCase):
         self.assertEqual(ended["units"][-1]["fight_points"], 1)
 
 
+class CatapultTests(TestCase):
+    def test_map_validation_and_legacy_maps(self):
+        battlefield = default_map()
+        validate_map(battlefield)
+        for points in ("invalid", [{"x": 3, "y": 7}] * 2,
+                       [{"x": True, "y": 7}], [{"x": -1, "y": 7}],
+                       [{"x": 11, "y": 7}], [{"x": 14, "y": 7}],
+                       [{"x": 2, "y": 7, "ammo": 100}]):
+            battlefield["catapults"] = points
+            with self.subTest(points=points), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield["catapults"] = [{"x": 3, "y": 5}]
+        battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1, "access": "ramp"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        del battlefield["catapults"]
+        validate_map(battlefield)
+        self.assertEqual(initial_state(battlefield)["catapults"], [])
+
+    def test_only_crew_with_fight_point_can_aim_and_fire(self):
+        state = initial_state()
+        aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 11, "y": 7}
+        original = initial_state()
+        for action in (
+            {**aim, "unit_id": 0}, {**aim, "unit_id": 6}, {**aim, "unit_id": True},
+            {**aim, "catapult_id": 42}, {**aim, "x": True}, {**aim, "x": -1},
+            {**aim, "x": 3, "y": 7}, {**aim, "x": 17}, {**aim, "extra": 1},
+            {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0},
+        ):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action)
+        self.assertEqual(state, original)
+        empty = initial_state()
+        empty["catapults"][0]["ammo"] = 0
+        with self.assertRaisesRegex(InvalidAction, "ammunition"):
+            apply_action(empty, aim)
+        empty["catapults"][0]["aim"] = {"x": 11, "y": 7}
+        with self.assertRaisesRegex(InvalidAction, "ammunition"):
+            apply_action(empty, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0})
+        aimed = apply_action(state, aim)
+        self.assertEqual(aimed["catapults"][0]["aim"], {"x": 11, "y": 7})
+        self.assertEqual(aimed["units"][1]["fight_points"], 0)
+        self.assertIsNone(state["catapults"][0]["aim"])
+        with self.assertRaises(InvalidAction):
+            apply_action(aimed, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0})
+        with self.assertRaises(InvalidAction):
+            apply_action(aimed, {"type": "fire_catapult", "unit_id": 0, "catapult_id": 0})
+        legacy = initial_state()
+        for field in ("catapults", "wall_damage", "breaches"):
+            del legacy[field]
+        self.assertEqual(apply_action(legacy, {"type": "end_turn"})["catapults"], [])
+
+    def test_fire_spends_ammo_reload_and_damages_wall_until_breached(self):
+        state = initial_state()
+        aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 11, "y": 7}
+        fire = {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0}
+        events = []
+        state = apply_action(state, aim)
+        state = apply_action(state, {"type": "end_turn"})
+        state = apply_action(state, fire, combat_events=events)
+        self.assertEqual(events, [{"type": "projectile", "weapon": "catapult",
+                                   "from": {"x": 3, "y": 7}, "to": {"x": 11, "y": 7}}])
+        self.assertEqual((state["catapults"][0]["ammo"], state["catapults"][0]["reload_turns"]), (2, 2))
+        self.assertEqual(state["wall_damage"], [{"x": 11, "y": 7, "damage": 1}])
+        self.assertFalse(is_walkable(11, 7))
+        state = apply_action(state, {"type": "end_turn"})
+        state = apply_action(state, aim)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, fire)
+        state = apply_action(state, {"type": "end_turn"})
+        state = apply_action(state, fire)
+        self.assertEqual(state["wall_damage"], [])
+        self.assertEqual(state["breaches"], [{"x": 11, "y": 7}])
+        self.assertTrue(state["history"][-1]["breached"])
+        self.assertEqual(state["catapults"][0]["ammo"], 1)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 11, "y": 7})
+        self.assertNotEqual((moved["units"][0]["x"], moved["units"][0]["y"]), (11, 7))
+        self.assertTrue(is_walkable(11, 7, {**MAP, "breaches": {(11, 7)}}))
+        self.assertFalse(has_line_of_sight((10, 7), (12, 7)))
+        self.assertTrue(has_line_of_sight((10, 7), (12, 7), {**MAP, "breaches": {(11, 7)}}))
+        self.assertEqual(find_path((10, 7), (12, 7), {**MAP, "breaches": {(11, 7)}}),
+                         [(11, 7), (12, 7)])
+        self.assertEqual(initial_state()["breaches"], [])
+
+    def test_stones_hit_units_including_friends_and_king(self):
+        state = initial_state()
+        state["units"][6].update(x=6, y=7, health=2)
+        state["units"][1]["fight_points"] = 2
+        aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 6, "y": 7}
+        fire = {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0}
+        hit = apply_action(apply_action(state, aim), fire)
+        self.assertNotIn(6, [unit["id"] for unit in hit["units"]])
+        self.assertEqual(hit["history"][-1]["weapon"], "catapult")
+        self.assertEqual(hit["history"][-1]["damage"], 2)
+        self.assertEqual(hit["history"][-1]["killed"], True)
+        state["units"][6].update(x=12, y=5)
+        state["units"][0].update(x=6, y=7, health=1)
+        friendly = apply_action(apply_action(state, aim), fire)
+        self.assertNotIn(0, [unit["id"] for unit in friendly["units"]])
+        throne = default_map()
+        throne["mission"] = "capture_king"
+        throne["catapults"] = [{"x": 8, "y": 7}]
+        throne["enemyStartPositions"] = [{"x": 14, "y": 7, "type": "king"},
+                                         {"x": 13, "y": 7, "type": "vanguard"}]
+        validate_map(throne)
+        state = initial_state(throne)
+        state["units"][0].update(x=8, y=7, fight_points=2)
+        state["units"][6]["health"] = 2
+        lost = apply_action(apply_action(state, {**aim, "unit_id": 0, "x": 14}, throne),
+                            {**fire, "unit_id": 0}, throne)
+        self.assertTrue(lost["defeated"])
+        self.assertNotIn(6, [unit["id"] for unit in lost["units"]])
+
+
 class TurnEngineTests(TestCase):
     def test_combat_history_records_player_attack_casualty_and_morale(self):
         state = initial_state()

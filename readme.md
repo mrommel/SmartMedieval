@@ -4,7 +4,7 @@
 
 **Siege of Greywatch** is a browser-playable, isometric medieval siege strategy prototype set in the Northern March in 1348. Lead an attacking company through the keep’s open southern gate and capture its courtyard.
 
-> **Prototype status:** Movement, turn-taking, melee and ranged combat, health, morale, veteran promotion, elevation, projectile animation, cover, courtyard capture, and a throne-room mission are playable. Defenders move and attack automatically on end turn. Further encounter balancing remains future work.
+> **Prototype status:** Movement, turn-taking, melee and ranged combat, catapults and wall breaches, health, morale, veteran promotion, elevation, projectile animation, cover, courtyard capture, and a throne-room mission are playable. Defenders move and attack automatically on end turn. Further encounter balancing remains future work.
 
 The browser controller in `game/static/game/game.js` handles input, actions, and menus; `game/static/game/renderer.js` owns battlefield drawing, projection, and projectile effects.
 
@@ -18,6 +18,7 @@ The browser controller in `game/static/game/game.js` handles input, actions, and
 - Defeating an enemy raises the victor's morale by one (up to 5); nearby allies of a fallen soldier lose one (down to 0). Morale 0–1 reduces next turn's movement by one; morale 5 increases it by one. Select one recruit with 5 morale and press **Promote** to gain veteran rank, resetting morale to 3 and granting an extra move and fight point from the following turn.
 - Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. A nearby defender guards the objective, and defenders prioritize attackers capturing it when they can attack. Losing all attackers ends the battle.
 - In **The Throne Room**, bring a vanguard next to the king at the same height and clear any guards standing beside him. Select the vanguard and press **Capture king** (or click the king when capture is available) to spend a fight point and win. The king stays on his throne and cannot attack. Killing him, even with a ranged shot, loses the mission; occupying the throne or killing all the guards does not win by itself.
+- The seeded assault has a catapult under its second vanguard. Select a soldier standing on a catapult, press **Aim catapult** and choose a target tile (walls included), then press **Fire catapult** once the crew has a fight point. Aiming and firing each spend one fight point; recruits can fire on the next turn. Each catapult carries three stones, takes two turn transitions to reload, and hits anyone on its target tile for two damage, including allies and the king. Two hits on a wall tile breach it, opening a passage and line of sight.
 - Drag the battlefield to pan. Use the mouse wheel or the **+ / −** buttons to zoom.
 - Select **Pause** to freeze animations and prevent new orders; orders already sent to the server still finish. Select **Resume** to continue. The **Animation speed** selector supports Off, 0.5×, 1× and 2× and is saved on your device. The device's reduced-motion preference also turns animations off.
 
@@ -40,6 +41,8 @@ Maps may include an optional `elevation` list of unique open tiles, for example 
 Maps may also include up to 256 `objects`, such as `[{"x": 4, "y": 5, "type": "tree"}, {"x": 5, "y": 6, "type": "rock"}]`. Both types block movement and line of sight. Place them on distinct ground tiles, away from walls, the gate, elevation, starting units, and the objective; all units must still be able to reach the objective. Older maps without objects remain unchanged, and running matches retain their snapshot after edits.
 
 Maps may include up to 16 additional `strongpoints`, for example `[{"left": 6, "right": 9, "top": 3, "bottom": 6, "gate": {"x": 7, "y": 6}}]`. Each rectangle needs its own gate on its perimeter and must not overlap the keep or another strongpoint. Its walls block movement and shots and provide cover just like keep walls; the interior and gate remain walkable. Keep objects, elevation, starting units, and the objective off the walls, and ensure every starting unit can reach the objective. Maps without `strongpoints` retain their existing layout; ongoing matches retain their map snapshot.
+
+Optional `catapults` are a list of up to 16 distinct open ground positions, such as `[{"x": 3, "y": 7}]`. They may overlap starting soldiers but not walls, objects, elevated tiles or the objective. The match stores their ammunition and aim separately from the map; edited layouts do not affect ongoing matches.
 
 To author a throne-room game, set `"mission": "capture_king"` in its map JSON, put the `objective` on an open tile strictly inside the keep, and include `enemyStartPositions` with **exactly one** `{"x": ..., "y": ..., "type": "king"}` on the objective plus at least one other defender (a vanguard, longbow, or crossbow) on a different tile. Existing maps without `mission` retain courtyard capture rules. The seeded **Capture the King** scenario and **The Throne Room** single game demonstrate this format.
 

@@ -32,6 +32,8 @@ class SingleGameAdmin(admin.ModelAdmin):
             "Optional strongpoints: [{\"left\": 6, \"right\": 9, \"top\": 3, \"bottom\": 6, "
             "\"gate\": {\"x\": 7, \"y\": 6}}]. Up to 16 non-overlapping gated rectangles may be "
             "placed away from the keep; all units must still reach the objective. "
+            "Optional catapults: [{\"x\": 3, \"y\": 7}]. Up to 16 distinct open ground "
+            "tiles away from the objective; a soldier on the tile can aim and fire. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

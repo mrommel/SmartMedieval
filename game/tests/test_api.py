@@ -61,6 +61,40 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 400)
         self.ai.assert_not_called()
 
+    def test_seeded_assault_catapult_actions_persist_and_ai_uses_breaches(self):
+        game = SingleGame.objects.get(slug="greywatch-assault")
+        self.assertEqual(game.map_definition["catapults"], [{"x": 3, "y": 7}])
+        self.game = game
+        started = self.start().json()
+        self.assertEqual(started["state"]["catapults"][0]["ammo"], 3)
+        aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 11, "y": 7}
+        self.assertEqual(self.action(0, {**aim, "x": True}).status_code, 400)
+        aimed = self.action(0, aim)
+        self.assertEqual(aimed.status_code, 200)
+        self.assertEqual(aimed.json()["state"]["catapults"][0]["aim"], {"x": 11, "y": 7})
+        self.assertEqual(self.action(0, aim).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0}).status_code, 400)
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 200)
+        shot = self.action(2, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0})
+        self.assertEqual(shot.status_code, 200)
+        self.assertEqual(shot.json()["combat_events"][0]["weapon"], "catapult")
+        self.assertEqual(shot.json()["state"]["wall_damage"], [{"x": 11, "y": 7, "damage": 1}])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], shot.json()["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["catapults"][0]["ammo"], 2)
+
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["breaches"] = [{"x": 11, "y": 7}]
+        instance.save(update_fields=["state"])
+        instance.state["units"][6].update(x=10, y=7)
+        instance.save(update_fields=["state"])
+        self.set_ai_orders([{"unit_id": 6, "x": 12, "y": 7}])
+        ended = self.action(3, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        self.assertEqual((ended.json()["state"]["units"][6]["x"],
+                          ended.json()["state"]["units"][6]["y"]), (12, 7))
+        self.assertEqual(ended.json()["state"]["breaches"], [{"x": 11, "y": 7}])
+        self.assertIn("breaches", json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"])
+
     def test_king_killed_is_defeat_and_ai_cannot_order_king(self):
         throne = SingleGame.objects.get(slug="greywatch-throne-room")
         started = self.client.post(reverse("start-game", args=["single-games", throne.pk])).json()

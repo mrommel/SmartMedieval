@@ -5,6 +5,8 @@ export function createBattlefieldRenderer(canvas) {
   let elevation = new Map();
   let raisedTiles = [];
   let objects = new Map();
+  let breaches = new Set();
+  let wallDamage = new Set();
   let tileW = 56, tileH = 28, originX = 0, originY = 0, width = 0, height = 0;
   let simulation, cursor, camera, hasAttackOption;
   let projectiles = [];
@@ -15,6 +17,8 @@ export function createBattlefieldRenderer(canvas) {
     raisedTiles = map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     objects = new Map((map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
+    breaches = new Set((map.breaches || []).map(point => `${point.x},${point.y}`));
+    wallDamage = new Set((map.wall_damage || []).map(point => `${point.x},${point.y}`));
   }
 
   function setLayout(layout) {
@@ -41,6 +45,7 @@ export function createBattlefieldRenderer(canvas) {
   }
 
   function isWall(x, y) {
+    if (breaches.has(`${x},${y}`)) return false;
     return [{ ...KEEP, gate: GATE }, ...strongpoints].some(point => {
       const inside = x >= point.left && x <= point.right && y >= point.top && y <= point.bottom;
       const edge = x === point.left || x === point.right || y === point.top || y === point.bottom;
@@ -139,6 +144,15 @@ export function createBattlefieldRenderer(canvas) {
       ctx.lineTo(leftX + tileW * .1, leftY + tileH * .1);
       ctx.stroke();
     }
+    if (wallDamage.has(`${x},${y}`)) {
+      ctx.strokeStyle = "#342f28";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y - tileH);
+      ctx.lineTo(base.x - tileW * .08, base.y - tileH * .45);
+      ctx.lineTo(base.x + tileW * .06, base.y - tileH * .1);
+      ctx.stroke();
+    }
     if ((y === point.top || y === point.bottom) && x % 2 === 0) {
       polygon([
         [top[0][0] - 3, top[0][1]], [top[1][0] + 3, top[1][1]],
@@ -208,6 +222,43 @@ export function createBattlefieldRenderer(canvas) {
       ], "#555f57", "#49564e", 1);
     }
     ctx.restore();
+  }
+
+  function drawCatapult(catapult) {
+    const p = project(catapult.x, catapult.y);
+    ctx.save();
+    ctx.translate(p.x, p.y + tileH * .48);
+    ctx.fillStyle = "#513b2c";
+    ctx.fillRect(-tileW * .23, -tileH * .09, tileW * .46, tileH * .18);
+    ctx.strokeStyle = "#c5a475";
+    ctx.lineWidth = Math.max(2, tileW * .045);
+    ctx.beginPath();
+    ctx.moveTo(-tileW * .17, -tileH * .18);
+    ctx.lineTo(tileW * .18, -tileH * .7);
+    ctx.stroke();
+    ctx.fillStyle = "#272c2a";
+    ctx.beginPath();
+    ctx.arc(tileW * .2, -tileH * .76, tileW * .065, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAimMarker(catapult) {
+    if (!catapult.aim) return;
+    const target = project(catapult.aim.x, catapult.aim.y);
+    ctx.strokeStyle = "#ffdd8a";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.ellipse(target.x, target.y + tileH * .5, tileW * .3, tileH * .22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawBreach(point) {
+    const p = project(point.x, point.y);
+    ctx.fillStyle = "#6e6a58";
+    ctx.fillRect(p.x - tileW * .14, p.y + tileH * .4, tileW * .28, tileH * .12);
   }
 
   function drawObjective(time) {
@@ -339,9 +390,16 @@ export function createBattlefieldRenderer(canvas) {
       const from = project(shot.from.x, shot.from.y);
       const to = project(shot.to.x, shot.to.y);
       const dx = to.x - from.x, dy = to.y - from.y;
-      const arc = Math.min(tileH * 1.4, Math.hypot(dx, dy) * .16);
+      const arc = shot.weapon === "catapult" ? tileH * 4 : Math.min(tileH * 1.4, Math.hypot(dx, dy) * .16);
       const x = from.x + dx * progress;
       const y = from.y + tileH * .1 + dy * progress - arc * 4 * progress * (1 - progress);
+      if (shot.weapon === "catapult") {
+        ctx.fillStyle = "#4e4c44";
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(3, tileW * .09), 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
       const angle = Math.atan2(dy - arc * 4 * (1 - 2 * progress), dx);
       const length = shot.weapon === "longbow" ? tileW * .25 : tileW * .18;
       ctx.save();
@@ -408,6 +466,12 @@ export function createBattlefieldRenderer(canvas) {
     }
     raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
     objects.forEach(obj => layers.push({ depth: obj.x + obj.y + .3, kind: "object", obj }));
+    breaches.forEach(key => {
+      const [x, y] = key.split(",").map(Number);
+      layers.push({ depth: x + y, kind: "breach", point: { x, y } });
+    });
+    (simulation.catapults || []).forEach(catapult =>
+      layers.push({ depth: catapult.x + catapult.y + .35, kind: "catapult", catapult }));
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     layers.sort((a, b) => a.depth - b.depth);
 
@@ -420,9 +484,12 @@ export function createBattlefieldRenderer(canvas) {
       if (layer.kind === "wall") drawWall(layer.x, layer.y, layer.point);
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
       else if (layer.kind === "object") drawObject(layer.obj);
+      else if (layer.kind === "breach") drawBreach(layer.point);
+      else if (layer.kind === "catapult") drawCatapult(layer.catapult);
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
+    (simulation.catapults || []).forEach(drawAimMarker);
     drawProjectiles(time);
     if (cursor.visible) {
       polygon(diamond(cursor.x, cursor.y), "rgba(241,211,137,.16)", "#ffe2a1", 2);
