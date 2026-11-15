@@ -4,13 +4,14 @@
 
 **Siege of Greywatch** is a browser-playable, isometric medieval siege strategy prototype set in the Northern March in 1348. Lead an attacking company through the keep’s open southern gate and capture its courtyard.
 
-> **Prototype status:** Movement, turn-taking, and courtyard capture are playable. Combat is not implemented yet; defenders can move on their turn but cannot fight or occupy the objective.
+> **Prototype status:** Movement, turn-taking, melee combat, health, fight points, and courtyard capture are playable. Combat currently supports adjacent melee attacks and automatic defender counterattacks; ranged attacks, line of sight, morale, and promotion remain future work.
 
 ## Play
 
 - Select a soldier with a click. Hold **Shift** while clicking to add or remove soldiers from your selection.
 - Click open ground to order selected soldiers to move; movement spends their move points.
-- Select **End turn** to let defenders move, restore your move points, and advance courtyard capture.
+- Move a selected soldier next to a defender, then click the defender to make a melee attack; each soldier has one fight point per turn. Health bars show remaining health.
+- Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. Losing all attackers ends the battle.
 - Drag the battlefield to pan. Use the mouse wheel or the **+ / −** buttons to zoom.
 
 ## Run locally

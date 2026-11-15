@@ -42,6 +42,8 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["map"], MAP)
         self.assertEqual(data["entry"]["name"], self.game.name)
         self.assertEqual(data["state"]["units"][0]["move_points"], 4)
+        self.assertEqual(data["state"]["units"][0]["health"], 3)
+        self.assertEqual(data["state"]["units"][0]["fight_points"], 1)
         self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 2)
         self.assertEqual(GameInstance.objects.count(), 1)
 
@@ -63,6 +65,20 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual([unit["id"] for unit in battlefield["units"] if unit["side"] == "defenders"], [6, 7])
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))
         self.assertNotIn("test-only-key", request.data.decode())
+
+    def test_attack_action_persists_damage_and_spent_fight_point(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0].update(x=12, y=4)
+        instance.save(update_fields=["state"])
+
+        attacked = self.action(0, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(attacked.status_code, 200)
+        state = attacked.json()["state"]
+        self.assertEqual(state["units"][0]["fight_points"], 0)
+        self.assertEqual(state["units"][6]["health"], 2)
+        self.assertEqual(attacked.json()["revision"], 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
 
     def test_rejects_stale_invalid_and_unauthorized_actions(self):
         self.assertEqual(self.client.get(reverse("current-game")).status_code, 404)

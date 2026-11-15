@@ -7,6 +7,65 @@ from ..engine import (
 
 
 class TurnEngineTests(TestCase):
+    def test_units_start_with_health_and_fight_points(self):
+        state = initial_state()
+        self.assertEqual(
+            (state["units"][0]["health"], state["units"][0]["max_health"],
+             state["units"][0]["fight_points"]),
+            (3, 3, 1),
+        )
+
+    def test_melee_attack_spends_a_fight_point_and_damages_adjacent_defender(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=4)
+        original = state["units"][6]["health"]
+        attacked = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(attacked["units"][0]["fight_points"], 0)
+        self.assertEqual(attacked["units"][6]["health"], original - 1)
+        self.assertEqual(state["units"][0]["fight_points"], 1)
+        with self.assertRaises(InvalidAction):
+            apply_action(attacked, {"type": "attack", "unit_id": 0, "target_id": 6})
+
+    def test_melee_attack_removes_defeated_defender(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=4)
+        state["units"][6]["health"] = 1
+        attacked = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertNotIn(6, [unit["id"] for unit in attacked["units"]])
+        self.assertIn(6, [unit["id"] for unit in state["units"]])
+
+    def test_melee_rejects_nonadjacent_friendly_or_invalid_targets(self):
+        state = initial_state()
+        for action in (
+            {"type": "attack", "unit_id": 0, "target_id": 6},
+            {"type": "attack", "unit_id": 6, "target_id": 0},
+            {"type": "attack", "unit_id": 0, "target_id": 1},
+            {"type": "attack", "unit_id": True, "target_id": 6},
+        ):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action)
+        self.assertEqual(state["units"][0]["fight_points"], 1)
+
+    def test_defender_counterattacks_and_can_defeat_the_attacking_company(self):
+        state = initial_state()
+        attacker, defender = state["units"][0], state["units"][6]
+        state["units"] = [attacker, defender]
+        attacker.update(x=12, y=6, health=1)
+        defender.update(x=12, y=5)
+        ended = apply_action(state, {"type": "end_turn"})
+        self.assertTrue(ended["defeated"])
+        self.assertEqual(ended["units"], [ended["units"][0]])
+        self.assertEqual(ended["units"][0]["side"], "defenders")
+        with self.assertRaises(InvalidAction):
+            apply_action(ended, {"type": "end_turn"})
+
+    def test_defender_counterattack_reduces_health_without_defeat(self):
+        state = initial_state()
+        state["units"][0].update(x=12, y=6)
+        ended = apply_action(state, {"type": "end_turn"})
+        self.assertEqual(ended["units"][0]["health"], 2)
+        self.assertFalse(ended["defeated"])
+
     def test_path_to_courtyard_uses_gate_and_walls_block_moves(self):
         path = find_path((10, 9), (MAP["objective"]["x"], MAP["objective"]["y"]))
         self.assertIn((MAP["gate"]["x"], MAP["gate"]["y"]), path)

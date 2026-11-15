@@ -37,7 +37,8 @@
     wallDark: "#5b5b4b",
     stone: "#746e5e"
   };
-  const simulation = { units: [], selected: new Set(), captured: false, captureProgress: 0 };
+  const simulation = { units: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  let startingAttackerCount = 0;
   let instanceId = null;
   let revision = 0;
   let pendingAction = false;
@@ -323,6 +324,11 @@
       ctx.beginPath(); ctx.moveTo(8, -14 + bob); ctx.lineTo(14, -14 + bob); ctx.stroke();
     }
     ctx.restore();
+    const healthRatio = Math.max(0, unit.health / unit.max_health);
+    ctx.fillStyle = "rgba(20,25,20,.8)";
+    ctx.fillRect(p.x - 10, p.y - tileH * .25, 20, 3);
+    ctx.fillStyle = healthRatio > .5 ? "#9aba78" : healthRatio > .25 ? "#d8b260" : "#bd6c58";
+    ctx.fillRect(p.x - 10, p.y - tileH * .25, 20 * healthRatio, 3);
     if (unit.side === "defenders") {
       ctx.strokeStyle = "#b5c9e6";
       ctx.lineWidth = 2;
@@ -373,6 +379,18 @@
     sendAction({ type: "move", units: [...simulation.selected], x, y });
   }
 
+  function attackSelected(target) {
+    const attacker = simulation.units.find(unit =>
+      simulation.selected.has(unit.id) && unit.fight_points > 0 &&
+      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1
+    );
+    if (!attacker) {
+      showToast("Select a soldier with a fight point next to that defender.");
+      return;
+    }
+    sendAction({ type: "attack", unit_id: attacker.id, target_id: target.id });
+  }
+
   function pickTile(localX, localY) {
     const a = (localX - originX) / (tileW / 2);
     const b = (localY - originY) / (tileH / 2);
@@ -382,7 +400,7 @@
   }
 
   function handlePointer(event) {
-    if (simulation.captured || pendingAction) return;
+    if (simulation.captured || simulation.defeated || pendingAction) return;
     const rect = canvas.getBoundingClientRect();
     const px = (event.clientX - rect.left - camera.x) / camera.zoom;
     const py = (event.clientY - rect.top - camera.y) / camera.zoom;
@@ -406,6 +424,15 @@
       updateSelection();
       return;
     }
+    const target = simulation.units.find(unit => {
+      if (unit.side !== "defenders") return false;
+      const p = project(unit.x, unit.y);
+      return Math.hypot(px - p.x, py - (p.y + tileH * .1)) < Math.max(17, tileW * .29);
+    });
+    if (target) {
+      attackSelected(target);
+      return;
+    }
     const tile = pickTile(px, py);
     if (!isWalkable(tile.x, tile.y)) {
       showToast("Stone walls bar the way. Enter through the south gate.");
@@ -427,9 +454,11 @@
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = snapshot.map);
     simulation.units = snapshot.state.units;
     simulation.captured = snapshot.state.captured;
+    simulation.defeated = snapshot.state.defeated || false;
     simulation.captureProgress = snapshot.state.capture_progress;
     const attackers = simulation.units.filter(unit => unit.side !== "defenders");
     const defenders = simulation.units.filter(unit => unit.side === "defenders");
+    startingAttackerCount = snapshot.map.startPositions.length;
     if (newGame) simulation.selected = new Set([attackers[0].id]);
     else simulation.selected = new Set([...simulation.selected].filter(id => attackers.some(unit => unit.id === id)));
     const roster = [
@@ -449,7 +478,11 @@
       const title = document.createElement("b");
       title.textContent = item.name;
       const detail = document.createElement("small");
-      detail.textContent = `${attackers.filter(unit => unit.type === item.type).length} · ${item.role}`;
+      const typeUnits = attackers.filter(unit => unit.type === item.type);
+      const health = typeUnits.reduce((total, unit) => total + unit.health, 0);
+      const maxHealth = typeUnits.reduce((total, unit) => total + unit.max_health, 0);
+      const fightPoints = typeUnits.reduce((total, unit) => total + unit.fight_points, 0);
+      detail.textContent = `${typeUnits.length} · ${item.role} · ${health}/${maxHealth} HP · ${fightPoints} FP`;
       copy.append(title, detail);
       const dot = document.createElement("i");
       dot.className = "health-dot";
@@ -458,10 +491,14 @@
     }));
     statusNode.textContent = snapshot.state.capture_status;
     progressNode.style.width = `${Math.round(simulation.captureProgress * 100)}%`;
-    countNode.textContent = `${String(attackers.length).padStart(2, "0")} / ${String(attackers.length).padStart(2, "0")}`;
+    countNode.textContent = `${String(attackers.length).padStart(2, "0")} / ${String(startingAttackerCount).padStart(2, "0")}`;
     turnNode.textContent = `Turn ${snapshot.state.turn}`;
-    victoryNode.hidden = !simulation.captured;
-    endTurnButton.disabled = pendingAction || simulation.captured;
+    victoryNode.hidden = !simulation.captured && !simulation.defeated;
+    victoryNode.classList.toggle("defeat", simulation.defeated);
+    victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated ? "THE COMPANY HAS FALLEN" : "GREYWATCH HAS FALLEN";
+    victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken." : "The keep is yours.";
+    victoryNode.querySelector("p").textContent = simulation.defeated ? "No attackers remain on the field." : "Your small band has secured the courtyard.";
+    endTurnButton.disabled = pendingAction || simulation.captured || simulation.defeated;
     draw();
   }
 
@@ -494,7 +531,8 @@
       const wasCaptured = simulation.captured;
       applySnapshot(snapshot);
       if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
-      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : "Order received.");
+      else if (simulation.defeated) showToast("Your company has been defeated.");
+      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "attack" ? "Melee attack resolved." : "Order received.");
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -507,7 +545,7 @@
       showToast(`Order failed: ${error.message}`);
     } finally {
       pendingAction = false;
-      endTurnButton.disabled = simulation.captured;
+      endTurnButton.disabled = simulation.captured || simulation.defeated;
     }
   }
 
@@ -630,7 +668,7 @@
       animationStarted = true;
       requestAnimationFrame(frame);
     }
-    showToast(`Playing ${entry.name}. Select a unit and move, then end the turn.`);
+    showToast(`Playing ${entry.name}. Select a unit, move or attack, then end the turn.`);
   }
 
   async function launchGame(entry, kind, gameId = null) {
@@ -648,12 +686,12 @@
       else renderCatalogMessage(`Could not start game: ${error.message}`, true);
     } finally {
       pendingAction = false;
-      endTurnButton.disabled = simulation.captured;
+      endTurnButton.disabled = simulation.captured || simulation.defeated;
     }
   }
 
   canvas.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || simulation.captured || pendingAction) return;
+    if (event.button !== 0 || simulation.captured || simulation.defeated || pendingAction) return;
     activePointer = {
       id: event.pointerId,
       x: event.clientX,

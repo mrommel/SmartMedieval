@@ -26,9 +26,11 @@
 - [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
 - [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.
-- [ ] Give units fight points, health, and morale, with turn-based rules for spending and changing them.
+- [ ] Complete unit stats and turn-based combat rules.
+  - [x] Add health, one fight point per turn, adjacent melee attacks, defender counterattacks, casualties, and defeat state.
+  - [ ] Add morale and promotion effects to unit stats.
 - [ ] Allow units to promote to higher ranks with increased point allowances.
-- [ ] Add melee, bow, and crossbow combat with distinct attack ranges, reload times, health, projectile motion, and line-of-sight checks.
+- [ ] Extend combat with bow and crossbow ranges, reload times, projectile motion, and line-of-sight checks.
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
 
@@ -44,7 +46,7 @@
 ## Release and validation
 
 - [x] Add server-engine and API tests for pathfinding, movement, turn transitions, objective capture, session access, and stale actions, plus Django catalog/page smoke tests.
-- [ ] Add automated tests for line of sight and combat as those systems are implemented.
+- [ ] Add automated tests for line of sight, ranged combat, morale, and promotion as those systems are implemented.
 - [ ] Test game editing and scenario links, server-loaded instances and action updates, turn rules, elevation traversal, unit stats and promotion, and enemy AI.
 - [ ] Test the complete scenario in current desktop and mobile browsers and tune performance and balance.
 - [ ] Document local setup, controls, asset workflow, and production build/deployment steps.

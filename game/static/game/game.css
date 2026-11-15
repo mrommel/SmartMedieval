@@ -97,6 +97,7 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .victory[hidden] { display: none; }
 .victory-card { width: min(330px, calc(100% - 32px)); padding: 25px; text-align: center; border: 1px solid rgba(224,194,132,.48); background: #202b26; box-shadow: 0 15px 50px #101611aa; }
 .victory-kicker { color: var(--gold); font-size: 9px; font-weight: 700; letter-spacing: .15em; }
+.victory.defeat .victory-kicker { color: #d78a72; }
 .victory-card h2 { margin: 8px 0 4px; font: 600 26px "Playfair Display", Georgia, serif; }
 .victory-card p { margin: 0 0 18px; color: #b0b6a9; font-size: 12px; }
 .victory-card button { padding: 9px 16px; border: 0; color: #1c261f; background: #d6bb84; font-size: 11px; font-weight: 700; cursor: pointer; }

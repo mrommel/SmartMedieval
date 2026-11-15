@@ -23,6 +23,9 @@ MAP = {
     ],
 }
 MOVE_POINTS = 4
+MAX_HEALTH = 3
+FIGHT_POINTS = 1
+ATTACK_DAMAGE = 1
 
 
 class InvalidAction(ValueError):
@@ -78,7 +81,7 @@ def validate_map(map_data):
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
             if name == "enemyStartPositions" and (position["x"], position["y"]) == (
                     objective["x"], objective["y"]):
-                raise InvalidMap("Defenders cannot start on the objective before combat is available.")
+                raise InvalidMap("Defenders cannot start on the objective.")
     if "enemyStartPositions" in map_data:
         attacker_tiles = {(point["x"], point["y"]) for point in map_data["startPositions"]}
         if any((point["x"], point["y"]) in attacker_tiles for point in map_data["enemyStartPositions"]):
@@ -221,15 +224,21 @@ def initial_state(map_data=MAP):
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
                 "move_points": MOVE_POINTS,
+                "health": MAX_HEALTH,
+                "max_health": MAX_HEALTH,
+                "fight_points": FIGHT_POINTS,
             }
             for index, point in enumerate(attackers + enemy_positions)
         ],
         "capture_progress": 0,
         "captured": False,
+        "defeated": False,
     }
 
 
 def capture_status(state, map_data=MAP):
+    if state.get("defeated", False):
+        return "DEFEATED"
     if state["captured"]:
         return "SECURED"
     objective = map_data["objective"]
@@ -240,12 +249,42 @@ def capture_status(state, map_data=MAP):
 
 
 def apply_action(state, action, map_data=MAP, enemy_orders=()):
-    if not isinstance(action, dict) or action.get("type") not in ("move", "end_turn"):
+    if not isinstance(action, dict) or action.get("type") not in ("move", "attack", "end_turn"):
         raise InvalidAction("Unknown action.")
-    if state["captured"]:
+    if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The courtyard has already been secured.")
 
-    next_state = {**state, "units": [unit.copy() for unit in state["units"]]}
+    next_state = {**state, "units": [
+        {
+            **unit,
+            "health": unit.get("health", MAX_HEALTH),
+            "max_health": unit.get("max_health", MAX_HEALTH),
+            "fight_points": unit.get("fight_points", FIGHT_POINTS),
+        }
+        for unit in state["units"]
+    ], "defeated": state.get("defeated", False)}
+    if action["type"] == "attack":
+        if set(action) != {"type", "unit_id", "target_id"}:
+            raise InvalidAction("Invalid attack action.")
+        unit_id, target_id = action["unit_id"], action["target_id"]
+        if type(unit_id) is not int or type(target_id) is not int:
+            raise InvalidAction("Choose a valid attacker and target.")
+        units = {unit["id"]: unit for unit in next_state["units"]}
+        attacker, target = units.get(unit_id), units.get(target_id)
+        if attacker is None or attacker.get("side", "attackers") != "attackers":
+            raise InvalidAction("Only your soldiers can attack.")
+        if target is None or target.get("side", "attackers") != "defenders":
+            raise InvalidAction("Choose a living defender as the target.")
+        if attacker["fight_points"] < 1:
+            raise InvalidAction("This soldier has no fight points left.")
+        if abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1:
+            raise InvalidAction("Move next to a defender to attack.")
+        attacker["fight_points"] -= 1
+        target["health"] -= ATTACK_DAMAGE
+        if target["health"] <= 0:
+            next_state["units"].remove(target)
+        return next_state
+
     if action["type"] == "end_turn":
         if set(action) != {"type"}:
             raise InvalidAction("Invalid end-turn action.")
@@ -254,6 +293,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
             unit["move_points"] = MOVE_POINTS
+            unit["fight_points"] = FIGHT_POINTS
         ordered = set()
         for order in enemy_orders:
             if not isinstance(order, dict) or set(order) != {"unit_id", "x", "y"}:
@@ -272,6 +312,24 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             unit["x"], unit["y"] = path[-1]
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= len(path)
+        for defender in [unit for unit in next_state["units"] if unit.get("side") == "defenders"]:
+            if defender["fight_points"] < 1:
+                continue
+            adjacent_attackers = [
+                unit for unit in next_state["units"]
+                if unit.get("side", "attackers") == "attackers"
+                and abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1
+            ]
+            if not adjacent_attackers:
+                continue
+            target = min(adjacent_attackers, key=lambda unit: (unit["health"], unit["id"]))
+            defender["fight_points"] -= 1
+            target["health"] -= ATTACK_DAMAGE
+            if target["health"] <= 0:
+                next_state["units"].remove(target)
+        next_state["defeated"] = not any(
+            unit.get("side", "attackers") == "attackers" for unit in next_state["units"]
+        )
         objective = map_data["objective"]
         occupiers = sum(
             (unit["x"], unit["y"]) == (objective["x"], objective["y"])
@@ -285,9 +343,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             next_state["capture_progress"] = max(0, state["capture_progress"] - 0.25)
         next_state["turn"] += 1
         for unit in next_state["units"]:
-            if unit.get("side", "attackers") != "attackers":
-                continue
-            unit["move_points"] = MOVE_POINTS
+            if unit.get("side", "attackers") == "attackers":
+                unit["move_points"] = MOVE_POINTS
+                unit["fight_points"] = FIGHT_POINTS
         return next_state
 
     if set(action) != {"type", "units", "x", "y"}:
