@@ -320,6 +320,11 @@ def resolve_defender_goals(state, goals, map_data=MAP):
     orders = []
     seen = set()
     positions = {unit["id"]: (unit["x"], unit["y"]) for unit in state["units"]}
+    objective = (map_data["objective"]["x"], map_data["objective"]["y"])
+
+    def guarding(tile):
+        return abs(tile[0] - objective[0]) + abs(tile[1] - objective[1]) <= 2
+
     for goal in goals:
         if not isinstance(goal, dict) or set(goal) != {"unit_id", "x", "y"}:
             raise InvalidAction("Invalid defender goal.")
@@ -337,7 +342,13 @@ def resolve_defender_goals(state, goals, map_data=MAP):
         destinations = defender_destinations(unit, map_data, blocked)
         if not destinations:
             continue
-        objective = (map_data["objective"]["x"], map_data["objective"]["y"])
+        # A nearby garrison must not abandon the objective unless another defender
+        # is already guarding it. Apply this to reachable tiles, not raw AI goals.
+        if guarding(start) and not any(
+                guarding(positions[other_id]) for other_id in defenders if other_id != unit_id):
+            destinations = [tile for tile in destinations if guarding(tile)]
+            if not destinations:
+                continue
         route = find_path(start, (x, y), map_data, blocked=blocked | {objective})
         along_route = [tile for tile in (route or [])[:move_allowance(unit)] if tile in destinations]
         if along_route:
@@ -538,7 +549,11 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             ]
             if not targets:
                 continue
-            target = min(targets, key=lambda unit: (unit["health"], unit["id"]))
+            objective = map_data["objective"]
+            target = min(targets, key=lambda unit: (
+                (unit["x"], unit["y"]) != (objective["x"], objective["y"]),
+                unit["health"], unit["id"],
+            ))
             defender["fight_points"] -= 1
             if ranged:
                 defender["reload_turns"] = RANGED_UNIT_STATS[defender["type"]]["reload_turns"]

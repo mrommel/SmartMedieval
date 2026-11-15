@@ -111,6 +111,10 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).status_code, 400)
         self.assertEqual(self.client.get(reverse("current-game")).json()["map"]["objects"],
                          started["map"]["objects"])
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 200)
+        request = self.ai.call_args.args[0]
+        ai_map = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertEqual(ai_map["objects"], started["map"]["objects"])
         self.assertEqual(self.start().json()["map"]["objects"], [])
 
     def test_attack_action_persists_damage_and_spent_fight_point(self):

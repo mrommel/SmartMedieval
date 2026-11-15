@@ -13,7 +13,7 @@
 - Raised tiles are marked with their height or a ladder/ramp symbol. Moving one level up or down requires a ladder or ramp on the higher tile; each step costs one move point. Melee attacks require both soldiers to be on the same level.
 - Move a selected vanguard next to a defender, then click the defender to make a melee attack. Longbows and crossbows can fire at defenders within range through clear lines of sight, then must reload. Recruits have one fight point per turn. Health bars show remaining health.
 - Defeating an enemy raises the victor's morale by one (up to 5); nearby allies of a fallen soldier lose one (down to 0). Morale 0–1 reduces next turn's movement by one; morale 5 increases it by one. Select one recruit with 5 morale and press **Promote** to gain veteran rank, resetting morale to 3 and granting an extra move and fight point from the following turn.
-- Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. Losing all attackers ends the battle.
+- Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. A nearby defender guards the objective, and defenders prioritize attackers capturing it when they can attack. Losing all attackers ends the battle.
 - Drag the battlefield to pan. Use the mouse wheel or the **+ / −** buttons to zoom.
 - Select **Pause** to freeze animations and prevent new orders; orders already sent to the server still finish. Select **Resume** to continue. The **Animation speed** selector supports Off, 0.5×, 1× and 2× and is saved on your device. The device's reduced-motion preference also turns animations off.
 

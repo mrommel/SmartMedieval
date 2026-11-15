@@ -531,6 +531,50 @@ class TurnEngineTests(TestCase):
         moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
         self.assertEqual(len({(unit["x"], unit["y"]) for unit in moved["units"]}), len(moved["units"]))
 
+    def test_last_objective_guard_stays_nearby_despite_a_distant_goal(self):
+        state = initial_state()
+        state["units"][6].update(x=14, y=6)
+        orders = resolve_defender_goals(state, [{"unit_id": 6, "x": 12, "y": 5}])
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
+        guard = moved["units"][6]
+        self.assertLessEqual(abs(guard["x"] - 14) + abs(guard["y"] - 7), 2)
+        self.assertNotEqual((guard["x"], guard["y"]), (12, 5))
+
+    def test_objective_guard_can_leave_after_another_takes_over(self):
+        state = initial_state()
+        state["units"][6].update(x=14, y=6)
+        orders = resolve_defender_goals(state, [
+            {"unit_id": 7, "x": 15, "y": 8}, {"unit_id": 6, "x": 12, "y": 5},
+        ])
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
+        self.assertEqual((moved["units"][6]["x"], moved["units"][6]["y"]), (12, 5))
+        self.assertEqual((moved["units"][7]["x"], moved["units"][7]["y"]), (15, 8))
+
+    def test_two_guards_cannot_both_abandon_the_objective(self):
+        state = initial_state()
+        state["units"][6].update(x=14, y=6)
+        state["units"][7].update(x=15, y=7)
+        orders = resolve_defender_goals(state, [
+            {"unit_id": 6, "x": 12, "y": 5}, {"unit_id": 7, "x": 16, "y": 8},
+        ])
+        moved = apply_action(state, {"type": "end_turn"}, enemy_orders=orders)
+        self.assertTrue(any(
+            abs(unit["x"] - 14) + abs(unit["y"] - 7) <= 2
+            for unit in moved["units"] if unit["side"] == "defenders"
+        ))
+
+    def test_defenders_prioritize_capturer_over_wounded_nonoccupier(self):
+        for weapon, position in (("vanguard", (14, 6)), ("longbow", (14, 4))):
+            with self.subTest(weapon=weapon):
+                state = initial_state()
+                state["units"][6].update(x=position[0], y=position[1], type=weapon)
+                state["units"][0].update(x=14, y=7)
+                state["units"][1].update(x=13, y=6, health=1)
+                result = apply_action(state, {"type": "end_turn"})
+                shot = next(event for event in result["history"] if event["actor_id"] == 6)
+                self.assertEqual(shot["target_id"], 0)
+                self.assertEqual(result["capture_progress"], 0.5)
+
     def test_defender_destinations_match_legal_reachable_tiles(self):
         state = initial_state()
         unit = state["units"][6]
