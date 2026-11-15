@@ -28,6 +28,7 @@
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
   const selectedStats = document.getElementById("selected-stats");
+  const historyList = document.getElementById("combat-history-list");
   const cursorStatus = document.getElementById("cursor-status");
   const continueButton = document.getElementById("continue-game");
   const launchError = document.getElementById("launch-error");
@@ -675,6 +676,30 @@
     updateControls();
   }
 
+  function renderHistory(history) {
+    const entries = history || [];
+    if (!entries.length) {
+      const empty = document.createElement("li");
+      empty.textContent = "No combat yet.";
+      historyList.replaceChildren(empty);
+      return;
+    }
+    historyList.replaceChildren(...entries.map(event => {
+      const item = document.createElement("li");
+      const actor = `${event.actor_side === "defenders" ? "Defender" : "Attacker"} ${event.actor_type} #${event.actor_id + 1}`;
+      if (event.type === "promote") {
+        item.textContent = `Turn ${event.turn} · ${actor} promoted to veteran (morale ${event.morale_change}).`;
+      } else {
+        const target = `${event.target_side === "defenders" ? "defender" : "attacker"} ${event.target_type} #${event.target_id + 1}`;
+        const morale = event.morale_changes.map(change =>
+          `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+      }
+      return item;
+    }));
+    historyList.scrollTop = historyList.scrollHeight;
+  }
+
   function applySnapshot(snapshot) {
     const newGame = instanceId !== snapshot.id;
     if (newGame) {
@@ -737,6 +762,7 @@
     progressNode.style.width = `${Math.round(simulation.captureProgress * 100)}%`;
     countNode.textContent = `${String(attackers.length).padStart(2, "0")} / ${String(startingAttackerCount).padStart(2, "0")}`;
     turnNode.textContent = `Turn ${snapshot.state.turn}`;
+    renderHistory(snapshot.state.history);
     victoryNode.hidden = !simulation.captured && !simulation.defeated;
     victoryNode.classList.toggle("defeat", simulation.defeated);
     victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated ? "THE COMPANY HAS FALLEN" : "GREYWATCH HAS FALLEN";

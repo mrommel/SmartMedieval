@@ -41,7 +41,7 @@
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
   - [x] Add pause/resume, locally saved animation-speed controls, reduced-motion support, and damage/casualty feedback.
   - [x] Add keyboard-accessible battlefield orders.
-  - [ ] Add richer combat history.
+  - [x] Add richer combat history: persist the latest 100 attacks and promotions, including casualties and morale changes, and show them in the battlefield sidebar.
 
 ## Asset creation
 

@@ -1,12 +1,65 @@
 from django.test import TestCase
 
 from ..engine import (
-    MAP, InvalidAction, InvalidMap, apply_action, default_map, defender_destinations, find_path,
+    HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, default_map, defender_destinations, find_path,
     has_line_of_sight, initial_state, is_walkable, resolve_defender_goals, validate_map,
 )
 
 
 class TurnEngineTests(TestCase):
+    def test_combat_history_records_player_attack_casualty_and_morale(self):
+        state = initial_state()
+        self.assertEqual(state["history"], [])
+        state["units"][0].update(x=12, y=4, morale=4)
+        state["units"][6]["health"] = 1
+        state["units"][7].update(x=12, y=7)
+        result = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(result["history"], [{
+            "turn": 1, "type": "attack", "actor_id": 0, "actor_side": "attackers",
+            "actor_type": "vanguard", "target_id": 6, "target_side": "defenders",
+            "target_type": "vanguard", "damage": 1, "killed": True,
+            "morale_changes": [{"unit_id": 0, "change": 1}, {"unit_id": 7, "change": -1}],
+        }])
+        self.assertEqual(state["history"], [])
+        with self.assertRaises(InvalidAction):
+            apply_action(result, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(len(result["history"]), 1)
+
+    def test_history_tracks_defender_shots_in_order_before_turn_increments(self):
+        state = initial_state()
+        state["units"][0].update(x=4, y=6, health=1)
+        state["units"][1].update(x=5, y=7)
+        state["units"][6].update(x=6, y=6, type="longbow")
+        state["units"][7].update(x=7, y=7, type="crossbow")
+        result = apply_action(state, {"type": "end_turn"})
+        self.assertEqual(result["turn"], 2)
+        self.assertEqual([(event["turn"], event["type"], event["actor_id"],
+                           event["target_id"], event["killed"]) for event in result["history"]],
+                         [(1, "ranged_attack", 6, 0, True), (1, "ranged_attack", 7, 1, False)])
+        self.assertEqual(state["history"], [])
+
+    def test_history_records_promotion_and_preserves_legacy_states(self):
+        state = initial_state()
+        del state["history"]
+        state["units"][0]["morale"] = 5
+        promoted = apply_action(state, {"type": "promote", "unit_id": 0})
+        self.assertEqual(promoted["history"], [{
+            "turn": 1, "type": "promote", "actor_id": 0,
+            "actor_side": "attackers", "actor_type": "vanguard", "morale_change": -2,
+        }])
+        self.assertNotIn("history", state)
+
+    def test_combat_history_is_bounded_and_unrelated_actions_do_not_add_entries(self):
+        state = initial_state()
+        state["history"] = [{"turn": turn} for turn in range(HISTORY_LIMIT)]
+        state["units"][0].update(x=12, y=4)
+        moved = apply_action(state, {"type": "move", "units": [1], "x": 4, "y": 7})
+        self.assertEqual(moved["history"], state["history"])
+        result = apply_action(moved, {"type": "attack", "unit_id": 0, "target_id": 6})
+        self.assertEqual(len(result["history"]), HISTORY_LIMIT)
+        self.assertEqual(result["history"][0], {"turn": 1})
+        self.assertEqual(state["history"][0], {"turn": 0})
+
     def test_elevation_requires_connector_for_climbing_and_descending(self):
         battlefield = default_map()
         battlefield["elevation"] = [{"x": 3, "y": 5, "height": 1},

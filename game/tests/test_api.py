@@ -46,6 +46,7 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["state"]["units"][0]["fight_points"], 1)
         self.assertEqual(data["state"]["units"][0]["morale"], 3)
         self.assertEqual(data["state"]["units"][0]["rank"], "recruit")
+        self.assertEqual(data["state"]["history"], [])
         self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 2)
         self.assertEqual(GameInstance.objects.count(), 1)
 
@@ -109,6 +110,24 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(attacked.json()["revision"], 1)
         self.assertEqual(attacked.json()["combat_events"], [])
         self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
+
+    def test_combat_history_survives_reload_and_resets_on_restart(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][2].update(x=2, y=6)
+        instance.state["units"][6].update(x=6, y=6, health=1)
+        instance.save(update_fields=["state"])
+        attacked = self.action(0, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertEqual(attacked.status_code, 200)
+        event = attacked.json()["state"]["history"][0]
+        self.assertEqual((event["turn"], event["actor_id"], event["target_id"], event["killed"]),
+                         (1, 2, 6, True))
+        self.assertEqual(event["morale_changes"], [{"unit_id": 2, "change": 1}])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["history"], [event])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["history"], [event])
+        self.assertNotIn("combat_events", GameInstance.objects.get(pk=started["id"]).state)
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.start().json()["state"]["history"], [])
 
     def test_promotion_requires_morale_and_persists_veteran_allowances(self):
         started = self.start().json()

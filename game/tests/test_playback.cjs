@@ -15,7 +15,7 @@ function element() {
     setAttribute(name, value) { this[name] = value; },
     querySelector() { return element(); },
     getBoundingClientRect() { return { width: 600, height: 400, left: 0, top: 0 }; },
-    setPointerCapture() {}, append() {}, replaceChildren() {},
+    setPointerCapture() {}, append() {}, replaceChildren(...children) { this.children = children; },
     fire(type, event = {}) { return listeners[type]?.(event); }
   };
 }
@@ -116,6 +116,22 @@ test("speed persists, restores, and off disables per-frame drawing", async () =>
   game.frame(16);
   assert.equal(game.draws(), count);
   assert.equal(setup("0").get("animation-speed").value, "0");
+});
+
+test("combat history renders on resume and updates after an action", async () => {
+  const game = setup();
+  game.snapshot.state.history = [{ turn: 1, type: "promote", actor_id: 0,
+    actor_side: "attackers", actor_type: "vanguard", morale_change: -2 }];
+  await game.get("continue-game").fire("click");
+  const list = game.get("combat-history-list");
+  assert.match(list.children[0].textContent, /Turn 1.*promoted to veteran/);
+  game.snapshot.state.history.push({ turn: 2, type: "ranged_attack", actor_id: 1,
+    actor_side: "defenders", actor_type: "longbow", target_id: 0,
+    target_side: "attackers", target_type: "vanguard", damage: 1, killed: true,
+    morale_changes: [{ unit_id: 1, change: 1 }] });
+  await game.get("end-turn").fire("click");
+  assert.equal(list.children.length, 2);
+  assert.match(list.children[1].textContent, /Turn 2.*shot attacker vanguard #1 for 1 damage \(fallen\).*Morale: #2 \+1/);
 });
 
 test("keyboard cursor selects groups, moves, attacks, and cannot order while paused", async () => {

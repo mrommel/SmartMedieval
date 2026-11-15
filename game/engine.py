@@ -28,6 +28,7 @@ FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
 STARTING_MORALE = 3
 MAX_MORALE = 5
+HISTORY_LIMIT = 100
 RANGED_UNIT_STATS = {
     # End-turn processing ticks cooldowns, including the transition after firing.
     "longbow": {"range": 5, "reload_turns": 2},
@@ -239,12 +240,35 @@ def fight_allowance(unit):
 
 def record_casualty(state, killer, casualty):
     """A kill rallies its victor; nearby surviving comrades lose heart."""
+    morale_changes = []
+    before = killer["morale"]
     killer["morale"] = min(MAX_MORALE, killer["morale"] + 1)
+    if killer["morale"] != before:
+        morale_changes.append({"unit_id": killer["id"], "change": killer["morale"] - before})
     for unit in state["units"]:
         if unit is not casualty and unit.get("side", "attackers") == casualty.get("side", "attackers"):
             if max(abs(unit["x"] - casualty["x"]), abs(unit["y"] - casualty["y"])) <= 3:
+                before = unit["morale"]
                 unit["morale"] = max(0, unit["morale"] - 1)
+                if unit["morale"] != before:
+                    morale_changes.append({"unit_id": unit["id"], "change": unit["morale"] - before})
     state["units"].remove(casualty)
+    return morale_changes
+
+
+def record_attack(state, attacker, target, ranged):
+    """Resolve damage and retain a compact, chronological account of combat."""
+    damage = min(ATTACK_DAMAGE, target["health"])
+    target["health"] -= ATTACK_DAMAGE
+    killed = target["health"] <= 0
+    morale_changes = record_casualty(state, attacker, target) if killed else []
+    state["history"] = (state["history"] + [{
+        "turn": state["turn"], "type": "ranged_attack" if ranged else "attack",
+        "actor_id": attacker["id"], "actor_side": attacker.get("side", "attackers"),
+        "actor_type": attacker["type"], "target_id": target["id"],
+        "target_side": target.get("side", "attackers"), "target_type": target["type"],
+        "damage": damage, "killed": killed, "morale_changes": morale_changes,
+    }])[-HISTORY_LIMIT:]
 
 
 def defender_destinations(unit, map_data=MAP, blocked=()):
@@ -355,6 +379,7 @@ def initial_state(map_data=MAP):
         "capture_progress": 0,
         "captured": False,
         "defeated": False,
+        "history": [],
     }
 
 
@@ -389,7 +414,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "rank": unit.get("rank", "recruit"),
         }
         for unit in state["units"]
-    ], "defeated": state.get("defeated", False)}
+    ], "defeated": state.get("defeated", False), "history": list(state.get("history", []))}
     if action["type"] == "promote":
         if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
             raise InvalidAction("Choose one soldier to promote.")
@@ -400,6 +425,11 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         unit["rank"] = "veteran"
         unit["morale"] = STARTING_MORALE
         # New point allowances take effect on the next turn, not mid-turn.
+        next_state["history"] = (next_state["history"] + [{
+            "turn": next_state["turn"], "type": "promote", "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_type": unit["type"],
+            "morale_change": STARTING_MORALE - MAX_MORALE,
+        }])[-HISTORY_LIMIT:]
         return next_state
     if action["type"] in ("attack", "ranged_attack"):
         ranged = action["type"] == "ranged_attack"
@@ -440,9 +470,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
               or attacker["z"] != target["z"]):
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
-        target["health"] -= ATTACK_DAMAGE
-        if target["health"] <= 0:
-            record_casualty(next_state, attacker, target)
+        record_attack(next_state, attacker, target, ranged)
         return next_state
 
     if action["type"] == "end_turn":
@@ -499,9 +527,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                         "from": {"x": defender["x"], "y": defender["y"]},
                         "to": {"x": target["x"], "y": target["y"]},
                     })
-            target["health"] -= ATTACK_DAMAGE
-            if target["health"] <= 0:
-                record_casualty(next_state, defender, target)
+            record_attack(next_state, defender, target, ranged)
         next_state["defeated"] = not any(
             unit.get("side", "attackers") == "attackers" for unit in next_state["units"]
         )
