@@ -39,7 +39,7 @@
 ## Asset creation
 
 - [ ] Set an original visual direction, palette, tile scale, and asset naming/manifest conventions.
-- [ ] Create terrain, road, wall, gate, tower, courtyard, and objective art as modular isometric tiles.
+- [ ] Create terrain, road, wall, gate, tower, castle moat, drawbridge, battlements, courtyard, and objective art as modular isometric tiles.
 - [ ] Create original directional attacker/defender sprites with idle, walk, attack, hit, and defeat animations.
 - [ ] Create weapons, arrows/bolts, selection indicators, health bars, UI icons, and lightweight combat audio.
 - [ ] Keep editable source assets, optimized browser exports, and a record of licenses/attributions for any external material.
