@@ -16,7 +16,7 @@ Siege of Greywatch is a Django-served, browser-playable isometric siege prototyp
 
 - `setup/` contains Django settings and project URLs; `game/` contains catalog models, views, URLs, migrations, and Django tests.
 - `game/templates/game/game.html` is the launch/menu/battlefield page; `game/static/game/game.css` styles it.
-- `game/static/game/game.js` handles canvas rendering, camera and pointer input, menus, and loading/sending actions; it does not advance game state on animation frames.
+- `game/static/game/game.js` coordinates server snapshots, actions, and battlefield status; `renderer.js` draws the battlefield, `input.js` handles camera, pointer and keyboard input, and `launch.js` owns the launch screens and catalog. Animation frames do not advance game state.
 - `game/engine.py` owns editable map geometry, both rosters, pathfinding, move-point rules, turns, and capture. `GameInstance` persists state and a revision in SQLite; the current session controls access to the active instance.
 - Catalog entries are exposed at `/api/scenarios/` and `/api/single-games/`. Migration `game/migrations/0001_initial.py` seeds an entry in each catalog. Starting a match uses `POST /api/games/<kind>/<entry_id>/start/`; `GET /api/games/current/` resumes it; `POST /api/games/actions/` applies a revisioned action. POST requests require CSRF.
 - Authenticated staff edit single-game map JSON (cols, rows, keep, gate, objective, startPositions, enemyStartPositions) and link games to scenarios in `/admin/`. Older maps without enemyStartPositions spawn one defender near the objective; existing active matches keep their earlier state until restarted. A scenario launch selects a linked game with `single_game_id` in its JSON POST body; a sole linked game can be launched with `{}`. New instances snapshot the map so later edits do not change active matches.
@@ -27,7 +27,7 @@ Siege of Greywatch is a Django-served, browser-playable isometric siege prototyp
 
 - Use Python 3.12 and the dependencies in `requirements.txt`. Run `make venv`, `make migrate`, and `make run` to serve the game at `http://127.0.0.1:8098/`.
 - Run `make createsuperuser` to create an editor login, then open `/admin/`. Save a single game with a reachable objective before linking it to a scenario; only available linked games can be launched.
-- Run `.venv/bin/python3.12 manage.py test game` for engine and API tests; use `node --check game/static/game/game.js` to check browser script syntax.
+- Run `.venv/bin/python3.12 manage.py test game` for engine and API tests; use `node --test game/tests/test_playback.cjs` for browser interaction tests and `node --check` on the browser scripts to check syntax.
 - When changing map geometry, update simulation walkability, pathfinding expectations, rendering, and pointer-to-tile behavior together. When changing catalog fields, update models, migrations, API serialization, UI, and tests together.
 - Keep original placeholder art and any added assets' attribution/license information intact. Do not treat `.venv/`, `.idea/`, or the local `db.sqlite3` as source files to edit.
 - The settings are development-only; do not rely on them for production deployment or put credentials in code or documentation.

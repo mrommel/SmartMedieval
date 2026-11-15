@@ -19,10 +19,10 @@
 
 ## Game engine and siege systems
 
-- [ ] Separate simulation state, input, pathfinding, rendering, and UI so each can evolve without coupling.
+- [x] Separate simulation state, input, pathfinding, rendering, and UI so each can evolve without coupling.
   - [x] Move prototype state, movement, capture, and pathfinding out of the browser UI into a testable server engine.
   - [x] Move battlefield rendering behind a renderer module.
-  - [ ] Isolate pointer/camera input and launch/catalog UI.
+  - [x] Isolate pointer/camera input and launch/catalog UI.
 - [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
   - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
   - [x] Keep units on distinct tiles during movement and prevent paths through occupied tiles.

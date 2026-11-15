@@ -6,6 +6,8 @@ const path = require("node:path");
 
 const script = fs.readFileSync(path.join(__dirname, "../static/game/game.js"), "utf8");
 const rendererScript = fs.readFileSync(path.join(__dirname, "../static/game/renderer.js"), "utf8");
+const inputScript = fs.readFileSync(path.join(__dirname, "../static/game/input.js"), "utf8");
+const launchScript = fs.readFileSync(path.join(__dirname, "../static/game/launch.js"), "utf8");
 
 function element() {
   const listeners = {};
@@ -16,12 +18,13 @@ function element() {
     setAttribute(name, value) { this[name] = value; },
     querySelector() { return element(); },
     getBoundingClientRect() { return { width: 600, height: 400, left: 0, top: 0 }; },
-    setPointerCapture() {}, append() {}, replaceChildren(...children) { this.children = children; },
+    setPointerCapture() {}, append(...children) { this.children = [...(this.children || []), ...children]; },
+    replaceChildren(...children) { this.children = children; },
     fire(type, event = {}) { return listeners[type]?.(event); }
   };
 }
 
-function setup(savedSpeed = null) {
+function setup(savedSpeed = null, catalogFetch = null) {
   const nodes = new Map();
   const get = id => {
     if (!nodes.has(id)) nodes.set(id, element());
@@ -60,13 +63,21 @@ function setup(savedSpeed = null) {
   const document = {
     getElementById: get, createElement: element,
     querySelector: () => ({ content: "csrf" }),
-    querySelectorAll: () => []
+    querySelectorAll: () => ["scenarios", "single-games"].map(kind => {
+      const button = get(`catalog-${kind}`);
+      button.dataset.catalog = kind;
+      return button;
+    })
   };
   const context = {
     document, window, performance: { now: () => 0 },
     requestAnimationFrame: callback => { nextFrame = callback; },
     setTimeout: () => 1, clearTimeout() {},
-    fetch: async (_, options = {}) => {
+    fetch: async (url, options = {}) => {
+      if (url === "/api/scenarios/" || url === "/api/single-games/") {
+        return { ok: true, headers: { get: () => "application/json" },
+          json: () => catalogFetch ? catalogFetch(url) : [] };
+      }
       if (options.method === "POST") {
         postCount++;
         if (options.body) actions.push(JSON.parse(options.body).action);
@@ -76,7 +87,11 @@ function setup(savedSpeed = null) {
   };
   vm.runInNewContext(rendererScript.replace("export function", "function") +
     "\nthis.createBattlefieldRenderer = createBattlefieldRenderer;", context);
-  vm.runInNewContext(script.replace('import { createBattlefieldRenderer } from "./renderer.js";', ""), context);
+  vm.runInNewContext(inputScript.replace("export function", "function") +
+    "\nthis.createBattlefieldInput = createBattlefieldInput;", context);
+  vm.runInNewContext(launchScript.replace("export function", "function") +
+    "\nthis.createLaunchUI = createLaunchUI;", context);
+  vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
     get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer
@@ -120,6 +135,51 @@ test("pointer orders still pick the raised surface rather than its ground tile",
   assert.equal(game.actions.at(-1).type, "move");
   assert.equal(game.actions.at(-1).x, 0);
   assert.equal(game.actions.at(-1).y, 1);
+});
+
+test("dragging pans without ordering; clicking after a drag still orders", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const down = { button: 0, pointerId: 1, clientX: 268, clientY: 219.2 };
+  canvas.fire("pointerdown", down);
+  canvas.fire("pointermove", { ...down, clientX: 340 });
+  canvas.fire("pointerup", { ...down, clientX: 340 });
+  assert.equal(game.actions.length, 0);
+  canvas.fire("pointerdown", { ...down, clientX: 308 });
+  canvas.fire("pointerup", { ...down, clientX: 308 });
+  assert.equal(game.actions.length, 1);
+  assert.equal(game.actions[0].type, "move");
+});
+
+test("catalog navigation renders linked games and starts a selected scenario", async () => {
+  const game = setup(null, () => [{ id: 8, name: "Siege", description: "Hold fast",
+    games: [{ id: 3, name: "Gate", description: "Break through" }] }]);
+  game.get("play-game").fire("click");
+  assert.equal(game.get("main-menu").hidden, false);
+  await game.get("catalog-scenarios").fire("click");
+  const group = game.get("catalog-list").children[0];
+  assert.equal(group.children[0].textContent, "Siege");
+  await group.children[2].fire("click");
+  assert.equal(game.get("game-screen").hidden, false);
+  assert.equal(game.get("game-title").textContent, "Test battle");
+  assert.equal(game.postCount(), 1);
+  game.get("main-menu-button").fire("click");
+  assert.equal(game.get("game-screen").hidden, true);
+});
+
+test("a slow catalog response cannot overwrite a newer catalog", async () => {
+  let resolveScenarios;
+  const game = setup(null, url => url === "/api/scenarios/"
+    ? new Promise(resolve => { resolveScenarios = resolve; })
+    : [{ id: 1, name: "Solo", description: "One battle" }]);
+  game.get("play-game").fire("click");
+  const slow = game.get("catalog-scenarios").fire("click");
+  await game.get("catalog-single-games").fire("click");
+  resolveScenarios([{ id: 2, name: "Old", description: "Stale", games: [] }]);
+  await slow;
+  assert.equal(game.get("catalog-title").textContent, "Single games");
+  assert.equal(game.get("catalog-list").children[0].children[0].textContent, "Solo");
 });
 
 test("pause blocks orders and freezes the animation clock until resumed", async () => {

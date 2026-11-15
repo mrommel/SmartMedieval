@@ -1,4 +1,6 @@
 import { createBattlefieldRenderer } from "./renderer.js";
+import { createBattlefieldInput } from "./input.js";
+import { createLaunchUI } from "./launch.js";
 
 (() => {
   "use strict";
@@ -13,16 +15,6 @@ import { createBattlefieldRenderer } from "./renderer.js";
   const progressNode = document.getElementById("capture-progress");
   const toastNode = document.getElementById("toast");
   const victoryNode = document.getElementById("victory");
-  const startScreen = document.getElementById("start-screen");
-  const mainMenu = document.getElementById("main-menu");
-  const catalogScreen = document.getElementById("catalog-screen");
-  const gameScreen = document.getElementById("game-screen");
-  const catalogList = document.getElementById("catalog-list");
-  const catalogTitle = document.getElementById("catalog-title");
-  const catalogKicker = document.getElementById("catalog-kicker");
-  const gameTitle = document.getElementById("game-title");
-  const briefingCopy = document.getElementById("briefing-copy");
-  const missionLabel = document.getElementById("mission-label");
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
   const promoteButton = document.getElementById("promote");
@@ -32,8 +24,6 @@ import { createBattlefieldRenderer } from "./renderer.js";
   const selectedStats = document.getElementById("selected-stats");
   const historyList = document.getElementById("combat-history-list");
   const cursorStatus = document.getElementById("cursor-status");
-  const continueButton = document.getElementById("continue-game");
-  const launchError = document.getElementById("launch-error");
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
@@ -52,9 +42,6 @@ import { createBattlefieldRenderer } from "./renderer.js";
   let height = 0;
   let gameIsVisible = false;
   let animationStarted = false;
-  const camera = { x: 0, y: 0, zoom: 1 };
-  let activePointer = null;
-  const cursor = { x: 0, y: 0, visible: false };
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const speedKey = "greywatch.animationSpeed";
   const validSpeeds = [0, .5, 1, 2];
@@ -89,13 +76,6 @@ import { createBattlefieldRenderer } from "./renderer.js";
       (selected[0].morale ?? 3) >= 5;
   }
 
-  function resetCamera() {
-    camera.x = 0;
-    camera.y = 0;
-    camera.zoom = 1;
-    if (width && height) clampCamera();
-  }
-
   function resize() {
     if (!instanceId) return;
     const rect = canvas.getBoundingClientRect();
@@ -110,39 +90,8 @@ import { createBattlefieldRenderer } from "./renderer.js";
     const mapHeight = (COLS + ROWS - 2) * tileH * 0.5;
     originY = Math.max(42, (height - mapHeight) * 0.5 + tileH * 1.1);
     renderer.setLayout({ width, height, tileW, tileH, originX, originY, ratio });
-    clampCamera();
+    input.clampCamera();
     draw();
-  }
-
-  function clampCamera() {
-    const mapWidth = (COLS + ROWS - 2) * tileW * 0.5;
-    const mapHeight = (COLS + ROWS - 2) * tileH * 0.5;
-    const left = originX - mapWidth;
-    const right = originX + mapWidth;
-    const top = originY - tileH * (2.7 + Math.max(0, ...(mapData.elevation || []).map(tile => tile.height)));
-    const bottom = originY + mapHeight + tileH;
-    const margin = Math.min(72, width * 0.2, height * 0.2);
-    const minX = margin - right * camera.zoom;
-    const maxX = width - margin - left * camera.zoom;
-    const minY = margin - bottom * camera.zoom;
-    const maxY = height - margin - top * camera.zoom;
-    camera.x = minX > maxX ? (minX + maxX) / 2 : Math.max(minX, Math.min(maxX, camera.x));
-    camera.y = minY > maxY ? (minY + maxY) / 2 : Math.max(minY, Math.min(maxY, camera.y));
-  }
-
-  function zoomAt(screenX, screenY, factor) {
-    const nextZoom = Math.max(.7, Math.min(1.8, camera.zoom * factor));
-    const worldX = (screenX - camera.x) / camera.zoom;
-    const worldY = (screenY - camera.y) / camera.zoom;
-    camera.zoom = nextZoom;
-    camera.x = screenX - worldX * nextZoom;
-    camera.y = screenY - worldY * nextZoom;
-    clampCamera();
-    draw();
-  }
-
-  function zoomAtCenter(factor) {
-    zoomAt(width / 2, height / 2, factor);
   }
 
   function isWalkable(x, y) {
@@ -150,7 +99,7 @@ import { createBattlefieldRenderer } from "./renderer.js";
   }
 
   function draw() {
-    renderer.draw(animationTime, { simulation, camera, cursor, hasAttackOption });
+    renderer.draw(animationTime, { simulation, camera: input.camera, cursor: input.cursor, hasAttackOption });
   }
 
   function moveSelected(x, y) {
@@ -212,102 +161,13 @@ import { createBattlefieldRenderer } from "./renderer.js";
         : !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
   }
 
-  function pickTile(localX, localY) {
-    for (const tile of [...(mapData.elevation || [])].sort((a, b) => b.x + b.y - a.x - a.y)) {
-      const p = renderer.project(tile.x, tile.y);
-      if (Math.abs(localX - p.x) / (tileW / 2) +
-          Math.abs(localY - p.y - tileH / 2) / (tileH / 2) <= 1) {
-        return { x: tile.x, y: tile.y };
-      }
-    }
-    const a = (localX - originX) / (tileW / 2);
-    const b = (localY - originY) / (tileH / 2);
-    // Projection places the top corner of each diamond at (x, y).
-    // Inverse coordinates span [x, x + 1) and [y, y + 1) inside it.
-    const x = Math.floor((a + b) / 2);
-    const y = Math.floor((b - a) / 2);
-    return { x, y };
-  }
-
-  function handlePointer(event) {
-    if (simulation.captured || simulation.defeated || pendingAction || paused) return;
-    const rect = canvas.getBoundingClientRect();
-    const px = (event.clientX - rect.left - camera.x) / camera.zoom;
-    const py = (event.clientY - rect.top - camera.y) / camera.zoom;
-    let clicked = null;
-    let nearest = Infinity;
-    for (const unit of simulation.units.filter(item => item.side !== "defenders")) {
-      const p = renderer.project(unit.x, unit.y);
-      const distance = Math.hypot(px - p.x, py - (p.y + tileH * .1));
-      if (distance < Math.max(17, tileW * .29) && distance < nearest) {
-        clicked = unit;
-        nearest = distance;
-      }
-    }
-    if (clicked) {
-      if (event.shiftKey) {
-        if (simulation.selected.has(clicked.id)) simulation.selected.delete(clicked.id);
-        else simulation.selected.add(clicked.id);
-      } else {
-        simulation.selected = new Set([clicked.id]);
-      }
-      updateSelection();
-      return;
-    }
-    const target = simulation.units.find(unit => {
-      if (unit.side !== "defenders") return false;
-      const p = renderer.project(unit.x, unit.y);
-      return Math.hypot(px - p.x, py - (p.y + tileH * .1)) < Math.max(17, tileW * .29);
-    });
-    if (target) {
-      attackSelected(target);
-      return;
-    }
-    const tile = pickTile(px, py);
-    if (!isWalkable(tile.x, tile.y)) {
-      showToast("An obstacle bars the way. Choose an open tile.");
-      return;
-    }
-    moveSelected(tile.x, tile.y);
-  }
-
-  function describeCursor() {
+  function describeCursor(cursor) {
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
       : objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
         ? "courtyard objective" : "open ground")}.`;
-  }
-
-  function revealCursor() {
-    const point = renderer.project(cursor.x, cursor.y);
-    const screenX = point.x * camera.zoom + camera.x;
-    const screenY = (point.y + tileH / 2) * camera.zoom + camera.y;
-    const margin = 32;
-    camera.x += Math.max(margin - screenX, 0) - Math.max(screenX - (width - margin), 0);
-    camera.y += Math.max(margin - screenY, 0) - Math.max(screenY - (height - margin), 0);
-    clampCamera();
-  }
-
-  function handleKeyboardOrder(shiftKey) {
-    const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
-    if (unit?.side === "defenders") {
-      attackSelected(unit);
-    } else if (unit) {
-      if (shiftKey) {
-        if (simulation.selected.has(unit.id)) simulation.selected.delete(unit.id);
-        else simulation.selected.add(unit.id);
-      } else {
-        simulation.selected = new Set([unit.id]);
-      }
-      updateSelection();
-      describeCursor();
-    } else if (!isWalkable(cursor.x, cursor.y)) {
-      showToast("An obstacle bars the way. Choose an open tile.");
-    } else {
-      moveSelected(cursor.x, cursor.y);
-    }
   }
 
   function updateSelection() {
@@ -371,13 +231,9 @@ import { createBattlefieldRenderer } from "./renderer.js";
     startingAttackerCount = snapshot.map.startPositions.length;
     if (newGame) simulation.selected = new Set([attackers[0].id]);
     else simulation.selected = new Set([...simulation.selected].filter(id => attackers.some(unit => unit.id === id)));
-    if (newGame) {
-      cursor.x = attackers[0]?.x ?? OBJECTIVE.x;
-      cursor.y = attackers[0]?.y ?? OBJECTIVE.y;
-    }
-    cursor.x = Math.max(0, Math.min(COLS - 1, cursor.x));
-    cursor.y = Math.max(0, Math.min(ROWS - 1, cursor.y));
-    describeCursor();
+    const cursor = input.cursor;
+    input.resetCursor(newGame ? attackers[0]?.x ?? OBJECTIVE.x : cursor.x,
+      newGame ? attackers[0]?.y ?? OBJECTIVE.y : cursor.y);
     const roster = [
       { type: "vanguard", name: "Vanguard", icon: "⚔", role: "close-quarters" },
       { type: "longbow", name: "Longbow", icon: "⌁", role: "ranged support" },
@@ -503,109 +359,15 @@ import { createBattlefieldRenderer } from "./renderer.js";
     requestAnimationFrame(frame);
   }
 
-  function showLaunchScreen(screen) {
-    gameIsVisible = false;
-    renderer.clearProjectiles();
-    startScreen.hidden = screen !== startScreen;
-    mainMenu.hidden = screen !== mainMenu;
-    catalogScreen.hidden = screen !== catalogScreen;
-    gameScreen.hidden = true;
-  }
-
-  function renderCatalogMessage(message, isError = false) {
-    const paragraph = document.createElement("p");
-    paragraph.className = "catalog-message";
-    paragraph.textContent = message;
-    catalogList.replaceChildren(paragraph);
-    if (isError) {
-      const retry = document.createElement("button");
-      retry.className = "menu-back";
-      retry.type = "button";
-      retry.textContent = "Try again";
-      retry.addEventListener("click", () => loadCatalog(currentCatalog));
-      catalogList.append(retry);
-    }
-  }
-
-  let currentCatalog = "scenarios";
-
-  async function loadCatalog(kind) {
-    currentCatalog = kind;
-    const catalog = kind === "scenarios"
-      ? { title: "Scenarios", endpoint: "/api/scenarios/", noun: "scenarios" }
-      : { title: "Single games", endpoint: "/api/single-games/", noun: "single games" };
-    catalogTitle.textContent = catalog.title;
-    catalogKicker.textContent = `AVAILABLE ${catalog.title.toUpperCase()}`;
-    renderCatalogMessage("Loading...");
-    try {
-      const response = await fetch(catalog.endpoint, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-      const entries = await response.json();
-      if (!Array.isArray(entries)) throw new Error("The catalog response is invalid.");
-      if (!entries.length) {
-        renderCatalogMessage(`No ${catalog.noun} are available yet.`);
-        return;
-      }
-      const cards = entries.map(entry => {
-        if (kind === "scenarios") {
-          const group = document.createElement("div");
-          group.className = "catalog-group";
-          const name = document.createElement("strong");
-          name.textContent = entry.name;
-          const description = document.createElement("p");
-          description.textContent = entry.description;
-          group.append(name, description);
-          if (!entry.games.length) {
-            const empty = document.createElement("p");
-            empty.textContent = "No available games in this scenario.";
-            group.append(empty);
-          }
-          for (const game of entry.games) {
-            const button = document.createElement("button");
-            button.className = "catalog-entry";
-            button.type = "button";
-            const label = document.createElement("strong");
-            label.textContent = game.name;
-            const summary = document.createElement("span");
-            summary.textContent = game.description;
-            button.append(label, summary);
-            button.addEventListener("click", () => launchGame(entry, kind, game.id));
-            group.append(button);
-          }
-          return group;
-        }
-        const button = document.createElement("button");
-        button.className = "catalog-entry";
-        button.type = "button";
-        const name = document.createElement("strong");
-        name.textContent = entry.name;
-        const description = document.createElement("span");
-        description.textContent = entry.description;
-        button.append(name, description);
-        button.addEventListener("click", () => launchGame(entry, kind));
-        return button;
-      });
-      catalogList.replaceChildren(...cards);
-    } catch (error) {
-      renderCatalogMessage(`Could not load ${catalog.noun}: ${error.message}`, true);
-    }
-  }
-
   function enterGame(snapshot) {
     const { entry, kind } = snapshot;
     currentEntryId = entry.id;
     currentKind = kind;
     currentGameId = snapshot.game_id;
-    gameTitle.textContent = entry.name;
-    briefingCopy.textContent = entry.introduction || entry.description;
-    missionLabel.textContent = kind === "scenarios" ? "SCENARIO" : "SINGLE GAME";
     applySnapshot(snapshot);
     gameIsVisible = true;
-    startScreen.hidden = true;
-    mainMenu.hidden = true;
-    catalogScreen.hidden = true;
-    gameScreen.hidden = false;
-    resetCamera();
+    launchUI.enterGame(snapshot);
+    input.resetCamera();
     resize();
     if (!animationStarted) {
       animationStarted = true;
@@ -623,79 +385,29 @@ import { createBattlefieldRenderer } from "./renderer.js";
         kind === "scenarios" ? { single_game_id: gameId } : {}
       );
       enterGame(snapshot);
-      continueButton.hidden = false;
     } catch (error) {
       if (gameIsVisible) showToast(`Could not restart game: ${error.message}`);
-      else renderCatalogMessage(`Could not start game: ${error.message}`, true);
+      else launchUI.renderCatalogMessage(`Could not start game: ${error.message}`, true);
     } finally {
       pendingAction = false;
       updatePromotion();
     }
   }
 
-  canvas.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || simulation.captured || simulation.defeated || pendingAction || paused) return;
-    activePointer = {
-      id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      cameraX: camera.x,
-      cameraY: camera.y,
-      dragging: false
-    };
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener("pointermove", event => {
-    if (!activePointer || event.pointerId !== activePointer.id) return;
-    const dx = event.clientX - activePointer.x;
-    const dy = event.clientY - activePointer.y;
-    if (!activePointer.dragging && Math.hypot(dx, dy) > 4) activePointer.dragging = true;
-    if (activePointer.dragging) {
-      camera.x = activePointer.cameraX + dx;
-      camera.y = activePointer.cameraY + dy;
-      clampCamera();
-      draw();
-    }
-  });
-  canvas.addEventListener("pointerup", event => {
-    if (!activePointer || event.pointerId !== activePointer.id) return;
-    if (!activePointer.dragging) handlePointer(event);
-    activePointer = null;
-  });
-  canvas.addEventListener("pointercancel", () => { activePointer = null; });
-  canvas.addEventListener("focus", () => {
-    cursor.visible = true;
-    describeCursor();
-    draw();
-  });
-  canvas.addEventListener("blur", () => {
-    cursor.visible = false;
-    draw();
-  });
-  canvas.addEventListener("keydown", event => {
-    const directions = {
-      ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
-    };
-    if (directions[event.key]) {
-      event.preventDefault();
-      const [dx, dy] = directions[event.key];
-      cursor.x = Math.max(0, Math.min(COLS - 1, cursor.x + dx));
-      cursor.y = Math.max(0, Math.min(ROWS - 1, cursor.y + dy));
-      describeCursor();
-      revealCursor();
-      draw();
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (!paused && !pendingAction && !simulation.captured && !simulation.defeated) handleKeyboardOrder(event.shiftKey);
-    }
-  });
-  canvas.addEventListener("wheel", event => {
-    event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    zoomAt(event.clientX - rect.left, event.clientY - rect.top, event.deltaY < 0 ? 1.12 : 1 / 1.12);
-  }, { passive: false });
-  document.getElementById("zoom-in").addEventListener("click", () => zoomAtCenter(1.15));
-  document.getElementById("zoom-out").addEventListener("click", () => zoomAtCenter(1 / 1.15));
+  const input = createBattlefieldInput({ canvas, renderer, simulation,
+    getMap: () => mapData,
+    getLayout: () => ({ width, height, tileW, tileH, originX, originY }),
+    canOrder: () => gameIsVisible && !simulation.captured && !simulation.defeated && !pendingAction && !paused,
+    isWalkable, onMove: moveSelected, onAttack: attackSelected, onSelection: updateSelection,
+    onBlocked: () => showToast("An obstacle bars the way. Choose an open tile."),
+    onDraw: draw, onCursor: describeCursor });
+  const launchUI = createLaunchUI({ api, onStart: launchGame,
+    onResume: async () => enterGame(await api("/api/games/current/")),
+    onLeaveGame: () => {
+      gameIsVisible = false;
+      input.cancelPointer();
+      renderer.clearProjectiles();
+    } });
   function restart() {
     if (!instanceId) return;
     launchGame({ id: currentEntryId }, currentKind, currentGameId);
@@ -709,7 +421,7 @@ import { createBattlefieldRenderer } from "./renderer.js";
   pauseButton.addEventListener("click", () => {
     if (simulation.captured || simulation.defeated) return;
     paused = !paused;
-    activePointer = null;
+    input.cancelPointer();
     updateControls();
     draw();
   });
@@ -729,31 +441,5 @@ import { createBattlefieldRenderer } from "./renderer.js";
     const [unitId] = simulation.selected;
     if (unitId !== undefined && !promoteButton.disabled) sendAction({ type: "promote", unit_id: unitId });
   });
-  continueButton.addEventListener("click", async () => {
-    try {
-      enterGame(await api("/api/games/current/"));
-      launchError.hidden = true;
-    } catch (error) {
-      launchError.textContent = `Could not resume game: ${error.message}`;
-      launchError.hidden = false;
-    }
-  });
-  document.getElementById("play-game").addEventListener("click", () => showLaunchScreen(mainMenu));
-  document.getElementById("menu-back").addEventListener("click", () => showLaunchScreen(startScreen));
-  document.getElementById("catalog-back").addEventListener("click", () => showLaunchScreen(mainMenu));
-  document.getElementById("main-menu-button").addEventListener("click", () => showLaunchScreen(mainMenu));
-  document.querySelectorAll("[data-catalog]").forEach(button => {
-    button.addEventListener("click", () => {
-      showLaunchScreen(catalogScreen);
-      loadCatalog(button.dataset.catalog);
-    });
-  });
   window.addEventListener("resize", resize);
-  api("/api/games/current/").then(snapshot => {
-    continueButton.hidden = false;
-  }).catch(error => {
-    if (error.status === 404) return;
-    launchError.textContent = `Could not check saved game: ${error.message}`;
-    launchError.hidden = false;
-  });
 })();
