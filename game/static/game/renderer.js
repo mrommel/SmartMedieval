@@ -1,6 +1,7 @@
 export function createBattlefieldRenderer(canvas) {
   const ctx = canvas.getContext("2d");
   let COLS, ROWS, KEEP, GATE, OBJECTIVE;
+  let strongpoints = [];
   let elevation = new Map();
   let raisedTiles = [];
   let objects = new Map();
@@ -10,6 +11,7 @@ export function createBattlefieldRenderer(canvas) {
 
   function setMap(map) {
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = map);
+    strongpoints = map.strongpoints || [];
     raisedTiles = map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     objects = new Map((map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
@@ -39,9 +41,11 @@ export function createBattlefieldRenderer(canvas) {
   }
 
   function isWall(x, y) {
-    const inside = x >= KEEP.left && x <= KEEP.right && y >= KEEP.top && y <= KEEP.bottom;
-    const edge = x === KEEP.left || x === KEEP.right || y === KEEP.top || y === KEEP.bottom;
-    return inside && edge && !(x === GATE.x && y === GATE.y);
+    return [{ ...KEEP, gate: GATE }, ...strongpoints].some(point => {
+      const inside = x >= point.left && x <= point.right && y >= point.top && y <= point.bottom;
+      const edge = x === point.left || x === point.right || y === point.top || y === point.bottom;
+      return inside && edge && !(x === point.gate.x && y === point.gate.y);
+    });
   }
 
   function diamond(x, y, z = tileHeight(x, y)) {
@@ -76,7 +80,8 @@ export function createBattlefieldRenderer(canvas) {
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const tile = diamond(x, y, 0);
-        const castle = x >= KEEP.left && x <= KEEP.right && y >= KEEP.top && y <= KEEP.bottom;
+        const castle = [KEEP, ...strongpoints].some(point =>
+          x >= point.left && x <= point.right && y >= point.top && y <= point.bottom);
         const path = (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
         const palette = path ? colors.path : colors.grass;
         polygon(tile, palette[hash(x, y) % palette.length], castle ? "rgba(53,53,43,.25)" : colors.grassLine, .7);
@@ -107,7 +112,7 @@ export function createBattlefieldRenderer(canvas) {
       p.x, p.y + tileH * .7);
   }
 
-  function drawWall(x, y) {
+  function drawWall(x, y, point) {
     const base = project(x, y, 0);
     const w = tileW * .5;
     const h = tileH * .5;
@@ -134,7 +139,7 @@ export function createBattlefieldRenderer(canvas) {
       ctx.lineTo(leftX + tileW * .1, leftY + tileH * .1);
       ctx.stroke();
     }
-    if ((y === KEEP.top || y === KEEP.bottom) && x % 2 === 0) {
+    if ((y === point.top || y === point.bottom) && x % 2 === 0) {
       polygon([
         [top[0][0] - 3, top[0][1]], [top[1][0] + 3, top[1][1]],
         [top[1][0] + 3, top[1][1] - tileH * .24], [top[1][0] - 3, top[1][1] - tileH * .24],
@@ -143,8 +148,8 @@ export function createBattlefieldRenderer(canvas) {
     }
   }
 
-  function drawGate() {
-    const p = project(GATE.x, GATE.y, 0);
+  function drawGate(gate) {
+    const p = project(gate.x, gate.y, 0);
     const half = tileW * .25;
     const groundY = p.y + tileH * .55;
     ctx.fillStyle = "#342f28";
@@ -381,12 +386,15 @@ export function createBattlefieldRenderer(canvas) {
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
     drawGround();
-    drawGate();
+    drawGate(GATE);
+    strongpoints.forEach(point => drawGate(point.gate));
 
     const layers = [];
-    for (let y = KEEP.top; y <= KEEP.bottom; y++) {
-      for (let x = KEEP.left; x <= KEEP.right; x++) {
-        if (isWall(x, y)) layers.push({ depth: x + y, kind: "wall", x, y });
+    for (const point of [KEEP, ...strongpoints]) {
+      for (let y = point.top; y <= point.bottom; y++) {
+        for (let x = point.left; x <= point.right; x++) {
+          if (isWall(x, y)) layers.push({ depth: x + y, kind: "wall", x, y, point });
+        }
       }
     }
     raisedTiles.forEach(tile => layers.push({ depth: tile.x + tile.y, kind: "raised", tile }));
@@ -400,7 +408,7 @@ export function createBattlefieldRenderer(canvas) {
         drawObjective(time);
         objectiveDrawn = true;
       }
-      if (layer.kind === "wall") drawWall(layer.x, layer.y);
+      if (layer.kind === "wall") drawWall(layer.x, layer.y, layer.point);
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
       else if (layer.kind === "object") drawObject(layer.obj);
       else drawUnit(layer.unit, time);

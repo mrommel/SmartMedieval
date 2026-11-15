@@ -38,6 +38,8 @@ Maps may include an optional `elevation` list of unique open tiles, for example 
 
 Maps may also include up to 256 `objects`, such as `[{"x": 4, "y": 5, "type": "tree"}, {"x": 5, "y": 6, "type": "rock"}]`. Both types block movement and line of sight. Place them on distinct ground tiles, away from walls, the gate, elevation, starting units, and the objective; all units must still be able to reach the objective. Older maps without objects remain unchanged, and running matches retain their snapshot after edits.
 
+Maps may include up to 16 additional `strongpoints`, for example `[{"left": 6, "right": 9, "top": 3, "bottom": 6, "gate": {"x": 7, "y": 6}}]`. Each rectangle needs its own gate on its perimeter and must not overlap the keep or another strongpoint. Its walls block movement and shots and provide cover just like keep walls; the interior and gate remain walkable. Keep objects, elevation, starting units, and the objective off the walls, and ensure every starting unit can reach the objective. Maps without `strongpoints` retain their existing layout; ongoing matches retain their map snapshot.
+
 Defender AI uses a local OpenAI-compatible service at `http://127.0.0.1:11435/v1`. Configure `SPLASH_API_KEY` in a local `.env` file when using that service; do not commit credentials.
 
 ## Development checks

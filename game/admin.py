@@ -29,6 +29,9 @@ class SingleGameAdmin(admin.ModelAdmin):
             "Heights are 1-3; only a ladder or ramp on the higher tile permits a one-level step. "
             "Optional objects: [{\"x\": 4, \"y\": 5, \"type\": \"tree\"}]. Trees and rocks "
             "block movement and shots; keep them off walls, gates, elevated tiles, units and the objective. "
+            "Optional strongpoints: [{\"left\": 6, \"right\": 9, \"top\": 3, \"bottom\": 6, "
+            "\"gate\": {\"x\": 7, \"y\": 6}}]. Up to 16 non-overlapping gated rectangles may be "
+            "placed away from the keep; all units must still reach the objective. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

@@ -91,6 +91,54 @@ class TurnEngineTests(TestCase):
         self.assertEqual(ended["units"][0]["health"], 3)
         self.assertEqual(ended["units"][1]["fight_points"], 1)
 
+    def test_strongpoint_gate_blocks_walls_but_allows_entry(self):
+        battlefield = default_map()
+        battlefield["strongpoints"] = [{"left": 6, "right": 9, "top": 3, "bottom": 6,
+                                        "gate": {"x": 7, "y": 6}},
+                                       {"left": 6, "right": 9, "top": 9, "bottom": 12,
+                                        "gate": {"x": 7, "y": 9}}]
+        validate_map(battlefield)
+        self.assertFalse(is_walkable(6, 4, battlefield))
+        self.assertTrue(is_walkable(7, 6, battlefield))
+        self.assertTrue(is_walkable(7, 5, battlefield))
+        self.assertEqual(find_path((7, 7), (7, 5), battlefield), [(7, 6), (7, 5)])
+        self.assertIsNone(find_path((7, 7), (6, 4), battlefield))
+        self.assertFalse(has_line_of_sight((5, 4), (7, 4), battlefield))
+        self.assertFalse(has_line_of_sight((5, 10), (7, 10), battlefield))
+        self.assertTrue(is_walkable(7, 9, battlefield))
+        self.assertTrue(has_line_of_sight((7, 7), (7, 5), battlefield))
+        state = initial_state(battlefield)
+        state["units"][0].update(x=7, y=7)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 7, "y": 5}, battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["y"]), (7, 5))
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 6, "y": 4}, battlefield)
+
+    def test_strongpoint_validation_rejects_bad_bounds_gates_overlaps_and_placements(self):
+        battlefield = default_map()
+        valid = {"left": 6, "right": 9, "top": 3, "bottom": 6, "gate": {"x": 7, "y": 6}}
+        for points in ("invalid", [valid] * 17,
+                       [{**valid, "left": True}], [{**valid, "right": 17}],
+                       [{**valid, "gate": {"x": 7, "y": 5}}],
+                       [{**valid, "gate": {"x": True, "y": 6}}],
+                       [valid, valid], [{**valid, "unknown": 1}]):
+            battlefield["strongpoints"] = points
+            with self.subTest(points=points), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield["strongpoints"] = [valid]
+        battlefield["objects"] = [{"x": 6, "y": 4, "type": "tree"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        battlefield.pop("objects")
+        battlefield["elevation"] = [{"x": 6, "y": 4, "height": 1}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        battlefield.pop("elevation")
+        battlefield["strongpoints"] = [{"left": 6, "right": 10, "top": 0, "bottom": 13,
+                                        "gate": {"x": 6, "y": 0}}]
+        with self.assertRaisesRegex(InvalidMap, "reach the objective"):
+            validate_map(battlefield)
+
     def test_map_objects_reject_invalid_placements_and_blocked_routes(self):
         battlefield = default_map()
         for objects in ("tree", [{"x": 2, "y": 4, "type": "water"}],

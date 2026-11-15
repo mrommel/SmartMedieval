@@ -124,6 +124,29 @@ test("renderer projects raised tiles and draws updated maps independently", () =
   assert.equal(game.draws(), 2);
 });
 
+test("renderer draws additional strongpoints and respects each gate after map changes", () => {
+  const game = setup();
+  const renderer = game.createRenderer(game.get("battlefield-canvas"));
+  renderer.setLayout({ width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 });
+  const base = { cols: 12, rows: 10, keep: { left: 7, right: 10, top: 2, bottom: 7 },
+    gate: { x: 8, y: 7 }, objective: { x: 8, y: 5 } };
+  renderer.setMap({ ...base, strongpoints: [
+    { left: 1, right: 4, top: 1, bottom: 4, gate: { x: 2, y: 4 } },
+    { left: 1, right: 4, top: 6, bottom: 9, gate: { x: 2, y: 6 } }
+  ] });
+  assert.equal(renderer.isWall(1, 2), true);
+  assert.equal(renderer.isWall(2, 4), false);
+  assert.equal(renderer.isWall(2, 6), false);
+  assert.equal(renderer.isWall(8, 7), false);
+  renderer.draw(0, { simulation: { units: [], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
+    hasAttackOption: () => false });
+  assert.equal(game.draws(), 1);
+  renderer.setMap(base);
+  assert.equal(renderer.isWall(1, 2), false);
+});
+
 test("pointer orders still pick the raised surface rather than its ground tile", async () => {
   const game = setup();
   game.snapshot.map.elevation = [{ x: 0, y: 1, height: 1, access: "ramp" }];

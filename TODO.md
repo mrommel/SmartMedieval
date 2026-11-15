@@ -23,10 +23,10 @@
   - [x] Move prototype state, movement, capture, and pathfinding out of the browser UI into a testable server engine.
   - [x] Move battlefield rendering behind a renderer module.
   - [x] Isolate pointer/camera input and launch/catalog UI.
-- [ ] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
+- [x] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
   - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
   - [x] Keep units on distinct tiles during movement and prevent paths through occupied tiles.
-  - [ ] Add multiple strongpoints and terrain collision beyond keep walls.
+  - [x] Add multiple gated strongpoints and terrain collision beyond keep walls.
   - [x] Add editable map objects such as trees and rocks, with rendering and appropriate movement and line-of-sight collision.
 - [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
 - [x] Give units turn-based move points that are spent on movement and restored at turn end.

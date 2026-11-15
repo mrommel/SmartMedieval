@@ -50,7 +50,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     cols, rows = map_data["cols"], map_data["rows"]
     if type(cols) is not int or type(rows) is not int or not (8 <= cols <= 64 and 8 <= rows <= 64):
@@ -70,6 +70,27 @@ def validate_map(map_data):
     gate = map_data["gate"]
     if not is_keep_edge(gate["x"], gate["y"], map_data):
         raise InvalidMap("The gate must lie on the keep wall.")
+    strongpoints = map_data.get("strongpoints", [])
+    if not isinstance(strongpoints, list) or len(strongpoints) > 16:
+        raise InvalidMap("Strongpoints must be a list of at most 16 gated rectangles.")
+    rectangles = [keep]
+    for point in strongpoints:
+        if not isinstance(point, dict) or set(point) != {"left", "right", "top", "bottom", "gate"}:
+            raise InvalidMap("Each strongpoint needs bounds and a gate.")
+        if (any(type(point[key]) is not int for key in ("left", "right", "top", "bottom"))
+                or not (0 <= point["left"] < point["right"] < cols)
+                or not (0 <= point["top"] < point["bottom"] < rows)):
+            raise InvalidMap("Strongpoint bounds must form a rectangle inside the map.")
+        entrance = point["gate"]
+        if (not isinstance(entrance, dict) or set(entrance) != {"x", "y"}
+                or type(entrance["x"]) is not int or type(entrance["y"]) is not int
+                or not is_rectangle_edge(entrance["x"], entrance["y"], point)):
+            raise InvalidMap("Each strongpoint gate must lie on its wall.")
+        if any(point["left"] <= other["right"] and other["left"] <= point["right"]
+               and point["top"] <= other["bottom"] and other["top"] <= point["bottom"]
+               for other in rectangles):
+            raise InvalidMap("Strongpoints cannot overlap the keep or each other.")
+        rectangles.append(point)
     objects = map_data.get("objects", [])
     if not isinstance(objects, list) or len(objects) > 256:
         raise InvalidMap("Objects must be a list of at most 256 trees and rocks.")
@@ -129,16 +150,19 @@ def validate_map(map_data):
 
 
 def is_keep_edge(x, y, map_data=MAP):
-    keep = map_data["keep"]
-    inside = keep["left"] <= x <= keep["right"] and keep["top"] <= y <= keep["bottom"]
-    edge = x in (keep["left"], keep["right"]) or y in (keep["top"], keep["bottom"])
+    return is_rectangle_edge(x, y, map_data["keep"])
+
+
+def is_rectangle_edge(x, y, rectangle):
+    inside = rectangle["left"] <= x <= rectangle["right"] and rectangle["top"] <= y <= rectangle["bottom"]
+    edge = x in (rectangle["left"], rectangle["right"]) or y in (rectangle["top"], rectangle["bottom"])
     return inside and edge
 
 
 def is_wall(x, y, map_data=MAP):
-    return is_keep_edge(x, y, map_data) and (x, y) != (
-        map_data["gate"]["x"], map_data["gate"]["y"]
-    )
+    return any(is_rectangle_edge(x, y, point) and (x, y) != (gate["x"], gate["y"])
+               for point, gate in [(map_data["keep"], map_data["gate"])]
+               + [(point, point["gate"]) for point in map_data.get("strongpoints", ())])
 
 
 def is_object(x, y, map_data=MAP):
