@@ -263,7 +263,7 @@ export function createBattlefieldRenderer(canvas) {
       ctx.arc(0, -10, 2, 0, Math.PI * 2);
       ctx.fill();
     }
-    const coat = unit.side === "defenders" ? "#566783" :
+    const coat = unit.type === "king" ? "#9b673c" : unit.side === "defenders" ? "#566783" :
       unit.type === "vanguard" ? "#8f5946" : unit.type === "longbow" ? "#71824e" : "#526e6b";
     ctx.fillStyle = coat;
     ctx.beginPath();
@@ -275,10 +275,16 @@ export function createBattlefieldRenderer(canvas) {
     ctx.beginPath();
     ctx.arc(0, -20 + bob, 4.3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = unit.type === "vanguard" ? "#615c4c" : "#665544";
-    ctx.beginPath();
-    ctx.arc(0, -21.2 + bob, 4.2, Math.PI, Math.PI * 2);
-    ctx.lineTo(3.9, -20 + bob); ctx.lineTo(-4, -20 + bob); ctx.fill();
+    if (unit.type === "king") {
+      ctx.fillStyle = "#f0d47a";
+      polygon([[-5, -24 + bob], [-5, -29 + bob], [-2, -26 + bob],
+        [0, -31 + bob], [2, -26 + bob], [5, -29 + bob], [5, -24 + bob]], "#f0d47a", "#76542e");
+    } else {
+      ctx.fillStyle = unit.type === "vanguard" ? "#615c4c" : "#665544";
+      ctx.beginPath();
+      ctx.arc(0, -21.2 + bob, 4.2, Math.PI, Math.PI * 2);
+      ctx.lineTo(3.9, -20 + bob); ctx.lineTo(-4, -20 + bob); ctx.fill();
+    }
 
     ctx.strokeStyle = "#d3c7a6";
     ctx.lineWidth = 1.35;
@@ -287,6 +293,9 @@ export function createBattlefieldRenderer(canvas) {
       ctx.beginPath(); ctx.moveTo(4, -12 + bob); ctx.lineTo(12, -22 + bob); ctx.stroke();
       ctx.strokeStyle = "#876846"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(-7, -12 + bob); ctx.lineTo(-10, -5 + bob); ctx.stroke();
+    } else if (unit.type === "king") {
+      ctx.strokeStyle = "#d8bf72";
+      ctx.beginPath(); ctx.moveTo(6, -15 + bob); ctx.lineTo(7, -4 + bob); ctx.stroke();
     } else if (unit.type === "longbow") {
       ctx.strokeStyle = "#9c7047"; ctx.lineWidth = 1.7;
       ctx.beginPath(); ctx.moveTo(7, -9 + bob); ctx.quadraticCurveTo(15, -16 + bob, 7, -24 + bob); ctx.stroke();

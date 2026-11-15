@@ -91,7 +91,7 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .camera-controls button { width: 30px; height: 30px; border: 1px solid rgba(234,216,169,.35); border-radius: 2px; color: #eee3c8; background: rgba(26,35,29,.78); font-size: 18px; line-height: 1; cursor: pointer; }
 .camera-controls button:hover, .camera-controls button:focus-visible { border-color: #e6c374; background: #26352c; }
 .objective-label { position: absolute; top: 16px; right: 18px; display: flex; gap: 7px; align-items: center; padding: 6px 9px; color: #eee3c8; background: rgba(26,35,29,.72); border: 1px solid rgba(234,216,169,.25); font-size: 8px; letter-spacing: .11em; pointer-events: none; }
-.objective-label span { width: 6px; height: 6px; border: 1px solid #e6c374; border-radius: 50%; box-shadow: 0 0 7px #e6c374; }
+.objective-label span:first-child { width: 6px; height: 6px; border: 1px solid #e6c374; border-radius: 50%; box-shadow: 0 0 7px #e6c374; }
 .map-coordinates { position: absolute; bottom: 11px; right: 14px; color: rgba(244,239,216,.63); font-size: 8px; letter-spacing: .08em; pointer-events: none; }
 .toast { position: absolute; left: 50%; bottom: 20px; transform: translate(-50%, 8px); width: max-content; max-width: calc(100% - 32px); padding: 7px 12px; color: #f2e7cb; background: rgba(26,35,29,.86); border: 1px solid rgba(234,216,169,.28); font-size: 10px; opacity: 0; transition: .2s ease; pointer-events: none; text-align: center; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
@@ -118,7 +118,7 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .objective-copy b { color: #d0bd91; }
 .progress-track { height: 3px; background: #39453d; }
 .progress-track div { width: 0; height: 100%; background: #d3b36e; transition: width .18s linear; }
-.turn-controls { display: flex; align-items: center; gap: 8px; color: #d0bd91; white-space: nowrap; }
+.turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #d0bd91; white-space: nowrap; }
 .turn-controls button:disabled { opacity: .5; cursor: not-allowed; }
 .order-readout { display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: #aab0a2; font-size: 8px; letter-spacing: .06em; white-space: nowrap; }
 .order-key { padding: 3px 5px; border: 1px solid #556057; color: #d1d1c1; font-size: 7px; }

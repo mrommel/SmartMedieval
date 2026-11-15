@@ -35,6 +35,56 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_seeded_throne_room_capture_survives_reload_and_is_session_owned(self):
+        throne = SingleGame.objects.get(slug="greywatch-throne-room")
+        self.assertIn(throne.pk, [game["id"] for game in self.client.get(reverse("single-games-api")).json()])
+        started = self.client.post(reverse("start-game", args=["single-games", throne.pk])).json()
+        self.assertEqual(started["map"]["mission"], "capture_king")
+        king = next(unit for unit in started["state"]["units"] if unit["type"] == "king")
+        self.assertEqual((king["x"], king["y"]), (14, 7))
+        self.assertEqual(started["state"]["capture_status"], "KING GUARDED")
+        self.assertEqual(Client().get(reverse("current-game")).status_code, 404)
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"] = [unit for unit in instance.state["units"]
+                                   if unit["side"] != "defenders" or unit["type"] == "king"]
+        instance.state["units"][0].update(x=14, y=8)
+        instance.save(update_fields=["state"])
+        result = self.action(0, {"type": "capture", "unit_id": 0})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["revision"], 1)
+        self.assertEqual(result.json()["state"]["capture_status"], "KING CAPTURED")
+        self.assertTrue(result.json()["state"]["captured"])
+        self.assertEqual(result.json()["state"]["history"][-1]["type"], "capture")
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], result.json()["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["history"][-1]["type"], "capture")
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 400)
+        self.ai.assert_not_called()
+
+    def test_king_killed_is_defeat_and_ai_cannot_order_king(self):
+        throne = SingleGame.objects.get(slug="greywatch-throne-room")
+        started = self.client.post(reverse("start-game", args=["single-games", throne.pk])).json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        king = next(unit for unit in instance.state["units"] if unit["type"] == "king")
+        instance.state["units"][0].update(x=14, y=8)
+        king["health"] = 1
+        instance.save(update_fields=["state"])
+        self.assertEqual(self.action(0, {"type": "capture", "unit_id": 0}).status_code, 400)
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 200)
+        request = self.ai.call_args.args[0]
+        ai_input = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual(ai_input["map"]["mission"], "capture_king")
+        self.assertIn("king", [unit["type"] for unit in ai_input["units"]])
+        self.set_ai_orders([{"unit_id": king["id"], "x": 14, "y": 8}])
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 502)
+        self.set_ai_orders([])
+        defeated = self.action(1, {"type": "attack", "unit_id": 0, "target_id": king["id"]})
+        self.assertEqual(defeated.status_code, 200)
+        self.assertTrue(defeated.json()["state"]["defeated"])
+        self.assertFalse(defeated.json()["state"]["captured"])
+        self.assertEqual(defeated.json()["state"]["capture_status"], "DEFEATED")
+        self.assertEqual(self.action(2, {"type": "end_turn"}).status_code, 400)
+
     def test_start_load_move_and_resume_server_owned_game(self):
         started = self.start()
         self.assertEqual(started.status_code, 201)

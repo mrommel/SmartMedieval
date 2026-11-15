@@ -18,6 +18,7 @@ import { createLaunchUI } from "./launch.js";
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
   const promoteButton = document.getElementById("promote");
+  const captureButton = document.getElementById("capture-king");
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
@@ -64,6 +65,7 @@ import { createLaunchUI } from "./launch.js";
     endTurnButton.disabled = pendingAction || paused || ended;
     promoteButton.disabled = pendingAction || paused || ended ||
       !promotionCandidate();
+    captureButton.disabled = pendingAction || paused || ended || captureCandidate() === null;
     pauseButton.disabled = ended;
     pauseButton.textContent = paused ? "Resume" : "Pause";
     pauseButton.setAttribute("aria-pressed", String(paused));
@@ -74,6 +76,18 @@ import { createLaunchUI } from "./launch.js";
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     return selected.length === 1 && (selected[0].rank || "recruit") === "recruit" &&
       (selected[0].morale ?? 3) >= 5;
+  }
+
+  function captureCandidate() {
+    if (mapData?.mission !== "capture_king") return null;
+    const king = simulation.units.find(unit => unit.type === "king" && unit.side === "defenders");
+    if (!king || simulation.units.some(unit => unit.side === "defenders" && unit.type !== "king" &&
+      Math.abs(unit.x - king.x) + Math.abs(unit.y - king.y) === 1 &&
+      renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(king.x, king.y))) return null;
+    return simulation.units.find(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
+      unit.type === "vanguard" && unit.fight_points > 0 &&
+      Math.abs(unit.x - king.x) + Math.abs(unit.y - king.y) === 1 &&
+      renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(king.x, king.y))?.id ?? null;
   }
 
   function resize() {
@@ -108,6 +122,10 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function attackSelected(target) {
+    if (target.type === "king" && captureCandidate() !== null) {
+      sendAction({ type: "capture", unit_id: captureCandidate() });
+      return;
+    }
     const selected = simulation.units.filter(unit => simulation.selected.has(unit.id));
     const melee = selected.find(unit => unit.type === "vanguard" && unit.fight_points > 0 &&
       Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1 &&
@@ -116,9 +134,11 @@ import { createLaunchUI } from "./launch.js";
       !(unit.reload_turns > 0) && canRangedAttack(unit, target));
     const attacker = melee || ranged;
     if (!attacker) {
-      showToast("Select a ready soldier with a clear shot or move a vanguard next to the defender.");
+      showToast(target.type === "king" ? "Move a vanguard next to the king and remove adjacent guards to capture him." :
+        "Select a ready soldier with a clear shot or move a vanguard next to the defender.");
       return;
     }
+    if (target.type === "king" && !window.confirm("Killing the king loses the mission. Attack him instead of capturing him?")) return;
     sendAction({ type: melee ? "attack" : "ranged_attack", unit_id: attacker.id, target_id: target.id });
   }
 
@@ -167,7 +187,7 @@ import { createLaunchUI } from "./launch.js";
     cursorStatus.textContent = `${location}: ${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
       : objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
-        ? "courtyard objective" : "open ground")}.`;
+        ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" : "open ground")}.`;
   }
 
   function updateSelection() {
@@ -199,6 +219,8 @@ import { createLaunchUI } from "./launch.js";
       const actor = `${event.actor_side === "defenders" ? "Defender" : "Attacker"} ${event.actor_type} #${event.actor_id + 1}`;
       if (event.type === "promote") {
         item.textContent = `Turn ${event.turn} · ${actor} promoted to veteran (morale ${event.morale_change}).`;
+      } else if (event.type === "capture") {
+        item.textContent = `Turn ${event.turn} · ${actor} captured the living king.`;
       } else {
         const target = `${event.target_side === "defenders" ? "defender" : "attacker"} ${event.target_type} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
@@ -219,6 +241,12 @@ import { createLaunchUI } from "./launch.js";
     instanceId = snapshot.id;
     revision = snapshot.revision;
     mapData = snapshot.map;
+    const throneMission = mapData.mission === "capture_king";
+    captureButton.hidden = !throneMission;
+    document.getElementById("objective-name").textContent = throneMission ? "THRONE ROOM" : "KEEP COURTYARD";
+    document.getElementById("mission-help").textContent = throneMission
+      ? "Reach the throne room. Defeat guards beside the king, then select a vanguard on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
+      : "Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap(mapData);
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
@@ -272,9 +300,15 @@ import { createLaunchUI } from "./launch.js";
     renderHistory(snapshot.state.history);
     victoryNode.hidden = !simulation.captured && !simulation.defeated;
     victoryNode.classList.toggle("defeat", simulation.defeated);
-    victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated ? "THE COMPANY HAS FALLEN" : "GREYWATCH HAS FALLEN";
-    victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken." : "The keep is yours.";
-    victoryNode.querySelector("p").textContent = simulation.defeated ? "No attackers remain on the field." : "Your small band has secured the courtyard.";
+    const kingAlive = defenders.some(unit => unit.type === "king");
+    victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated
+      ? throneMission && !kingAlive ? "THE KING HAS FALLEN" : "THE COMPANY HAS FALLEN"
+      : throneMission ? "THE KING IS CAPTIVE" : "GREYWATCH HAS FALLEN";
+    victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken."
+      : throneMission ? "The king is your prisoner." : "The keep is yours.";
+    victoryNode.querySelector("p").textContent = simulation.defeated
+      ? throneMission && !kingAlive ? "You needed the king alive. The mission has failed." : "No attackers remain on the field."
+      : throneMission ? "Your company captured the king alive." : "Your small band has secured the courtyard.";
     updatePromotion();
     draw();
   }
@@ -324,8 +358,8 @@ import { createLaunchUI } from "./launch.js";
       const combat = combatSummary(simulation.units, snapshot.state.units);
       applySnapshot(snapshot);
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
-      if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
-      else if (simulation.defeated) showToast("Your company has been defeated.");
+      if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
+      else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.type === "king") ? "The king was killed. Mission failed." : "Your company has been defeated.");
       else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
@@ -440,6 +474,10 @@ import { createLaunchUI } from "./launch.js";
   promoteButton.addEventListener("click", () => {
     const [unitId] = simulation.selected;
     if (unitId !== undefined && !promoteButton.disabled) sendAction({ type: "promote", unit_id: unitId });
+  });
+  captureButton.addEventListener("click", () => {
+    const unitId = captureCandidate();
+    if (unitId !== null && !captureButton.disabled) sendAction({ type: "capture", unit_id: unitId });
   });
   window.addEventListener("resize", resize);
 })();

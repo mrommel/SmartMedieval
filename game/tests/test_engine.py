@@ -1,9 +1,121 @@
 from django.test import TestCase
 
 from ..engine import (
-    HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, default_map, defender_destinations, find_path,
+    HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, capture_status, default_map, defender_destinations, find_path,
     has_line_of_sight, initial_state, is_walkable, resolve_defender_goals, validate_map,
 )
+
+
+class ThroneRoomTests(TestCase):
+    def throne_map(self):
+        battlefield = default_map()
+        battlefield["mission"] = "capture_king"
+        battlefield["enemyStartPositions"] = [
+            {"x": 14, "y": 7, "type": "king"},
+            {"x": 13, "y": 7, "type": "vanguard"},
+        ]
+        return battlefield
+
+    def test_map_requires_one_king_on_throne_and_at_least_one_guard(self):
+        battlefield = self.throne_map()
+        validate_map(battlefield)
+        for update in (
+            lambda data: data.pop("enemyStartPositions"),
+            lambda data: data["enemyStartPositions"].pop(),
+            lambda data: data["enemyStartPositions"].append({"x": 12, "y": 5, "type": "king"}),
+            lambda data: data["enemyStartPositions"][0].update(x=12, y=5),
+            lambda data: data["enemyStartPositions"][1].update(x=14, y=7),
+            lambda data: data["startPositions"][0].update(type="king"),
+            lambda data: data.update(objective={"x": 7, "y": 7}),
+        ):
+            changed = self.throne_map()
+            update(changed)
+            with self.subTest(changed=changed), self.assertRaises(InvalidMap):
+                validate_map(changed)
+        for mission in ("unknown", None, 12):
+            battlefield["mission"] = mission
+            with self.subTest(mission=mission), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        courtyard = default_map()
+        courtyard["enemyStartPositions"][0]["type"] = "king"
+        with self.assertRaises(InvalidMap):
+            validate_map(courtyard)
+
+    def test_capture_requires_vanguard_range_height_fight_point_and_no_adjacent_guard(self):
+        battlefield = self.throne_map()
+        state = initial_state(battlefield)
+        state["units"][0].update(x=14, y=8)
+        king_id = len(battlefield["startPositions"])
+        guard_id = king_id + 1
+        self.assertEqual(capture_status(state, battlefield), "KING GUARDED")
+        action = {"type": "capture", "unit_id": 0}
+        with self.assertRaisesRegex(InvalidAction, "guards"):
+            apply_action(state, action, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "capture", "unit_id": True}, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "capture", "unit_id": 2}, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "capture", "unit_id": 99}, battlefield)
+        self.assertEqual(state["units"][0]["fight_points"], 1)
+
+        state["units"] = [unit for unit in state["units"] if unit["id"] != guard_id]
+        self.assertEqual(capture_status(state, battlefield), "CAPTURE THE KING")
+        for change in ({"x": 14, "y": 9}, {"fight_points": 0}, {"elevation": True}):
+            layout = self.throne_map()
+            if change.get("elevation"):
+                layout["elevation"] = [{"x": 14, "y": 7, "height": 1, "access": "ramp"}]
+            altered = initial_state(layout)
+            altered["units"] = [unit for unit in altered["units"] if unit["id"] != guard_id]
+            altered["units"][0].update({"x": 14, "y": 8})
+            altered["units"][0].update({key: value for key, value in change.items() if key != "elevation"})
+            with self.subTest(change=change), self.assertRaises(InvalidAction):
+                apply_action(altered, action, layout)
+        captured = apply_action(state, action, battlefield)
+        self.assertTrue(captured["captured"])
+        self.assertFalse(captured["defeated"])
+        self.assertEqual(captured["units"][0]["fight_points"], 0)
+        self.assertIn(king_id, [unit["id"] for unit in captured["units"]])
+        self.assertEqual(captured["capture_progress"], 1)
+        self.assertEqual(capture_status(captured, battlefield), "KING CAPTURED")
+        self.assertEqual(captured["history"][-1]["type"], "capture")
+        self.assertEqual(state["units"][0]["fight_points"], 1)
+        with self.assertRaises(InvalidAction):
+            apply_action(captured, {"type": "end_turn"}, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(initial_state(), action)
+
+    def test_killing_king_fails_and_throne_occupation_does_not_win(self):
+        battlefield = self.throne_map()
+        state = initial_state(battlefield)
+        state["units"][0].update(x=14, y=8)
+        king = state["units"][6]
+        king["health"] = 1
+        dead = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": king["id"]}, battlefield)
+        self.assertTrue(dead["defeated"])
+        self.assertFalse(dead["captured"])
+        self.assertEqual(capture_status(dead, battlefield), "DEFEATED")
+        self.assertEqual(dead["history"][-1]["target_type"], "king")
+        with self.assertRaises(InvalidAction):
+            apply_action(dead, {"type": "end_turn"}, battlefield)
+        state = initial_state(battlefield)
+        state["units"][0].update(x=14, y=7)
+        self.assertFalse(apply_action(state, {"type": "end_turn"}, battlefield)["captured"])
+
+    def test_king_never_moves_attacks_or_accepts_ai_orders(self):
+        battlefield = self.throne_map()
+        state = initial_state(battlefield)
+        king = state["units"][6]
+        state["units"][0].update(x=14, y=8, health=1)
+        with self.assertRaises(InvalidAction):
+            resolve_defender_goals(state, [{"unit_id": king["id"], "x": 14, "y": 8}], battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "end_turn"}, battlefield,
+                         enemy_orders=[{"unit_id": king["id"], "x": 14, "y": 8}])
+        state["units"] = [unit for unit in state["units"] if unit["id"] != 7]
+        ended = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual((ended["units"][0]["health"], ended["units"][-1]["x"]), (1, 14))
+        self.assertEqual(ended["units"][-1]["fight_points"], 1)
 
 
 class TurnEngineTests(TestCase):

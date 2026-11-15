@@ -18,7 +18,8 @@ class EnemyAIError(Exception):
 
 
 def enemy_turn(state, map_data, combat_events=None):
-    defenders = [unit for unit in state["units"] if unit.get("side") == "defenders"]
+    defenders = [unit for unit in state["units"]
+                 if unit.get("side") == "defenders" and unit.get("type") != "king"]
     if not defenders:
         return apply_action(state, {"type": "end_turn"}, map_data, combat_events=combat_events)
     if not settings.ENEMY_AI_API_KEY:
@@ -27,7 +28,8 @@ def enemy_turn(state, map_data, combat_events=None):
     battlefield = {
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
-                  "strongpoints": map_data.get("strongpoints", [])},
+                  "strongpoints": map_data.get("strongpoints", []),
+                  "mission": map_data.get("mission", "courtyard")},
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
@@ -55,7 +57,10 @@ def enemy_turn(state, map_data, combat_events=None):
                 "within a clear shot. Ground-level units beside a wall, tree, or rock on the "
                 "shooter-facing side block the first ranged hit against them each turn; melee "
                 "ignores cover. Keep at least one defender near the objective when one is "
-                "already nearby; prioritize attackers occupying the objective. "
+                "already nearby; prioritize attackers occupying the objective. In a capture_king "
+                "mission the king stays on the throne, never moves or attacks, and cannot be "
+                "ordered; keep guards adjacent to him to prevent capture, and attack nearby "
+                "vanguards before they can capture him. "
                 "Issue at most 8 orders and at most one per defender. "
                 "Omit units that should hold position. Do not issue attacker orders."
             )},

@@ -87,7 +87,7 @@
           <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
           <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
         </div>
-        <div class="objective-label"><span></span> KEEP COURTYARD</div>
+        <div class="objective-label"><span></span><span id="objective-name">KEEP COURTYARD</span></div>
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
         <p id="cursor-status" class="sr-only" aria-live="polite"></p>
         <div class="pause-indicator" id="pause-indicator" hidden>PAUSED · Orders are disabled</div>
@@ -107,7 +107,7 @@
           <div class="objective-copy"><span><i></i> OBJECTIVE</span><b id="objective-status">UNCLAIMED</b></div>
           <div class="progress-track"><div id="capture-progress"></div></div>
         </div>
-        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="pause-game" type="button" aria-pressed="false">Pause</button><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
+        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="pause-game" type="button" aria-pressed="false">Pause</button><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="capture-king" type="button" disabled hidden>Capture king</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
         <div class="order-readout"><span class="order-key">LMB</span><span>SELECT &amp; ORDER</span><span class="order-key">SHIFT</span><span>ADD TO GROUP</span></div>
       </footer>
     </section>
@@ -130,11 +130,11 @@
       <div class="howto">
         <div class="roster-heading">HOW TO PLAY</div>
         <p><kbd>Click</kbd> a soldier to select. <kbd>Shift</kbd> + click to add or remove a soldier.</p>
-        <p>Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
+        <p id="mission-help">Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
         <p>Walls, trees, and rocks beside a ground-level target can block the first ranged hit each turn when they face the shooter. The shot still spends a fight point and reloads. Attack from another direction or use melee to bypass cover.</p>
         <p>Defeating an enemy raises the victor's morale; nearby allies lose morale when a soldier falls. At 0–1 morale, units lose one move point next turn; at 5, they gain one. Select one recruit with 5 morale and press Promote to become a veteran: morale returns to 3, with one extra move and fight point each following turn.</p>
         <p>Drag the battlefield to pan. Use the mouse wheel or the zoom buttons to zoom.</p>
-        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, or order movement to open ground. Hold Shift while selecting to add or remove a soldier. Tab to End turn, Promote, or the zoom buttons for other controls.</p>
+        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, or order movement to open ground. Hold Shift while selecting to add or remove a soldier. Tab to End turn, Promote, Capture king, or the zoom buttons for other controls.</p>
       </div>
       <div class="playback-settings">
         <label for="animation-speed">Animation speed</label>

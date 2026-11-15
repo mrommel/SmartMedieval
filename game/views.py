@@ -128,7 +128,8 @@ def game_action(request):
     try:
         action = payload.get("action")
         if (isinstance(action, dict) and action.get("type") == "end_turn"
-                and set(action) == {"type"} and not instance.state["captured"]):
+                and set(action) == {"type"} and not instance.state["captured"]
+                and not instance.state.get("defeated", False)):
             state = enemy_turn(instance.state, instance.map_definition, combat_events=combat_events)
         else:
             state = apply_action(instance.state, action, instance.map_definition, combat_events=combat_events)

@@ -50,8 +50,13 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
+    mission = map_data.get("mission", "courtyard")
+    if mission not in ("courtyard", "capture_king"):
+        raise InvalidMap("Mission must be courtyard or capture_king.")
+    if mission == "capture_king" and "enemyStartPositions" not in map_data:
+        raise InvalidMap("A throne-room mission needs a king and guards in enemyStartPositions.")
     cols, rows = map_data["cols"], map_data["rows"]
     if type(cols) is not int or type(rows) is not int or not (8 <= cols <= 64 and 8 <= rows <= 64):
         raise InvalidMap("Map dimensions must be between 8 and 64 tiles.")
@@ -123,7 +128,12 @@ def validate_map(map_data):
     objective = map_data["objective"]
     if not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
+    if mission == "capture_king" and not (keep["left"] < objective["x"] < keep["right"]
+                                          and keep["top"] < objective["y"] < keep["bottom"]):
+        raise InvalidMap("The throne must be inside the keep.")
     occupied = set()
+    kings = 0
+    guards = 0
     for name in ("startPositions", "enemyStartPositions"):
         if name not in map_data:
             continue
@@ -133,18 +143,27 @@ def validate_map(map_data):
         for position in positions:
             if (not isinstance(position, dict) or set(position) != {"x", "y", "type"}
                     or type(position["x"]) is not int or type(position["y"]) is not int
-                    or position["type"] not in ("vanguard", "longbow", "crossbow")
+                    or position["type"] not in (("vanguard", "longbow", "crossbow", "king")
+                                                if name == "enemyStartPositions" and mission == "capture_king"
+                                                else ("vanguard", "longbow", "crossbow"))
                     or not is_walkable(position["x"], position["y"], map_data)):
                 raise InvalidMap("Every starting unit needs an open tile and a supported type.")
             tile = (position["x"], position["y"])
             if tile in occupied:
                 raise InvalidMap("Starting units must have distinct tiles.")
             occupied.add(tile)
+            if name == "enemyStartPositions":
+                kings += position["type"] == "king"
+                guards += position["type"] != "king"
+                if (position["type"] == "king") != (tile == (objective["x"], objective["y"])) and mission == "capture_king":
+                    raise InvalidMap("The king must start on the throne and guards must start elsewhere.")
             if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
-            if name == "enemyStartPositions" and (position["x"], position["y"]) == (
+            if name == "enemyStartPositions" and mission != "capture_king" and tile == (
                     objective["x"], objective["y"]):
                 raise InvalidMap("Defenders cannot start on the objective.")
+    if mission == "capture_king" and (kings != 1 or guards < 1):
+        raise InvalidMap("A throne-room mission needs exactly one king and at least one guard.")
     if "enemyStartPositions" not in map_data:
         legacy_enemy_position(map_data)
 
@@ -361,7 +380,8 @@ def defender_destinations(unit, map_data=MAP, blocked=()):
 
 
 def resolve_defender_goals(state, goals, map_data=MAP):
-    defenders = {unit["id"]: unit for unit in state["units"] if unit.get("side") == "defenders"}
+    defenders = {unit["id"]: unit for unit in state["units"]
+                 if unit.get("side") == "defenders" and unit.get("type") != "king"}
     if not isinstance(goals, list) or len(goals) > len(defenders):
         raise InvalidAction("Invalid defender goals.")
     orders = []
@@ -466,7 +486,9 @@ def capture_status(state, map_data=MAP):
     if state.get("defeated", False):
         return "DEFEATED"
     if state["captured"]:
-        return "SECURED"
+        return "KING CAPTURED" if map_data.get("mission") == "capture_king" else "SECURED"
+    if map_data.get("mission") == "capture_king":
+        return "KING GUARDED" if king_is_guarded(state) else "CAPTURE THE KING"
     objective = map_data["objective"]
     if any((unit["x"], unit["y"]) == (objective["x"], objective["y"])
            and unit.get("side", "attackers") == "attackers" for unit in state["units"]):
@@ -474,12 +496,21 @@ def capture_status(state, map_data=MAP):
     return "CONTESTED" if state["capture_progress"] else "UNCLAIMED"
 
 
+def king_is_guarded(state):
+    king = next((unit for unit in state["units"] if unit.get("type") == "king"), None)
+    return bool(king and any(
+        unit.get("side") == "defenders" and unit.get("type") != "king"
+        and abs(unit["x"] - king["x"]) + abs(unit["y"] - king["y"]) == 1
+        and unit["z"] == king["z"] for unit in state["units"]
+    ))
+
+
 def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
-            "move", "attack", "ranged_attack", "promote", "end_turn"):
+            "move", "attack", "ranged_attack", "capture", "promote", "end_turn"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
-        raise InvalidAction("The courtyard has already been secured.")
+        raise InvalidAction("The battle has already ended.")
 
     next_state = {**state, "units": [
         {
@@ -494,6 +525,29 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         }
         for unit in state["units"]
     ], "defeated": state.get("defeated", False), "history": list(state.get("history", []))}
+    if action["type"] == "capture":
+        if (map_data.get("mission") != "capture_king" or set(action) != {"type", "unit_id"}
+                or type(action["unit_id"]) is not int):
+            raise InvalidAction("Choose one soldier to capture the king.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side") == "attackers"), None)
+        king = next((unit for unit in next_state["units"] if unit.get("type") == "king"), None)
+        if not unit or not king or unit["fight_points"] < 1 or unit["type"] != "vanguard":
+            raise InvalidAction("A vanguard with a fight point must capture the living king.")
+        if (abs(unit["x"] - king["x"]) + abs(unit["y"] - king["y"]) != 1
+                or unit["z"] != king["z"]):
+            raise InvalidAction("Move beside the king on the same level to capture him.")
+        if king_is_guarded(next_state):
+            raise InvalidAction("Remove the guards beside the king before capturing him.")
+        unit["fight_points"] -= 1
+        next_state["captured"] = True
+        next_state["capture_progress"] = 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": "capture", "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_type": unit["type"],
+            "target_id": king["id"], "target_side": "defenders", "target_type": "king",
+        }])[-HISTORY_LIMIT:]
+        return next_state
     if action["type"] == "promote":
         if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
             raise InvalidAction("Choose one soldier to promote.")
@@ -550,12 +604,15 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
         record_attack(next_state, attacker, target, ranged, map_data)
+        if map_data.get("mission") == "capture_king" and target["type"] == "king" and target["health"] <= 0:
+            next_state["defeated"] = True
         return next_state
 
     if action["type"] == "end_turn":
         if set(action) != {"type"}:
             raise InvalidAction("Invalid end-turn action.")
-        defenders = {unit["id"]: unit for unit in next_state["units"] if unit.get("side") == "defenders"}
+        defenders = {unit["id"]: unit for unit in next_state["units"]
+                     if unit.get("side") == "defenders" and unit.get("type") != "king"}
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
@@ -583,7 +640,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= len(path)
-        for defender in [unit for unit in next_state["units"] if unit.get("side") == "defenders"]:
+        for defender in [unit for unit in next_state["units"]
+                         if unit.get("side") == "defenders" and unit.get("type") != "king"]:
             if defender["fight_points"] < 1:
                 continue
             ranged = defender.get("type") in RANGED_UNIT_STATS
@@ -620,7 +678,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             and unit.get("side", "attackers") == "attackers"
             for unit in next_state["units"]
         )
-        if occupiers:
+        if map_data.get("mission") == "capture_king":
+            next_state["capture_progress"] = 0
+        elif occupiers:
             next_state["capture_progress"] = min(1, state["capture_progress"] + occupiers / 2)
             next_state["captured"] = next_state["capture_progress"] == 1
         else:

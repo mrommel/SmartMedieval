@@ -57,6 +57,7 @@ function setup(savedSpeed = null, catalogFetch = null) {
   let nextFrame;
   const window = {
     devicePixelRatio: 1, localStorage: store,
+    confirm: () => true,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     addEventListener() {}
   };
@@ -97,6 +98,29 @@ function setup(savedSpeed = null, catalogFetch = null) {
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer
   };
 }
+
+test("throne mission enables capture only for an unguarded adjacent king", async () => {
+  const game = setup();
+  game.snapshot.map.mission = "capture_king";
+  game.snapshot.map.objective = { x: 2, y: 2 };
+  game.snapshot.state.units[0].x = 2;
+  game.snapshot.state.units[0].y = 3;
+  game.snapshot.state.units.push({ id: 1, side: "defenders", type: "king", x: 2, y: 2,
+    health: 3, max_health: 3, fight_points: 1 });
+  game.snapshot.state.units.push({ id: 2, side: "defenders", type: "vanguard", x: 2, y: 1,
+    health: 3, max_health: 3, fight_points: 1 });
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("capture-king").hidden, false);
+  assert.equal(game.get("capture-king").disabled, true);
+  assert.equal(game.get("objective-name").textContent, "THRONE ROOM");
+  assert.match(game.get("mission-help").textContent, /Killing the king loses/);
+  game.snapshot.state.units.pop();
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("capture-king").disabled, false);
+  await game.get("capture-king").fire("click");
+  assert.equal(game.actions.at(-1).type, "capture");
+  assert.equal(game.actions.at(-1).unit_id, 0);
+});
 
 test("renderer projects raised tiles and draws updated maps independently", () => {
   const game = setup();

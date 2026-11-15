@@ -48,7 +48,7 @@
 
 ## Medieval tactical expansion (inspired by UFO: Enemy Unknown)
 
-- [ ] Add a throne-room mission where attackers must reach the throne and capture the living king; make the king a unit, define capture range/action and guards, and distinguish capture from killing him in victory/defeat rules.
+- [x] Add a throne-room mission where attackers must reach the throne and capture the living king; make the king a unit, define capture range/action and guards, and distinguish capture from killing him in victory/defeat rules.
 - [ ] Add catapults as crewed siege equipment with limited ammunition, aiming, firing and reload costs, projectile impacts, and damage to units or fortifications.
 - [ ] Add an editable medieval village with houses, lanes, fences, wells, and other cover; define movement, visibility, and combat interactions for its structures.
 - [ ] Let units enter and navigate houses and castles across multiple floors, including basements and dungeons; connect levels with doors, stairs, ladders, and passages, and account for walls and floors in movement and line of sight.
