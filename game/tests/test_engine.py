@@ -1,8 +1,8 @@
 from django.test import TestCase
 
 from ..engine import (
-    MAP, InvalidAction, apply_action, default_map, defender_destinations, find_path, initial_state,
-    is_walkable, resolve_defender_goals,
+    MAP, InvalidAction, apply_action, default_map, defender_destinations, find_path,
+    has_line_of_sight, initial_state, is_walkable, resolve_defender_goals,
 )
 
 
@@ -46,6 +46,48 @@ class TurnEngineTests(TestCase):
                 apply_action(state, action)
         self.assertEqual(state["units"][0]["fight_points"], 1)
 
+    def test_ranged_attack_uses_unit_range_and_spends_fight_point(self):
+        state = initial_state()
+        attacker, target = state["units"][2], state["units"][6]
+        attacker.update(x=2, y=6)
+        target.update(x=6, y=6)
+        attacked = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertEqual(attacked["units"][2]["fight_points"], 0)
+        self.assertEqual(attacked["units"][2]["reload_turns"], 2)
+        self.assertEqual(attacked["units"][6]["health"], 2)
+
+    def test_ranged_attack_rejects_out_of_range_blocked_and_wrong_unit(self):
+        state = initial_state()
+        attacker, target = state["units"][2], state["units"][6]
+        attacker.update(x=2, y=6)
+        target.update(x=8, y=6)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertFalse(has_line_of_sight((10, 7), (12, 7)))
+        self.assertTrue(has_line_of_sight((2, 6), (6, 6)))
+        state["units"][0].update(x=5, y=6)
+        target.update(x=6, y=6)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 6})
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "attack", "unit_id": 2, "target_id": 6})
+
+    def test_ranged_reload_blocks_next_turn_then_recovers(self):
+        state = initial_state()
+        state["units"][2].update(x=2, y=6)
+        state["units"][6].update(x=6, y=6)
+        state = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        state = apply_action(state, {"type": "end_turn"})
+        self.assertEqual(state["units"][2]["reload_turns"], 1)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        state = apply_action(state, {"type": "end_turn"})
+        self.assertEqual(state["units"][2]["reload_turns"], 0)
+        self.assertEqual(
+            apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})["units"][6]["health"],
+            1,
+        )
+
     def test_defender_counterattacks_and_can_defeat_the_attacking_company(self):
         state = initial_state()
         attacker, defender = state["units"][0], state["units"][6]
@@ -61,10 +103,23 @@ class TurnEngineTests(TestCase):
 
     def test_defender_counterattack_reduces_health_without_defeat(self):
         state = initial_state()
-        state["units"][0].update(x=12, y=6)
+        attacker, defender = state["units"][0], state["units"][6]
+        state["units"] = [attacker, defender]
+        attacker.update(x=12, y=6)
+        defender.update(x=12, y=5)
         ended = apply_action(state, {"type": "end_turn"})
         self.assertEqual(ended["units"][0]["health"], 2)
         self.assertFalse(ended["defeated"])
+
+    def test_ranged_defender_attacks_from_range_during_its_turn(self):
+        state = initial_state()
+        attacker, defender = state["units"][0], state["units"][6]
+        state["units"] = [attacker, defender]
+        attacker.update(x=2, y=6)
+        defender.update(x=6, y=6, type="longbow")
+        ended = apply_action(state, {"type": "end_turn"})
+        self.assertEqual(ended["units"][0]["health"], 2)
+        self.assertEqual(ended["units"][1]["reload_turns"], 2)
 
     def test_path_to_courtyard_uses_gate_and_walls_block_moves(self):
         path = find_path((10, 9), (MAP["objective"]["x"], MAP["objective"]["y"]))

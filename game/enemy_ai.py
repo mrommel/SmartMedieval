@@ -27,7 +27,9 @@ def enemy_turn(state, map_data):
     battlefield = {
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")},
         "units": [
-            {key: unit[key] for key in ("id", "side", "x", "y")}
+            {key: unit.get(key) for key in (
+                "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
+            )}
             for unit in state["units"]
         ],
     }
@@ -40,8 +42,10 @@ def enemy_turn(state, map_data):
                 "Each x,y is a goal inside the map, not a final destination. The server moves "
                 "the defender up to 4 steps toward it, avoiding walls and stopping short of the "
                 "objective. A defender may aim at the objective but cannot occupy it. After "
-                "movement, defenders automatically make one melee attack against an adjacent "
-                "attacker when possible. "
+                "movement, defenders automatically attack when possible: vanguards make melee "
+                "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
+                "with walls blocking line of sight. Ranged weapons need one or two full turns to "
+                "reload. Prefer goals that bring ranged defenders within a clear shot. "
                 "Issue at most 8 orders and at most one per defender. "
                 "Omit units that should hold position. Do not issue attacker orders."
             )},

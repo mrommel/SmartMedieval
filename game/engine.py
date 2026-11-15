@@ -26,6 +26,11 @@ MOVE_POINTS = 4
 MAX_HEALTH = 3
 FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
+RANGED_UNIT_STATS = {
+    # End-turn processing ticks cooldowns, including the transition after firing.
+    "longbow": {"range": 5, "reload_turns": 2},
+    "crossbow": {"range": 6, "reload_turns": 3},
+}
 
 
 class InvalidAction(ValueError):
@@ -105,6 +110,48 @@ def is_wall(x, y, map_data=MAP):
 
 def is_walkable(x, y, map_data=MAP):
     return 0 <= x < map_data["cols"] and 0 <= y < map_data["rows"] and not is_wall(x, y, map_data)
+
+
+def has_line_of_sight(start, end, map_data=MAP):
+    """Return whether a tile-center ray reaches its target without crossing a wall."""
+    x, y = start
+    target_x, target_y = end
+    dx, dy = target_x - x, target_y - y
+    nx, ny = abs(dx), abs(dy)
+    step_x = 1 if dx > 0 else -1 if dx < 0 else 0
+    step_y = 1 if dy > 0 else -1 if dy < 0 else 0
+    ix = iy = 0
+    while ix < nx or iy < ny:
+        horizontal = (1 + 2 * ix) * ny
+        vertical = (1 + 2 * iy) * nx
+        if horizontal == vertical:
+            # At a corner, either adjoining wall blocks the shot.
+            if ix < nx and iy < ny and (
+                    is_wall(x + step_x, y, map_data) or is_wall(x, y + step_y, map_data)):
+                return False
+            x += step_x
+            y += step_y
+            ix += 1
+            iy += 1
+        elif horizontal < vertical:
+            x += step_x
+            ix += 1
+        else:
+            y += step_y
+            iy += 1
+        if (x, y) != end and is_wall(x, y, map_data):
+            return False
+    return True
+
+
+def can_ranged_attack(attacker, target, map_data=MAP):
+    stats = RANGED_UNIT_STATS.get(attacker.get("type"))
+    if not stats or attacker.get("reload_turns", 0) > 0:
+        return False
+    distance = max(abs(attacker["x"] - target["x"]), abs(attacker["y"] - target["y"]))
+    return (distance > 0 and distance <= stats["range"]
+            and has_line_of_sight((attacker["x"], attacker["y"]),
+                                  (target["x"], target["y"]), map_data))
 
 
 def find_path(start, goal, map_data=MAP, blocked=()):
@@ -227,6 +274,7 @@ def initial_state(map_data=MAP):
                 "health": MAX_HEALTH,
                 "max_health": MAX_HEALTH,
                 "fight_points": FIGHT_POINTS,
+                "reload_turns": 0,
             }
             for index, point in enumerate(attackers + enemy_positions)
         ],
@@ -249,7 +297,8 @@ def capture_status(state, map_data=MAP):
 
 
 def apply_action(state, action, map_data=MAP, enemy_orders=()):
-    if not isinstance(action, dict) or action.get("type") not in ("move", "attack", "end_turn"):
+    if not isinstance(action, dict) or action.get("type") not in (
+            "move", "attack", "ranged_attack", "end_turn"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The courtyard has already been secured.")
@@ -260,10 +309,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             "health": unit.get("health", MAX_HEALTH),
             "max_health": unit.get("max_health", MAX_HEALTH),
             "fight_points": unit.get("fight_points", FIGHT_POINTS),
+            "reload_turns": unit.get("reload_turns", 0),
         }
         for unit in state["units"]
     ], "defeated": state.get("defeated", False)}
-    if action["type"] == "attack":
+    if action["type"] in ("attack", "ranged_attack"):
+        ranged = action["type"] == "ranged_attack"
         if set(action) != {"type", "unit_id", "target_id"}:
             raise InvalidAction("Invalid attack action.")
         unit_id, target_id = action["unit_id"], action["target_id"]
@@ -275,9 +326,23 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             raise InvalidAction("Only your soldiers can attack.")
         if target is None or target.get("side", "attackers") != "defenders":
             raise InvalidAction("Choose a living defender as the target.")
+        if ranged and attacker.get("type") not in RANGED_UNIT_STATS:
+            raise InvalidAction("Only bow and crossbow units can make ranged attacks.")
+        if not ranged and attacker.get("type") in RANGED_UNIT_STATS:
+            raise InvalidAction("Bow and crossbow units must use ranged attacks.")
         if attacker["fight_points"] < 1:
             raise InvalidAction("This soldier has no fight points left.")
-        if abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1:
+        if ranged:
+            if attacker.get("reload_turns", 0) > 0:
+                raise InvalidAction("This soldier is reloading.")
+            distance = max(abs(attacker["x"] - target["x"]), abs(attacker["y"] - target["y"]))
+            if distance == 0 or distance > RANGED_UNIT_STATS[attacker["type"]]["range"]:
+                raise InvalidAction("That defender is outside this weapon's range.")
+            if not has_line_of_sight((attacker["x"], attacker["y"]),
+                                     (target["x"], target["y"]), map_data):
+                raise InvalidAction("A wall blocks the line of sight.")
+            attacker["reload_turns"] = RANGED_UNIT_STATS[attacker["type"]]["reload_turns"]
+        elif abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1:
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
         target["health"] -= ATTACK_DAMAGE
@@ -294,6 +359,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
         for unit in defenders.values():
             unit["move_points"] = MOVE_POINTS
             unit["fight_points"] = FIGHT_POINTS
+            unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         ordered = set()
         for order in enemy_orders:
             if not isinstance(order, dict) or set(order) != {"unit_id", "x", "y"}:
@@ -315,15 +381,19 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
         for defender in [unit for unit in next_state["units"] if unit.get("side") == "defenders"]:
             if defender["fight_points"] < 1:
                 continue
-            adjacent_attackers = [
+            ranged = defender.get("type") in RANGED_UNIT_STATS
+            targets = [
                 unit for unit in next_state["units"]
                 if unit.get("side", "attackers") == "attackers"
-                and abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1
+                and (can_ranged_attack(defender, unit, map_data) if ranged else
+                     abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1)
             ]
-            if not adjacent_attackers:
+            if not targets:
                 continue
-            target = min(adjacent_attackers, key=lambda unit: (unit["health"], unit["id"]))
+            target = min(targets, key=lambda unit: (unit["health"], unit["id"]))
             defender["fight_points"] -= 1
+            if ranged:
+                defender["reload_turns"] = RANGED_UNIT_STATS[defender["type"]]["reload_turns"]
             target["health"] -= ATTACK_DAMAGE
             if target["health"] <= 0:
                 next_state["units"].remove(target)
@@ -346,6 +416,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=()):
             if unit.get("side", "attackers") == "attackers":
                 unit["move_points"] = MOVE_POINTS
                 unit["fight_points"] = FIGHT_POINTS
+                unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         return next_state
 
     if set(action) != {"type", "units", "x", "y"}:

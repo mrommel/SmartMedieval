@@ -31,6 +31,8 @@
   - [ ] Add morale and promotion effects to unit stats.
 - [ ] Allow units to promote to higher ranks with increased point allowances.
 - [ ] Extend combat with bow and crossbow ranges, reload times, projectile motion, and line-of-sight checks.
+  - [x] Add server-validated bow/crossbow attacks with wall-blocked line of sight, weapon ranges, reloads, and defender ranged attacks.
+  - [ ] Animate arrows and bolts as projectiles.
 - [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
 - [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
 
@@ -46,7 +48,8 @@
 ## Release and validation
 
 - [x] Add server-engine and API tests for pathfinding, movement, turn transitions, objective capture, session access, and stale actions, plus Django catalog/page smoke tests.
-- [ ] Add automated tests for line of sight, ranged combat, morale, and promotion as those systems are implemented.
+- [ ] Add automated tests for morale and promotion as those systems are implemented.
+  - [x] Add automated tests for line of sight, ranged combat, and reload timing.
 - [ ] Test game editing and scenario links, server-loaded instances and action updates, turn rules, elevation traversal, unit stats and promotion, and enemy AI.
 - [ ] Test the complete scenario in current desktop and mobile browsers and tune performance and balance.
 - [ ] Document local setup, controls, asset workflow, and production build/deployment steps.

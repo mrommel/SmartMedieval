@@ -335,6 +335,15 @@
       ctx.beginPath();
       ctx.ellipse(p.x, p.y + tileH * .5, tileW * .19, tileH * .14, 0, 0, Math.PI * 2);
       ctx.stroke();
+      if (hasAttackOption(unit)) {
+        ctx.strokeStyle = "#e8a56a";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + tileH * .5, tileW * .27, tileH * .2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
   }
 
@@ -380,15 +389,55 @@
   }
 
   function attackSelected(target) {
-    const attacker = simulation.units.find(unit =>
-      simulation.selected.has(unit.id) && unit.fight_points > 0 &&
-      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1
-    );
+    const selected = simulation.units.filter(unit => simulation.selected.has(unit.id));
+    const melee = selected.find(unit => unit.type === "vanguard" && unit.fight_points > 0 &&
+      Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1);
+    const ranged = selected.find(unit => unit.type !== "vanguard" && unit.fight_points > 0 &&
+      !(unit.reload_turns > 0) && canRangedAttack(unit, target));
+    const attacker = melee || ranged;
     if (!attacker) {
-      showToast("Select a soldier with a fight point next to that defender.");
+      showToast("Select a ready soldier with a clear shot or move a vanguard next to the defender.");
       return;
     }
-    sendAction({ type: "attack", unit_id: attacker.id, target_id: target.id });
+    sendAction({ type: melee ? "attack" : "ranged_attack", unit_id: attacker.id, target_id: target.id });
+  }
+
+  function hasLineOfSight(start, end) {
+    let [x, y] = start;
+    const [targetX, targetY] = end;
+    const dx = targetX - x, dy = targetY - y;
+    const nx = Math.abs(dx), ny = Math.abs(dy);
+    const stepX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+    const stepY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+    let ix = 0, iy = 0;
+    while (ix < nx || iy < ny) {
+      const horizontal = (1 + 2 * ix) * ny;
+      const vertical = (1 + 2 * iy) * nx;
+      if (horizontal === vertical) {
+        if (ix < nx && iy < ny && (isWall(x + stepX, y) || isWall(x, y + stepY))) return false;
+        x += stepX; y += stepY; ix++; iy++;
+      } else if (horizontal < vertical) {
+        x += stepX; ix++;
+      } else {
+        y += stepY; iy++;
+      }
+      if ((x !== targetX || y !== targetY) && isWall(x, y)) return false;
+    }
+    return true;
+  }
+
+  function canRangedAttack(attacker, target) {
+    const range = attacker.type === "longbow" ? 5 : attacker.type === "crossbow" ? 6 : 0;
+    const distance = Math.max(Math.abs(attacker.x - target.x), Math.abs(attacker.y - target.y));
+    return distance > 0 && distance <= range &&
+      hasLineOfSight([attacker.x, attacker.y], [target.x, target.y]);
+  }
+
+  function hasAttackOption(target) {
+    return simulation.units.some(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
+      unit.fight_points > 0 && (unit.type === "vanguard"
+        ? Math.abs(unit.x - target.x) + Math.abs(unit.y - target.y) === 1
+        : !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
   }
 
   function pickTile(localX, localY) {
@@ -482,7 +531,10 @@
       const health = typeUnits.reduce((total, unit) => total + unit.health, 0);
       const maxHealth = typeUnits.reduce((total, unit) => total + unit.max_health, 0);
       const fightPoints = typeUnits.reduce((total, unit) => total + unit.fight_points, 0);
-      detail.textContent = `${typeUnits.length} · ${item.role} · ${health}/${maxHealth} HP · ${fightPoints} FP`;
+      const reloading = typeUnits.filter(unit => unit.reload_turns > 0).length;
+      const weapon = item.type === "longbow" ? " · range 5" : item.type === "crossbow" ? " · range 6" : "";
+      const reload = reloading ? ` · ${reloading} reloading` : "";
+      detail.textContent = `${typeUnits.length} · ${item.role}${weapon} · ${health}/${maxHealth} HP · ${fightPoints} FP${reload}`;
       copy.append(title, detail);
       const dot = document.createElement("i");
       dot.className = "health-dot";
@@ -532,7 +584,7 @@
       applySnapshot(snapshot);
       if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
       else if (simulation.defeated) showToast("Your company has been defeated.");
-      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "attack" ? "Melee attack resolved." : "Order received.");
+      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "ranged_attack" ? "Ranged attack resolved; weapon reloading." : action.type === "attack" ? "Melee attack resolved." : "Order received.");
     } catch (error) {
       if (error.status === 409) {
         try {

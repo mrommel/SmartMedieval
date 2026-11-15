@@ -80,6 +80,20 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(attacked.json()["revision"], 1)
         self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
 
+    def test_ranged_attack_persists_damage_and_reload_state(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][2].update(x=2, y=6)
+        instance.state["units"][6].update(x=6, y=6)
+        instance.save(update_fields=["state"])
+
+        attacked = self.action(0, {"type": "ranged_attack", "unit_id": 2, "target_id": 6})
+        self.assertEqual(attacked.status_code, 200)
+        units = {unit["id"]: unit for unit in attacked.json()["state"]["units"]}
+        self.assertEqual(units[2]["reload_turns"], 2)
+        self.assertEqual(units[6]["health"], 2)
+        self.assertEqual(self.client.get(reverse("current-game")).json(), attacked.json())
+
     def test_rejects_stale_invalid_and_unauthorized_actions(self):
         self.assertEqual(self.client.get(reverse("current-game")).status_code, 404)
         self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 404)
