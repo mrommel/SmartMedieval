@@ -17,16 +17,16 @@ $(VENV)/bin/activate: requirements.txt
 venv: $(VENV)/bin/activate
 
 run: venv
-	./$(VENV)/bin/python3.12 manage.py runserver 8098
+	./$(VENV)/bin/python manage.py runserver 8098
 
 make_migrations: venv
-	./$(VENV)/bin/python3.12 manage.py makemigrations
-	./$(VENV)/bin/python3.12 manage.py sqlmigrate games 0004  # change this
-	./$(VENV)/bin/python3.12 manage.py migrate
+	./$(VENV)/bin/python manage.py makemigrations
+	./$(VENV)/bin/python manage.py sqlmigrate games 0004  # change this
+	./$(VENV)/bin/python manage.py migrate
 
 migrate: venv
-	./$(VENV)/bin/python3.12 manage.py migrate --run-syncdb
+	./$(VENV)/bin/python manage.py migrate --run-syncdb
 
 createsuperuser: venv
-	./$(VENV)/bin/python3.12 manage.py createsuperuser
-	# mrommel + g9nf5d44b7IzHABy
+	./$(VENV)/bin/python manage.py createsuperuser
+	# mrommel + ???
