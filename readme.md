@@ -15,6 +15,7 @@
 - Defeating an enemy raises the victor's morale by one (up to 5); nearby allies of a fallen soldier lose one (down to 0). Morale 0–1 reduces next turn's movement by one; morale 5 increases it by one. Select one recruit with 5 morale and press **Promote** to gain veteran rank, resetting morale to 3 and granting an extra move and fight point from the following turn.
 - Select **End turn** to let defenders move and counterattack, restore your points, and advance courtyard capture. Losing all attackers ends the battle.
 - Drag the battlefield to pan. Use the mouse wheel or the **+ / −** buttons to zoom.
+- Select **Pause** to freeze animations and prevent new orders; orders already sent to the server still finish. Select **Resume** to continue. The **Animation speed** selector supports Off, 0.5×, 1× and 2× and is saved on your device. The device's reduced-motion preference also turns animations off.
 
 ## Run locally
 
@@ -39,6 +40,7 @@ Defender AI uses a local OpenAI-compatible service at `http://127.0.0.1:11435/v1
 ```sh
 .venv/bin/python3.12 manage.py test game
 node --check game/static/game/game.js
+node --test game/tests/test_playback.cjs
 ```
 
 ## Favicon

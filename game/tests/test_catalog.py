@@ -81,3 +81,5 @@ class GameCatalogApiTests(TestCase):
         self.assertContains(response, "Play game")
         self.assertContains(response, "static/game/favicon.ico")
         self.assertContains(response, "static/game/site.webmanifest")
+        self.assertContains(response, 'id="pause-game" type="button" aria-pressed="false"')
+        self.assertContains(response, '<label for="animation-speed">Animation speed</label>')

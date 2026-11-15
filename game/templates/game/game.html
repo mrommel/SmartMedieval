@@ -89,6 +89,7 @@
         </div>
         <div class="objective-label"><span></span> KEEP COURTYARD</div>
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <div class="pause-indicator" id="pause-indicator" hidden>PAUSED · Orders are disabled</div>
         <div class="victory" id="victory" hidden>
           <div class="victory-card">
             <span class="victory-kicker">GREYWATCH HAS FALLEN</span>
@@ -105,7 +106,7 @@
           <div class="objective-copy"><span><i></i> OBJECTIVE</span><b id="objective-status">UNCLAIMED</b></div>
           <div class="progress-track"><div id="capture-progress"></div></div>
         </div>
-        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
+        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="pause-game" type="button" aria-pressed="false">Pause</button><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
         <div class="order-readout"><span class="order-key">LMB</span><span>SELECT &amp; ORDER</span><span class="order-key">SHIFT</span><span>ADD TO GROUP</span></div>
       </footer>
     </section>
@@ -125,6 +126,16 @@
         <p>Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
         <p>Defeating an enemy raises the victor's morale; nearby allies lose morale when a soldier falls. At 0–1 morale, units lose one move point next turn; at 5, they gain one. Select one recruit with 5 morale and press Promote to become a veteran: morale returns to 3, with one extra move and fight point each following turn.</p>
         <p>Drag the battlefield to pan. Use the mouse wheel or the zoom buttons to zoom.</p>
+      </div>
+      <div class="playback-settings">
+        <label for="animation-speed">Animation speed</label>
+        <select id="animation-speed">
+          <option value="0">Off</option>
+          <option value="0.5">Slow · 0.5×</option>
+          <option value="1" selected>Normal · 1×</option>
+          <option value="2">Fast · 2×</option>
+        </select>
+        <p>Speed is saved on this device. Pause stops animations and prevents new orders, but does not undo an order already sent. Your device’s reduced-motion preference also turns animations off.</p>
       </div>
       <div class="field-quote"><span>“</span><p>Hold the gate. Take the yard.<br>We have no men to spare.</p><small>— CAPTAIN ALDWYN</small></div>
     </aside>

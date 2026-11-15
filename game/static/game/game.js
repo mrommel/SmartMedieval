@@ -24,6 +24,9 @@
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
   const promoteButton = document.getElementById("promote");
+  const pauseButton = document.getElementById("pause-game");
+  const pauseIndicator = document.getElementById("pause-indicator");
+  const speedSelect = document.getElementById("animation-speed");
   const selectedStats = document.getElementById("selected-stats");
   const continueButton = document.getElementById("continue-game");
   const launchError = document.getElementById("launch-error");
@@ -59,6 +62,38 @@
   let activePointer = null;
   let projectiles = [];
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const speedKey = "greywatch.animationSpeed";
+  const validSpeeds = [0, .5, 1, 2];
+  let animationSpeed = 1;
+  let paused = false;
+  let animationTime = 0;
+  let lastFrameTime = null;
+  try {
+    const savedValue = window.localStorage.getItem(speedKey);
+    if (savedValue !== null && validSpeeds.includes(Number(savedValue))) animationSpeed = Number(savedValue);
+  } catch (_) { /* Private browsing may disable storage. */ }
+  speedSelect.value = String(animationSpeed);
+
+  function animationsEnabled() {
+    return animationSpeed > 0 && !reducedMotion.matches;
+  }
+
+  function updateControls() {
+    const ended = simulation.captured || simulation.defeated;
+    endTurnButton.disabled = pendingAction || paused || ended;
+    promoteButton.disabled = pendingAction || paused || ended ||
+      !promotionCandidate();
+    pauseButton.disabled = ended;
+    pauseButton.textContent = paused ? "Resume" : "Pause";
+    pauseButton.setAttribute("aria-pressed", String(paused));
+    pauseIndicator.hidden = !paused || ended;
+  }
+
+  function promotionCandidate() {
+    const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
+    return selected.length === 1 && (selected[0].rank || "recruit") === "recruit" &&
+      (selected[0].morale ?? 3) >= 5;
+  }
 
   function resetCamera() {
     camera.x = 0;
@@ -415,16 +450,15 @@
   }
 
   function queueProjectiles(events) {
-    if (reducedMotion.matches || !events?.length) return;
-    const now = performance.now();
+    if (!animationsEnabled() || !events?.length) return;
     for (const [index, event] of events.entries()) {
       if (event.type !== "projectile") continue;
       const distance = Math.hypot(event.to.x - event.from.x, event.to.y - event.from.y);
-      projectiles.push({ ...event, start: now + index * 110, duration: 360 + distance * 65 });
+      projectiles.push({ ...event, start: animationTime + index * 110, duration: 360 + distance * 65 });
     }
   }
 
-  function draw(time = 0) {
+  function draw(time = animationTime) {
     if (!width || !height) return;
     ctx.clearRect(0, 0, width, height);
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
@@ -459,7 +493,7 @@
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
-    drawProjectiles(time || performance.now());
+    drawProjectiles(time);
     ctx.restore();
   }
 
@@ -540,7 +574,7 @@
   }
 
   function handlePointer(event) {
-    if (simulation.captured || simulation.defeated || pendingAction) return;
+    if (simulation.captured || simulation.defeated || pendingAction || paused) return;
     const rect = canvas.getBoundingClientRect();
     const px = (event.clientX - rect.left - camera.x) / camera.zoom;
     const py = (event.clientY - rect.top - camera.y) / camera.zoom;
@@ -594,13 +628,15 @@
     selectedStats.textContent = unit
       ? `#${unit.id + 1} ${unit.rank || "recruit"} · morale ${unit.morale ?? 3}/5 · ${unit.move_points} MP · ${unit.fight_points} FP`
       : `${selected.length} soldiers selected · choose one to inspect or promote`;
-    promoteButton.disabled = pendingAction || simulation.captured || simulation.defeated ||
-      !unit || (unit.rank || "recruit") !== "recruit" || (unit.morale ?? 3) < 5;
+    updateControls();
   }
 
   function applySnapshot(snapshot) {
     const newGame = instanceId !== snapshot.id;
-    if (newGame) projectiles = [];
+    if (newGame) {
+      projectiles = [];
+      paused = false;
+    }
     instanceId = snapshot.id;
     revision = snapshot.revision;
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = snapshot.map);
@@ -655,9 +691,23 @@
     victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated ? "THE COMPANY HAS FALLEN" : "GREYWATCH HAS FALLEN";
     victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken." : "The keep is yours.";
     victoryNode.querySelector("p").textContent = simulation.defeated ? "No attackers remain on the field." : "Your small band has secured the courtyard.";
-    endTurnButton.disabled = pendingAction || simulation.captured || simulation.defeated;
     updatePromotion();
     draw();
+  }
+
+  function combatSummary(before, after) {
+    const remaining = new Map(after.map(unit => [unit.id, unit]));
+    const damage = { attackers: 0, defenders: 0 };
+    const losses = { attackers: 0, defenders: 0 };
+    for (const unit of before) {
+      const current = remaining.get(unit.id);
+      const side = unit.side === "defenders" ? "defenders" : "attackers";
+      damage[side] += Math.max(0, unit.health - (current?.health || 0));
+      if (!current) losses[side]++;
+    }
+    if (!damage.attackers && !damage.defenders) return "";
+    const detail = side => `${damage[side]} damage to ${side}${losses[side] ? ` (${losses[side]} fallen)` : ""}`;
+    return ["defenders", "attackers"].filter(side => damage[side]).map(detail).join(" · ");
   }
 
   async function api(url, body) {
@@ -680,19 +730,19 @@
   }
 
   async function sendAction(action) {
-    if (pendingAction || !instanceId) return;
+    if (pendingAction || !instanceId || paused || simulation.captured || simulation.defeated) return;
     pendingAction = true;
-    endTurnButton.disabled = true;
-    promoteButton.disabled = true;
+    updateControls();
     if (action.type === "end_turn") showToast("Defenders are taking their turn...");
     try {
       const snapshot = await api("/api/games/actions/", { revision, action });
       const wasCaptured = simulation.captured;
+      const combat = combatSummary(simulation.units, snapshot.state.units);
       applySnapshot(snapshot);
       queueProjectiles(snapshot.combat_events);
       if (!wasCaptured && simulation.captured) showToast("Greywatch courtyard secured.");
       else if (simulation.defeated) showToast("Your company has been defeated.");
-      else showToast(action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "ranged_attack" ? "Ranged attack resolved; weapon reloading." : action.type === "attack" ? "Melee attack resolved." : "Order received.");
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -705,7 +755,6 @@
       showToast(`Order failed: ${error.message}`);
     } finally {
       pendingAction = false;
-      endTurnButton.disabled = simulation.captured || simulation.defeated;
       updatePromotion();
     }
   }
@@ -718,7 +767,11 @@
   }
 
   function frame(time) {
-    if (gameIsVisible) draw(time);
+    if (lastFrameTime !== null && gameIsVisible && !paused && animationsEnabled()) {
+      animationTime += Math.min(time - lastFrameTime, 100) * animationSpeed;
+      draw();
+    }
+    lastFrameTime = time;
     requestAnimationFrame(frame);
   }
 
@@ -848,13 +901,12 @@
       else renderCatalogMessage(`Could not start game: ${error.message}`, true);
     } finally {
       pendingAction = false;
-      endTurnButton.disabled = simulation.captured || simulation.defeated;
       updatePromotion();
     }
   }
 
   canvas.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || simulation.captured || simulation.defeated || pendingAction) return;
+    if (event.button !== 0 || simulation.captured || simulation.defeated || pendingAction || paused) return;
     activePointer = {
       id: event.pointerId,
       x: event.clientX,
@@ -900,6 +952,25 @@
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));
+  pauseButton.addEventListener("click", () => {
+    if (simulation.captured || simulation.defeated) return;
+    paused = !paused;
+    activePointer = null;
+    updateControls();
+    draw();
+  });
+  speedSelect.addEventListener("change", () => {
+    const nextSpeed = Number(speedSelect.value);
+    if (!validSpeeds.includes(nextSpeed)) return;
+    animationSpeed = nextSpeed;
+    if (!animationsEnabled()) projectiles = [];
+    try { window.localStorage.setItem(speedKey, speedSelect.value); } catch (_) { /* Storage is optional. */ }
+    draw();
+  });
+  reducedMotion.addEventListener?.("change", () => {
+    if (!animationsEnabled()) projectiles = [];
+    draw();
+  });
   promoteButton.addEventListener("click", () => {
     const [unitId] = simulation.selected;
     if (unitId !== undefined && !promoteButton.disabled) sendAction({ type: "promote", unit_id: unitId });
