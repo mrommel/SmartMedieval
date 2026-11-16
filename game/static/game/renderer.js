@@ -559,6 +559,28 @@ export function createBattlefieldRenderer(canvas) {
     }
   }
 
+  function drawMovementPreview(preview) {
+    if (!preview) return;
+    const { route, start, destination } = preview;
+    if (route.status === "reachable") {
+      let from = start;
+      for (const [index, tile] of route.path.entries()) {
+        const a = project(from.x, from.y), b = project(tile.x, tile.y);
+        ctx.strokeStyle = index < route.thisTurn ? "#b8edb0" : "#f5d286";
+        ctx.lineWidth = Math.max(2, tileW * .075);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y + tileH * .5);
+        ctx.lineTo(b.x, b.y + tileH * .5);
+        ctx.stroke();
+        polygon(diamond(tile.x, tile.y), index < route.thisTurn ? "rgba(83,189,116,.27)" :
+          "rgba(230,178,83,.26)", ctx.strokeStyle, 1.5);
+        from = tile;
+      }
+    } else if (route.status === "unreachable") {
+      polygon(diamond(destination.x, destination.y), "rgba(196,74,65,.2)", "#ff9887", 2);
+    }
+  }
+
   function draw(time, scene) {
     ({ simulation, cursor, camera, hasAttackOption } = scene);
     if (!width || !height) return;
@@ -619,6 +641,7 @@ export function createBattlefieldRenderer(canvas) {
     }
     if (!objectiveDrawn) drawObjective(time);
     (simulation.catapults || []).forEach(drawAimMarker);
+    drawMovementPreview(scene.movementPreview);
     drawProjectiles(time);
     if (cursor.visible) {
       polygon(diamond(cursor.x, cursor.y), "rgba(241,211,137,.16)", "#ffe2a1", 2);

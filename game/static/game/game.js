@@ -1,6 +1,7 @@
 import { createBattlefieldRenderer } from "./renderer.js";
 import { createBattlefieldInput } from "./input.js";
 import { createLaunchUI } from "./launch.js";
+import { previewMovement } from "./path_preview.js";
 
 (() => {
   "use strict";
@@ -31,6 +32,7 @@ import { createLaunchUI } from "./launch.js";
   const selectedStats = document.getElementById("selected-stats");
   const historyList = document.getElementById("combat-history-list");
   const cursorStatus = document.getElementById("cursor-status");
+  const routeStatus = document.getElementById("route-status");
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
@@ -57,6 +59,9 @@ import { createLaunchUI } from "./launch.js";
   let paused = false;
   let animationTime = 0;
   let lastFrameTime = null;
+  let previewMap = null;
+  let movementPreview = null;
+  let previewKey = null;
   try {
     const savedValue = window.localStorage.getItem(speedKey);
     if (savedValue !== null && validSpeeds.includes(Number(savedValue))) animationSpeed = Number(savedValue);
@@ -199,7 +204,35 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function draw() {
-    renderer.draw(animationTime, { simulation, camera: input.camera, cursor: input.cursor, hasAttackOption });
+    renderer.draw(animationTime, { simulation, camera: input.camera, cursor: input.cursor, hasAttackOption, movementPreview });
+  }
+
+  function updateMovementPreview() {
+    const destination = input.previewDestination();
+    const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
+    const available = gameIsVisible && !pendingAction && !paused && !aimingCatapult &&
+      !simulation.captured && !simulation.defeated && selected.length === 1 && destination;
+    const key = available ? `${revision}:${selected[0].id}:${destination.x},${destination.y}` : null;
+    if (key !== null && key === previewKey) return;
+    previewKey = key;
+    movementPreview = available ? {
+      start: { x: selected[0].x, y: selected[0].y }, destination,
+      route: previewMovement(previewMap, simulation.units, selected[0], destination)
+    } : null;
+    if (movementPreview) {
+      const { route } = movementPreview;
+      if (route.status === "reachable") {
+        routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.path.length} MP total · ${route.thisTurn} this turn${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · later turns needed (future allowance unavailable)" : ""}.`;
+      } else {
+        routeStatus.textContent = route.status === "exhausted" ? "No movement points left. End the turn to move again." :
+          route.status === "already_there" ? "Soldier is already on this tile." : "Unreachable: blocked route or occupied destination.";
+      }
+    } else {
+      routeStatus.textContent = selected.length > 1 && destination ? "Select one soldier to preview their route; group orders spread to nearby tiles." :
+        selected.length === 0 && destination ? "Select a soldier to preview a route." :
+        "Hover over a tile, or focus the battlefield and use arrow keys, to preview a route.";
+    }
+    draw();
   }
 
   function moveSelected(x, y) {
@@ -287,7 +320,7 @@ import { createLaunchUI } from "./launch.js";
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     if (selected.length) showToast(`${selected.length} selected · ${Math.min(...selected.map(unit => unit.move_points))} move points remaining.`);
     updatePromotion();
-    draw();
+    updateMovementPreview();
   }
 
   function statRow(label, remaining, maximum, unit, tone) {
@@ -403,6 +436,7 @@ import { createLaunchUI } from "./launch.js";
   function applySnapshot(snapshot) {
     const newGame = instanceId !== snapshot.id;
     if (newGame) {
+      input.cancelPointer();
       renderer.clearProjectiles();
       paused = false;
     }
@@ -418,6 +452,8 @@ import { createLaunchUI } from "./launch.js";
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
+    previewMap = { ...mapData, breaches: snapshot.state.breaches || [] };
+    previewKey = null;
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
     simulation.catapults = snapshot.state.catapults || [];
@@ -481,7 +517,7 @@ import { createLaunchUI } from "./launch.js";
       ? throneMission && !kingAlive ? "You needed the king alive. The mission has failed." : "No attackers remain on the field."
       : throneMission ? "Your company captured the king alive." : "Your small band has secured the courtyard.";
     updatePromotion();
-    draw();
+    updateMovementPreview();
   }
 
   function combatSummary(before, after) {
@@ -522,6 +558,7 @@ import { createLaunchUI } from "./launch.js";
     if (pendingAction || !instanceId || paused || simulation.captured || simulation.defeated) return;
     pendingAction = true;
     updateControls();
+    updateMovementPreview();
     if (action.type === "end_turn") showToast("Defenders are taking their turn...");
     try {
       const snapshot = await api("/api/games/actions/", { revision, action });
@@ -545,6 +582,7 @@ import { createLaunchUI } from "./launch.js";
     } finally {
       pendingAction = false;
       updatePromotion();
+      updateMovementPreview();
     }
   }
 
@@ -572,6 +610,7 @@ import { createLaunchUI } from "./launch.js";
     applySnapshot(snapshot);
     gameIsVisible = true;
     launchUI.enterGame(snapshot);
+    updateMovementPreview();
     input.resetCamera();
     resize();
     if (!animationStarted) {
@@ -606,7 +645,7 @@ import { createLaunchUI } from "./launch.js";
     isWalkable, onMove: moveSelected, onAttack: attackSelected, onSelection: updateSelection,
     isAiming: () => aimingCatapult, onAim: aimCatapultAt,
     onBlocked: () => showToast("An obstacle bars the way. Choose an open tile."),
-    onDraw: draw, onCursor: describeCursor });
+    onDraw: draw, onCursor: describeCursor, onPreviewChange: updateMovementPreview });
   const launchUI = createLaunchUI({ api, onStart: launchGame,
     onResume: async () => enterGame(await api("/api/games/current/")),
     onLeaveGame: () => {
@@ -614,6 +653,7 @@ import { createLaunchUI } from "./launch.js";
       input.cancelPointer();
       renderer.clearProjectiles();
       aimingCatapult = false;
+      updateMovementPreview();
     } });
   function restart() {
     if (!instanceId) return;
@@ -628,6 +668,7 @@ import { createLaunchUI } from "./launch.js";
   aimButton.addEventListener("click", () => {
     aimingCatapult = !aimingCatapult;
     updateControls();
+    updateMovementPreview();
     if (aimingCatapult) showToast("Select a target tile (including walls) on the battlefield. Aiming costs one fight point.");
   });
   fireButton.addEventListener("click", () => {
@@ -654,7 +695,7 @@ import { createLaunchUI } from "./launch.js";
     paused = !paused;
     input.cancelPointer();
     updateControls();
-    draw();
+    updateMovementPreview();
   });
   speedSelect.addEventListener("change", () => {
     const nextSpeed = Number(speedSelect.value);

@@ -1,8 +1,20 @@
 export function createBattlefieldInput({ canvas, renderer, simulation, getMap, getLayout,
-  canOrder, isWalkable, isAiming, onAim, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor }) {
+  canOrder, isWalkable, isAiming, onAim, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor, onPreviewChange = () => {} }) {
   const camera = { x: 0, y: 0, zoom: 1 };
   const cursor = { x: 0, y: 0, visible: false };
   let activePointer = null;
+  let hoveredTile = null;
+  let keyboardPreview = false;
+
+  function previewDestination() {
+    return hoveredTile || (cursor.visible && keyboardPreview ? { x: cursor.x, y: cursor.y } : null);
+  }
+
+  function setHover(tile) {
+    if (hoveredTile?.x === tile?.x && hoveredTile?.y === tile?.y && Boolean(hoveredTile) === Boolean(tile)) return;
+    hoveredTile = tile;
+    onPreviewChange();
+  }
 
   function clampCamera() {
     const { width, height, tileW, tileH, originX, originY } = getLayout();
@@ -153,16 +165,28 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
 
   canvas.addEventListener("pointerdown", event => {
     if (event.button !== 0 || !canOrder()) return;
+    keyboardPreview = false;
+    onPreviewChange();
+    if (event.pointerType === "touch") setHover(null);
     activePointer = { id: event.pointerId, x: event.clientX, y: event.clientY,
       cameraX: camera.x, cameraY: camera.y, dragging: false };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
+    if (!activePointer) {
+      if (event.pointerType === "touch" || !canOrder()) return;
+      const rect = canvas.getBoundingClientRect();
+      const tile = pickTile((event.clientX - rect.left - camera.x) / camera.zoom,
+        (event.clientY - rect.top - camera.y) / camera.zoom);
+      setHover(tile.x >= 0 && tile.x < getMap().cols && tile.y >= 0 && tile.y < getMap().rows ? tile : null);
+      return;
+    }
     if (!activePointer || event.pointerId !== activePointer.id) return;
     const dx = event.clientX - activePointer.x;
     const dy = event.clientY - activePointer.y;
     if (!activePointer.dragging && Math.hypot(dx, dy) > 4) activePointer.dragging = true;
     if (activePointer.dragging) {
+      setHover(null);
       camera.x = activePointer.cameraX + dx;
       camera.y = activePointer.cameraY + dy;
       clampCamera();
@@ -175,13 +199,19 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     activePointer = null;
   });
   canvas.addEventListener("pointercancel", () => { activePointer = null; });
+  canvas.addEventListener("pointerleave", () => setHover(null));
   canvas.addEventListener("focus", () => {
     cursor.visible = true;
+    keyboardPreview = !activePointer;
     describeCursor();
+    onPreviewChange();
     onDraw();
   });
   canvas.addEventListener("blur", () => {
     cursor.visible = false;
+    keyboardPreview = false;
+    setHover(null);
+    onPreviewChange();
     onDraw();
   });
   canvas.addEventListener("keydown", event => {
@@ -192,9 +222,12 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
       event.preventDefault();
       const [dx, dy] = directions[event.key];
       const map = getMap();
+      keyboardPreview = true;
       cursor.x = Math.max(0, Math.min(map.cols - 1, cursor.x + dx));
       cursor.y = Math.max(0, Math.min(map.rows - 1, cursor.y + dy));
+      setHover(null);
       describeCursor();
+      onPreviewChange();
       revealCursor();
       onDraw();
     } else if (event.key === "Enter" || event.key === " ") {
@@ -216,6 +249,6 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     zoomAt(width / 2, height / 2, 1 / 1.15);
   });
 
-  return { camera, cursor, clampCamera, resetCamera, resetCursor, describeCursor,
-    cancelPointer() { activePointer = null; } };
+  return { camera, cursor, clampCamera, resetCamera, resetCursor, describeCursor, previewDestination,
+    cancelPointer() { activePointer = null; setHover(null); } };
 }

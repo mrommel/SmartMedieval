@@ -8,6 +8,11 @@ const script = fs.readFileSync(path.join(__dirname, "../static/game/game.js"), "
 const rendererScript = fs.readFileSync(path.join(__dirname, "../static/game/renderer.js"), "utf8");
 const inputScript = fs.readFileSync(path.join(__dirname, "../static/game/input.js"), "utf8");
 const launchScript = fs.readFileSync(path.join(__dirname, "../static/game/launch.js"), "utf8");
+const previewScript = fs.readFileSync(path.join(__dirname, "../static/game/path_preview.js"), "utf8");
+const previewContext = {};
+vm.runInNewContext(previewScript.replace("export function", "function") +
+  "\nthis.previewMovement = previewMovement;", previewContext);
+const previewMovement = previewContext.previewMovement;
 
 function element() {
   const listeners = {};
@@ -96,6 +101,8 @@ function setup(savedSpeed = null, catalogFetch = null) {
     "\nthis.createBattlefieldInput = createBattlefieldInput;", context);
   vm.runInNewContext(launchScript.replace("export function", "function") +
     "\nthis.createLaunchUI = createLaunchUI;", context);
+  vm.runInNewContext(previewScript.replace("export function", "function") +
+    "\nthis.previewMovement = previewMovement;", context);
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
     get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
@@ -151,6 +158,98 @@ test("renderer projects raised tiles and draws updated maps independently", () =
     camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
     hasAttackOption: () => false });
   assert.equal(game.draws(), 2);
+});
+
+test("route preview uses server neighbor order, occupancy, breaches, and turn costs", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, objective: { x: 6, y: 6 } };
+  const unit = { id: 0, x: 0, y: 0, move_points: 2, next_move_capacity: 3 };
+  const first = previewMovement(map, [unit], unit, { x: 3, y: 0 });
+  assert.equal(first.status, "reachable");
+  assert.deepEqual(Array.from(first.path, p => [p.x, p.y]), [[1, 0], [2, 0], [3, 0]]);
+  assert.equal(first.thisTurn, 2);
+  assert.equal(first.turns, 2);
+  const blocker = { id: 1, x: 1, y: 0 };
+  const around = previewMovement(map, [unit, blocker], unit, { x: 2, y: 0 });
+  assert.deepEqual(Array.from(around.path, p => [p.x, p.y]),
+    [[0, 1], [1, 1], [2, 1], [2, 0]]);
+  assert.equal(around.turns, 2);
+  assert.equal(previewMovement(map, [unit, blocker], unit, { x: 1, y: 0 }).status, "unreachable");
+  assert.equal(previewMovement(map, [unit], unit, { x: 5, y: 6 }).status, "unreachable");
+  assert.equal(previewMovement({ ...map, breaches: [{ x: 5, y: 6 }] }, [unit], unit,
+    { x: 5, y: 6 }).status, "reachable");
+  assert.equal(previewMovement(map, [unit], unit, { x: 0, y: 0 }).status, "already_there");
+  assert.equal(previewMovement(map, [unit], { ...unit, move_points: 0 },
+    { x: 2, y: 0 }).status, "exhausted");
+});
+
+test("renderer draws reachable route steps and unreachable markers", () => {
+  const game = setup();
+  const renderer = game.createRenderer(game.get("battlefield-canvas"));
+  renderer.setLayout({ width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 });
+  renderer.setMap(game.snapshot.map);
+  const scene = { simulation: { units: [], selected: new Set(), captured: false },
+    camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false },
+    hasAttackOption: () => false, movementPreview: { start: { x: 0, y: 0 },
+      destination: { x: 0, y: 2 }, route: { status: "reachable", thisTurn: 1,
+        path: [{ x: 0, y: 1 }, { x: 0, y: 2 }] } } };
+  renderer.draw(0, scene);
+  scene.movementPreview = { ...scene.movementPreview, route: { status: "unreachable", path: [] } };
+  renderer.draw(0, scene);
+  assert.equal(game.draws(), 2);
+});
+
+test("route preview obeys house doors, objects, and elevation access in both directions", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, objective: { x: 6, y: 6 },
+    houses: [{ left: 2, right: 3, top: 1, bottom: 2, door: { x: 2, y: 1 } }],
+    objects: [{ x: 1, y: 0, type: "fence" }] };
+  const soldier = { id: 0, x: 1, y: 2, move_points: 3, next_move_capacity: 4 };
+  const inside = previewMovement(map, [soldier], soldier, { x: 3, y: 2 });
+  assert.equal(inside.status, "reachable");
+  assert.deepEqual(Array.from(inside.path, p => [p.x, p.y]),
+    [[1, 1], [2, 1], [3, 1], [3, 2]]);
+  const trapped = { ...soldier, x: 3, y: 2 };
+  const outside = previewMovement(map, [trapped], trapped, { x: 1, y: 2 });
+  assert.deepEqual(Array.from(outside.path, p => [p.x, p.y]),
+    [[2, 2], [2, 1], [1, 1], [1, 2]]);
+  const climb = { ...map, elevation: [{ x: 0, y: 1, height: 1, access: "ladder" }] };
+  const climber = { ...soldier, x: 0, y: 0 };
+  assert.equal(previewMovement(climb, [climber], climber, { x: 0, y: 1 }).status, "reachable");
+  const descending = { ...climber, y: 1 };
+  assert.equal(previewMovement(climb, [descending], descending,
+    { x: 0, y: 0 }).status, "reachable");
+  assert.equal(previewMovement({ ...map, elevation: [{ x: 0, y: 1, height: 1 }] },
+    [climber], climber, { x: 0, y: 1 }).status, "unreachable");
+});
+
+test("keyboard and hover preview refresh after occupancy, selection, and pause", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.move_points = 1;
+  soldier.next_move_capacity = 4;
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const key = name => canvas.fire("keydown", { key: name, preventDefault() {} });
+  canvas.fire("pointermove", { pointerType: "mouse", clientX: 268, clientY: 219.2 });
+  assert.match(game.get("route-status").textContent, /1 tile · 1 MP total · 1 this turn/);
+  canvas.fire("pointerleave");
+  assert.match(game.get("route-status").textContent, /Hover over a tile/);
+  canvas.fire("focus");
+  key("ArrowDown");
+  key("ArrowDown");
+  assert.match(game.get("route-status").textContent, /2 tiles · 2 MP total · 1 this turn · approximately 2 turns/);
+  game.snapshot.state.units.push({ ...soldier, id: 1, x: 0, y: 2 });
+  await game.get("end-turn").fire("click");
+  assert.match(game.get("route-status").textContent, /Unreachable/);
+  canvas.fire("keydown", { key: "Enter", shiftKey: true, preventDefault() {} });
+  assert.match(game.get("route-status").textContent, /Select one soldier to preview/);
+  game.get("pause-game").fire("click");
+  assert.doesNotMatch(game.get("route-status").textContent, /Route to/);
+  game.get("pause-game").fire("click");
+  canvas.fire("keydown", { key: "Enter", shiftKey: true, preventDefault() {} });
+  assert.match(game.get("route-status").textContent, /Unreachable/);
 });
 
 test("renderer draws village structures and clears house footprints when the map changes", () => {

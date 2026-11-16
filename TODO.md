@@ -68,6 +68,7 @@
 - [ ] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.
 - [ ] Give ground types such as roads, grass, mud, and swamp different movement costs and traversal rules for foot units and horses; have pathfinding choose routes by move-point cost, not just tile count.
 - [ ] Preview the exact path, terrain costs, and turns required while hovering or selecting a destination; update the preview for occupancy, equipment weight, and mounted status, and distinguish unreachable tiles.
+  - [x] Preview the current single-soldier route, occupancy, one-MP-per-tile cost, estimated turns, and unreachable tiles on hover and keyboard focus; update it after actions and selection changes. Extend costs and routes when terrain, carried weight, and mounts are implemented.
 - [ ] Let units reserve move/fight points for reactions during the enemy turn, such as a bow shot or melee strike when a visible enemy enters range; show the reserved cost and eligible trigger area.
 - [ ] Add fog of war and night battles: reveal only what allied units can see, and let torches, watchfires, and daylight affect detection and ambushes without revealing hidden enemies to the player.
 - [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
