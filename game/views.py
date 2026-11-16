@@ -80,7 +80,7 @@ def serialize_instance(instance):
         "entry": serialize_catalog_entry(entry),
         "map": map_data,
         "state": {
-            **state,
+            **{key: value for key, value in state.items() if key != "next_item_id"},
             "units": [{**normalize_unit(unit), "armor_remaining": armor_remaining(unit, instance.state["turn"]),
                        "carried_weight": carried_weight(unit, instance.state.get("items", ())),
                        "max_carry_weight": MAX_CARRY_WEIGHT,

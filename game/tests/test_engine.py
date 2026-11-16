@@ -401,6 +401,107 @@ class CarriedWeightTests(TestCase):
         self.assertNotIn((8, 5), destinations)  # Four tiles from the armored guard.
 
 
+class EquipmentRecoveryTests(TestCase):
+    def test_casualties_drop_weapon_armor_and_potions_with_stable_ids(self):
+        battlefield = default_map()
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        battlefield["items"] = [{"x": 12, "y": 5, "type": "healing_potion"}]
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][0], state["units"][6]]
+        state["units"][0].update(x=12, y=4)
+        state["units"][1].update(health=1, armor_equipped=False)
+        state["items"][0].update(x=None, y=None, carrier_id=6)
+        fallen = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertEqual([item["id"] for item in fallen["items"]], [0, 1, 2])
+        self.assertEqual([(item["type"], item.get("name"), item["x"], item["y"])
+                          for item in fallen["items"]], [
+            ("healing_potion", None, 12, 5), ("weapon", "sword", 12, 5), ("armor", "mail", 12, 5)])
+        self.assertEqual(fallen["next_item_id"], 3)
+        self.assertIsNone(state["items"][0]["x"])
+        self.assertEqual(len(state["units"]), 2)
+
+        fallen = apply_action(fallen, {"type": "end_turn"}, battlefield)
+        fallen = apply_action(fallen, {"type": "drop_weapon", "unit_id": 0}, battlefield)
+        self.assertIsNone(fallen["units"][0]["weapon"])
+        self.assertEqual(fallen["items"][-1]["id"], 3)
+        fallen = apply_action(fallen, {"type": "move", "units": [0], "x": 12, "y": 5}, battlefield)
+        fallen = apply_action(fallen, {"type": "end_turn"}, battlefield)
+        recovered = apply_action(fallen, {"type": "pickup_equipment", "unit_id": 0, "item_id": 1}, battlefield)
+        self.assertEqual(recovered["units"][0]["weapon"], "sword")
+        self.assertEqual(recovered["units"][0]["fight_points"], 0)
+        self.assertEqual(recovered["history"][-1]["equipment"], "sword")
+        self.assertNotIn(1, [item["id"] for item in recovered["items"]])
+        self.assertEqual(recovered["next_item_id"], 4)
+        self.assertEqual(recovered["items"][0]["type"], "healing_potion")
+
+    def test_unarmed_soldier_cannot_melee_even_with_forged_order(self):
+        battlefield = default_map()
+        state = initial_state(battlefield)
+        state["units"][0].update(x=12, y=4)
+        dropped = apply_action(state, {"type": "drop_weapon", "unit_id": 0}, battlefield)
+        dropped["units"][0]["fight_points"] = 1
+        with self.assertRaisesMessage(InvalidAction, "needs a sword"):
+            apply_action(dropped, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+
+    def test_armor_recovery_preserves_used_protection_and_movement_spent(self):
+        battlefield = default_map()
+        state = initial_state(battlefield)
+        unit = state["units"][0]
+        unit.update(armor="leather", armor_equipped=True, armor_turn=1, armor_absorbed=1,
+                    move_points=2, fight_points=3)
+        from ..engine import drop_equipment, armor_remaining
+        drop_equipment(state, unit, "armor", "mail")
+        dropped = apply_action(state, {"type": "drop_armor", "unit_id": 0}, battlefield)
+        self.assertEqual((dropped["units"][0]["move_capacity"], dropped["units"][0]["move_points"]), (4, 2))
+        self.assertFalse(dropped["units"][0]["armor_equipped"])
+        recovered = apply_action(dropped, {"type": "pickup_equipment", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((recovered["units"][0]["armor"], recovered["units"][0]["move_capacity"],
+                          recovered["units"][0]["move_points"]), ("mail", 3, 1))
+        self.assertEqual(armor_remaining(recovered["units"][0], 1), 1)
+        self.assertEqual(recovered["units"][0]["fight_points"], 1)
+
+    def test_weight_slot_point_limits_and_potion_actions_reject_gear_ids(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}]
+        state = initial_state(battlefield)
+        unit = state["units"][0]
+        unit.update(weapon="crossbow", tools=["rope", "spade"], fight_points=3,
+                    move_capacity=2, move_points=2)
+        state["items"][0].update(carrier_id=0, x=None, y=None)
+        from ..engine import drop_equipment
+        drop_equipment(state, unit, "armor", "mail")
+        original = initial_state(battlefield)
+        for action in ({"type": "pickup_equipment", "unit_id": 0, "item_id": 0},
+                       {"type": "pickup_equipment", "unit_id": 6, "item_id": 1},
+                       {"type": "pickup_equipment", "unit_id": 0, "item_id": True},
+                       {"type": "drop_weapon", "unit_id": 6},
+                       {"type": "drop_armor", "unit_id": 0},
+                       {"type": "pickup_item", "unit_id": 0, "item_id": 1},
+                       {"type": "use_item", "unit_id": 0, "item_id": 1, "target_id": 0}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        self.assertEqual(state["items"][1]["name"], "mail")
+        self.assertIsNone(original["units"][0]["armor"])
+        with self.assertRaisesMessage(InvalidAction, "eight weight"):
+            apply_action(state, {"type": "pickup_equipment", "unit_id": 0, "item_id": 1}, battlefield)
+        lighter = apply_action(state, {"type": "drop_item", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(lighter["units"][0]["move_capacity"], 3)
+        recovered = apply_action(lighter, {"type": "pickup_equipment", "unit_id": 0, "item_id": 1}, battlefield)
+        self.assertEqual(carried_weight(recovered["units"][0], recovered["items"]), 8)
+        self.assertEqual(recovered["units"][0]["move_capacity"], 2)
+        with self.assertRaises(InvalidAction):
+            apply_action(recovered, {"type": "pickup_equipment", "unit_id": 0, "item_id": 1}, battlefield)
+
+    def test_old_state_without_inventory_counter_can_drop_gear_after_consumption(self):
+        state = initial_state()
+        state.pop("next_item_id")
+        state["history"] = [{"turn": 1, "type": "use_item", "item_id": 9,
+                             "actor_id": 0, "actor_side": "attackers", "actor_weapon": "sword"}]
+        dropped = apply_action(state, {"type": "drop_weapon", "unit_id": 0})
+        self.assertEqual(dropped["items"][0]["id"], 10)
+        self.assertEqual(dropped["next_item_id"], 11)
+
+
 class FieldMedicineTests(TestCase):
     def potion_map(self):
         battlefield = default_map()

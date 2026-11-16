@@ -40,12 +40,16 @@ function setup(savedSpeed = null, catalogFetch = null) {
   };
   let draws = 0;
   const fogFills = [];
+  const gearPaints = [];
   const ctx = new Proxy({}, { get(_, name) {
     if (name === "createLinearGradient") return () => ({ addColorStop() {} });
     if (name === "clearRect") return () => { draws++; };
     return () => {};
   }, set(_, name, value) {
-    if (name === "fillStyle" && typeof value === "string" && value.startsWith("rgba(12,21,30,")) fogFills.push(value);
+    if (name === "fillStyle" && typeof value === "string") {
+      if (value.startsWith("rgba(12,21,30,")) fogFills.push(value);
+      if (["#9baeb3", "#d2ac70"].includes(value)) gearPaints.push(value);
+    }
     return true;
   } });
   get("battlefield-canvas").getContext = () => ctx;
@@ -109,7 +113,7 @@ function setup(savedSpeed = null, catalogFetch = null) {
     "\nthis.previewMovement = previewMovement;", context);
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
-    get, store, snapshot, actions, fogFills, draws: () => draws, postCount: () => postCount,
+    get, store, snapshot, actions, fogFills, gearPaints, draws: () => draws, postCount: () => postCount,
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer,
     createInput: context.createBattlefieldInput
   };
@@ -905,4 +909,57 @@ test("potions appear on the map and enable pickup, drop, and allied healing", as
   await new Promise(setImmediate);
   await game.get("drop-potion").fire("click");
   assert.equal(game.actions.at(-1).type, "drop_item");
+});
+
+test("fallen gear renders and can be dropped, selected and recovered without stealing potion actions", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.armor = "leather";
+  soldier.armor_equipped = true;
+  soldier.carried_weight = 2;
+  soldier.max_carry_weight = 8;
+  game.snapshot.map.items = [{ x: 0, y: 0, type: "healing_potion" }];
+  game.snapshot.state.items = [
+    { id: 0, type: "healing_potion", x: 0, y: 0, carrier_id: null },
+    { id: 1, type: "armor", name: "mail", x: 0, y: 0, carrier_id: null },
+    { id: 2, type: "weapon", name: "crossbow", x: 0, y: 0, carrier_id: null }
+  ];
+  await game.get("continue-game").fire("click");
+  assert.ok(game.gearPaints.includes("#9baeb3"));
+  assert.ok(game.gearPaints.includes("#d2ac70"));
+  assert.equal(game.get("gear-target").children.length, 2);
+  assert.equal(game.get("gear-target").children[0].textContent, "mail armor");
+  assert.equal(game.get("pickup-equipment").disabled, true);
+  assert.match(game.get("selected-stats").textContent, /Equipment here.*mail armor, crossbow/);
+  assert.match(game.get("cursor-status").textContent, /healing potion on ground.*mail armor, crossbow on ground/);
+  await game.get("pickup-potion").fire("click");
+  assert.equal(game.actions.at(-1).item_id, 0);
+  await new Promise(setImmediate);
+  await game.get("drop-armor").fire("click");
+  assert.equal(game.actions.at(-1).type, "drop_armor");
+  await new Promise(setImmediate);
+  soldier.armor = null;
+  soldier.armor_equipped = false;
+  game.snapshot.state.history = [{ turn: 1, type: "drop_armor", actor_id: 0,
+    actor_side: "attackers", actor_weapon: "sword", equipment: "leather" }];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("combat-history-list").textContent, /dropped leather armor/);
+  assert.equal(game.get("pickup-equipment").disabled, false);
+  await game.get("pickup-equipment").fire("click");
+  assert.equal(game.actions.at(-1).type, "pickup_equipment");
+  assert.equal(game.actions.at(-1).item_id, 1);
+  await new Promise(setImmediate);
+  soldier.armor = "mail";
+  game.snapshot.state.items.splice(1, 1);
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("gear-target").value, "2");
+  assert.equal(game.get("pickup-equipment").disabled, true);
+  await game.get("drop-weapon").fire("click");
+  assert.equal(game.actions.at(-1).type, "drop_weapon");
+  await new Promise(setImmediate);
+  soldier.weapon = null;
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("pickup-equipment").disabled, false);
+  await game.get("pickup-equipment").fire("click");
+  assert.equal(game.actions.at(-1).item_id, 2);
 });

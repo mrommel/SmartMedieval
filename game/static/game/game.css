@@ -119,6 +119,7 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .progress-track { height: 3px; background: #39453d; }
 .progress-track div { width: 0; height: 100%; background: #d3b36e; transition: width .18s linear; }
 .turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #d0bd91; white-space: nowrap; }
+.gear-controls { flex: 1 0 100%; justify-content: flex-end; }
 .turn-controls button:disabled { opacity: .5; cursor: not-allowed; }
 .turn-controls select { max-width: 180px; padding: 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--ink); background: var(--panel-deep); font: inherit; }
 .turn-controls select:disabled { opacity: .5; }

@@ -644,6 +644,20 @@ def ranged_cover(attacker, target, map_data):
     return None
 
 
+def drop_equipment(state, unit, kind, name):
+    """Create a ground item with a stable ID, including on imported older matches."""
+    if not name:
+        return
+    next_id = state.get("next_item_id")
+    if next_id is None:
+        previous = [item["id"] for item in state.get("items", ())]
+        previous += [event["item_id"] for event in state.get("history", ()) if "item_id" in event]
+        next_id = max(previous, default=-1) + 1
+    state.setdefault("items", []).append({"id": next_id, "type": kind, "name": name,
+                                           "x": unit["x"], "y": unit["y"], "carrier_id": None})
+    state["next_item_id"] = next_id + 1
+
+
 def record_casualty(state, killer, casualty):
     """A kill rallies its victor; nearby surviving comrades lose heart."""
     morale_changes = []
@@ -661,6 +675,8 @@ def record_casualty(state, killer, casualty):
     for item in state.get("items", []):
         if item["carrier_id"] == casualty["id"]:
             item.update(carrier_id=None, x=casualty["x"], y=casualty["y"])
+    drop_equipment(state, casualty, "weapon", normalize_unit(casualty)["weapon"])
+    drop_equipment(state, casualty, "armor", casualty.get("armor"))
     for horse in state.get("horses", []):
         if horse["rider_id"] == casualty["id"]:
             horse["rider_id"] = None
@@ -877,6 +893,7 @@ def initial_state(map_data=MAP):
             {"id": index, "type": "healing_potion", "x": item["x"], "y": item["y"], "carrier_id": None}
             for index, item in enumerate(map_data.get("items", []))
         ],
+        "next_item_id": len(map_data.get("items", [])),
     }
     return remember_visibility(state, map_data)
 
@@ -908,7 +925,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
-            "mount", "dismount"):
+            "pickup_equipment", "drop_weapon", "drop_armor", "mount", "dismount"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -981,6 +998,51 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "armor": unit["armor"], "equipped": unit["armor_equipped"],
         }])[-HISTORY_LIMIT:]
         return remember_visibility(next_state, map_data)
+    if action["type"] in ("drop_weapon", "drop_armor", "pickup_equipment"):
+        picking_up = action["type"] == "pickup_equipment"
+        required = {"type", "unit_id", "item_id"} if picking_up else {"type", "unit_id"}
+        if set(action) != required or any(type(action[key]) is not int for key in required - {"type"}):
+            raise InvalidAction("Choose a soldier and valid equipment.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if unit is None or unit["fight_points"] < 1:
+            raise InvalidAction("A living soldier needs one fight point to handle equipment.")
+        if picking_up:
+            item = next((item for item in next_state["items"] if item["id"] == action["item_id"]), None)
+            if (item is None or item["type"] not in ("weapon", "armor") or item["carrier_id"] is not None
+                    or (item["x"], item["y"]) != (unit["x"], unit["y"])):
+                raise InvalidAction("Stand on a piece of equipment to recover it.")
+            kind, name = item["type"], item.get("name")
+            if ((kind == "weapon" and (name not in ("sword", "longbow", "crossbow") or unit["weapon"] is not None))
+                    or (kind == "armor" and (name not in ARMOR_STATS or unit["armor"] is not None))):
+                raise InvalidAction("Free the matching weapon or armor slot before recovering equipment.")
+            weight = WEAPON_WEIGHTS[name] if kind == "weapon" else ARMOR_STATS[name]["weight"]
+            if carried_weight(unit, next_state["items"]) + weight > MAX_CARRY_WEIGHT:
+                raise InvalidAction("This soldier cannot carry more than eight weight.")
+        else:
+            kind = "weapon" if action["type"] == "drop_weapon" else "armor"
+            name = unit[kind]
+            if not name:
+                raise InvalidAction("That soldier has no equipment in this slot.")
+        old_penalty = weight_penalty(unit, next_state["items"])
+        actor_weapon = unit["weapon"]
+        if picking_up:
+            next_state["items"].remove(item)
+            unit[kind] = name
+            if kind == "armor":
+                unit["armor_equipped"] = True
+        else:
+            drop_equipment(next_state, unit, kind, name)
+            unit[kind] = None
+            if kind == "armor":
+                unit["armor_equipped"] = False
+        refresh_inventory_movement(unit, old_penalty, next_state["items"])
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": actor_weapon, "equipment": name,
+        }])[-HISTORY_LIMIT:]
+        return remember_visibility(next_state, map_data)
     if action["type"] in ("pickup_item", "drop_item", "use_item"):
         operation = action["type"]
         required_fields = {"type", "unit_id", "item_id"} | ({"target_id"} if operation == "use_item" else set())
@@ -989,7 +1051,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
         item = next((item for item in next_state["items"] if item["id"] == action["item_id"]), None)
-        if not unit or not item or unit["fight_points"] < 1:
+        if not unit or not item or item["type"] != "healing_potion" or unit["fight_points"] < 1:
             raise InvalidAction("A living soldier needs a fight point to handle a potion.")
         if operation == "pickup_item":
             if (item["carrier_id"] is not None or (item["x"], item["y"]) != (unit["x"], unit["y"]) or
@@ -1150,6 +1212,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Only soldiers carrying bows or crossbows can make ranged attacks.")
         if not ranged and attacker["weapon"] in RANGED_WEAPON_STATS:
             raise InvalidAction("Soldiers carrying bows or crossbows must use ranged attacks.")
+        if not ranged and attacker["weapon"] != "sword":
+            raise InvalidAction("A soldier needs a sword to make a melee attack.")
         if attacker["fight_points"] < 1:
             raise InvalidAction("This soldier has no fight points left.")
         if ranged:

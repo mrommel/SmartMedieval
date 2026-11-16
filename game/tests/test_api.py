@@ -5,7 +5,7 @@ from urllib.error import URLError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from ..engine import MAP, default_map, normalize_map
+from ..engine import MAP, default_map, normalize_map, record_casualty
 from ..models import GameInstance, Scenario, SingleGame
 
 
@@ -46,6 +46,49 @@ class GameInstanceApiTests(TestCase):
         self.game.map_definition = battlefield
         self.game.full_clean()
         self.game.save()
+
+    def test_equipment_drop_recover_and_resume_are_server_owned(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertNotIn("next_item_id", started["state"])
+        self.assertEqual(self.action(0, {"type": "drop_weapon", "unit_id": 6}).status_code, 400)
+        dropped = self.action(0, {"type": "drop_weapon", "unit_id": 0}).json()
+        self.assertIsNone(dropped["state"]["units"][0]["weapon"])
+        weapon = dropped["state"]["items"][0]
+        self.assertEqual((weapon["type"], weapon["name"], weapon["x"], weapon["y"]),
+                         ("weapon", "sword", 2, 6))
+        self.assertEqual(self.action(0, {"type": "pickup_equipment", "unit_id": 0,
+                                         "item_id": weapon["id"]}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "pickup_equipment", "unit_id": 0,
+                                         "item_id": weapon["id"]}).status_code, 400)
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 200)
+        restored = self.action(2, {"type": "pickup_equipment", "unit_id": 0,
+                                   "item_id": weapon["id"]}).json()
+        self.assertEqual((restored["state"]["units"][0]["weapon"], restored["state"]["units"][0]["fight_points"]),
+                         ("sword", 0))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], restored["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["next_item_id"], 1)
+
+    def test_fog_hides_casualty_gear_until_spotted(self):
+        self.fog_game()
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        attacker, defender = instance.state["units"]
+        record_casualty(instance.state, attacker, defender)
+        instance.save(update_fields=["state"])
+        hidden = self.client.get(reverse("current-game")).json()
+        self.assertNotIn("next_item_id", hidden["state"])
+        self.assertEqual([item["id"] for item in hidden["state"]["items"]], [0])
+        self.assertEqual([(item["type"], item.get("name")) for item in instance.state["items"]],
+                         [("healing_potion", None), ("healing_potion", None), ("weapon", "sword")])
+        spotted = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).json()
+        self.assertIn({"id": 2, "type": "weapon", "name": "sword", "x": 9, "y": 6, "carrier_id": None},
+                      spotted["state"]["items"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], spotted["state"])
 
     def test_fog_hides_enemy_roster_supplies_history_and_ai_positions_until_spotted(self):
         self.fog_game()

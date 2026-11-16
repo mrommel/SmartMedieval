@@ -401,6 +401,22 @@ export function createBattlefieldRenderer(canvas) {
     ctx.stroke();
   }
 
+  function drawEquipment(item, stack) {
+    const p = project(item.x, item.y);
+    const size = Math.max(9, tileW * .21);
+    const x = p.x + (stack % 3 - 1) * size * .85;
+    const y = p.y + tileH * .45 - Math.floor(stack / 3) * size * .55;
+    ctx.fillStyle = item.type === "weapon" ? "#9baeb3" : "#d2ac70";
+    ctx.strokeStyle = "#26312c";
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+    ctx.fillStyle = "#202c29";
+    ctx.textAlign = "center";
+    ctx.font = `bold ${Math.max(8, size * .7)}px sans-serif`;
+    ctx.fillText(item.type === "weapon" ? "W" : "A", x, y + size * .25);
+  }
+
   function drawAimMarker(catapult) {
     if (!catapult.aim) return;
     const target = project(catapult.aim.x, catapult.aim.y);
@@ -671,8 +687,13 @@ export function createBattlefieldRenderer(canvas) {
       layers.push({ depth: catapult.x + catapult.y + .35, kind: "catapult", catapult }));
     (simulation.horses || []).forEach(horse =>
       layers.push({ depth: horse.x + horse.y + .45, kind: "horse", horse }));
-    (simulation.items || []).filter(item => item.carrier_id === null).forEach(item =>
-      layers.push({ depth: item.x + item.y + .4, kind: "potion", item }));
+    const itemStacks = new Map();
+    (simulation.items || []).filter(item => item.carrier_id === null).forEach(item => {
+      const key = `${item.x},${item.y}`;
+      const stack = itemStacks.get(key) || 0;
+      itemStacks.set(key, stack + 1);
+      layers.push({ depth: item.x + item.y + .4, kind: "item", item, stack });
+    });
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     layers.sort((a, b) => a.depth - b.depth);
 
@@ -689,7 +710,10 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
       else if (layer.kind === "horse") drawHorse(layer.horse);
-      else if (layer.kind === "potion") drawPotion(layer.item);
+      else if (layer.kind === "item") {
+        if (layer.item.type === "healing_potion") drawPotion(layer.item);
+        else drawEquipment(layer.item, layer.stack);
+      }
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);
