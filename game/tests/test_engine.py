@@ -7,6 +7,145 @@ from ..engine import (
 )
 
 
+class HorsebackRidingTests(TestCase):
+    def horse_map(self):
+        battlefield = default_map()
+        battlefield["horses"] = [{"x": 2, "y": 6}]
+        return battlefield
+
+    def mount(self, state, battlefield):
+        return apply_action(state, {"type": "mount", "unit_id": 0, "horse_id": 0}, battlefield)
+
+    def test_map_validates_horse_positions_and_old_maps_need_no_horses(self):
+        battlefield = self.horse_map()
+        validate_map(battlefield)
+        self.assertEqual(initial_state(battlefield)["horses"][0]["health"], 2)
+        self.assertEqual(initial_state()["horses"], [])
+        for horses in ("invalid", [{"x": 2, "y": 6}] * 2,
+                       [{"x": 2, "y": 6}] * 17, [{"x": True, "y": 6}],
+                       [{"x": 99, "y": 6}], [{"x": 11, "y": 7}],
+                       [{"x": 14, "y": 7}], [{"x": 2, "y": 6, "health": 99}]):
+            battlefield["horses"] = horses
+            with self.subTest(horses=horses), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        for extra in ({"objects": [{"x": 2, "y": 6, "type": "tree"}]},
+                      {"elevation": [{"x": 2, "y": 6, "height": 1, "access": "ramp"}]},
+                      {"terrain": [{"x": 2, "y": 6, "type": "swamp"}]}):
+            battlefield = self.horse_map()
+            battlefield.update(extra)
+            with self.subTest(extra=extra), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+
+    def test_mount_dismount_spend_fight_points_and_preserve_spent_movement(self):
+        battlefield = self.horse_map()
+        battlefield["startPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        state["units"][0]["move_points"] = 1  # 2 of 3 foot MP spent.
+        original = initial_state(battlefield)
+        for action in ({"type": "mount", "unit_id": True, "horse_id": 0},
+                       {"type": "mount", "unit_id": 6, "horse_id": 0},
+                       {"type": "mount", "unit_id": 0, "horse_id": False},
+                       {"type": "mount", "unit_id": 1, "horse_id": 0},
+                       {"type": "dismount", "unit_id": 0}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        ridden = self.mount(state, battlefield)
+        self.assertEqual((ridden["units"][0]["mount_id"], ridden["horses"][0]["rider_id"]), (0, 0))
+        self.assertEqual((ridden["units"][0]["move_capacity"], ridden["units"][0]["move_points"]), (6, 4))
+        self.assertEqual(ridden["units"][0]["fight_points"], 0)
+        self.assertEqual(state["horses"][0]["rider_id"], None)
+        self.assertEqual(original["units"][0]["move_capacity"], 3)
+        with self.assertRaises(InvalidAction):
+            self.mount(ridden, battlefield)
+        ridden["units"][0]["fight_points"] = 1
+        walked = apply_action(ridden, {"type": "dismount", "unit_id": 0}, battlefield)
+        self.assertEqual((walked["units"][0]["move_capacity"], walked["units"][0]["move_points"]), (3, 1))
+        self.assertIsNone(walked["horses"][0]["rider_id"])
+
+    def test_mounted_routes_use_horse_costs_and_cannot_enter_swamps_houses_or_ladders(self):
+        battlefield = self.horse_map()
+        battlefield["terrain"] = [{"x": 3, "y": 6, "type": "mud"},
+                                  {"x": 4, "y": 6, "type": "swamp"}]
+        state = self.mount(initial_state(battlefield), battlefield)
+        self.assertEqual(state["units"][0]["move_points"], 6)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["move_points"]), (3, 2))
+        self.assertEqual((moved["horses"][0]["x"], moved["horses"][0]["y"]), (3, 6))
+        self.assertNotEqual(find_path((2, 6), (4, 6), battlefield, mounted=True), [(3, 6), (4, 6)])
+        self.assertFalse(can_step((3, 6), (4, 6), battlefield, mounted=True))
+        self.assertEqual(find_path((2, 6), (4, 6), battlefield)[:2], [(3, 6), (4, 6)])
+        house = self.horse_map()
+        house["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4,
+                            "door": {"x": 4, "y": 4}}]
+        self.assertIsNone(find_path((4, 5), (4, 4), house, mounted=True))
+        self.assertIsNotNone(find_path((4, 5), (4, 4), house))
+        house["elevation"] = [{"x": 3, "y": 6, "height": 1, "access": "ladder"}]
+        self.assertFalse(can_step((2, 6), (3, 6), house, mounted=True))
+        house["elevation"][0]["access"] = "ramp"
+        self.assertTrue(can_step((2, 6), (3, 6), house, mounted=True))
+
+    def test_inventory_changes_do_not_slow_a_mounted_soldier(self):
+        battlefield = self.horse_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}]
+        state = self.mount(initial_state(battlefield), battlefield)
+        state["units"][0]["fight_points"] = 1
+        state["units"][0]["move_points"] = 3
+        picked = apply_action(state, {"type": "pickup_item", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((picked["units"][0]["move_capacity"], picked["units"][0]["move_points"]), (6, 3))
+        picked["units"][0]["fight_points"] = 1
+        dropped = apply_action(picked, {"type": "drop_item", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((dropped["units"][0]["move_capacity"], dropped["units"][0]["move_points"]), (6, 3))
+        self.assertEqual(move_allowance(dropped["units"][0], dropped["items"]), 6)
+
+    def test_mounted_melee_hits_harder_and_horse_absorbs_hits_until_fallen(self):
+        battlefield = self.horse_map()
+        state = self.mount(initial_state(battlefield), battlefield)
+        state["units"][0].update(x=12, y=4, fight_points=1, armor="mail", armor_equipped=True)
+        state["horses"][0].update(x=12, y=4)
+        attacked = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertEqual(attacked["units"][6]["health"], 1)
+        self.assertEqual(attacked["history"][-1]["damage"], 2)
+        attacked["units"][6]["fight_points"] = 2
+        record_attack(attacked, attacked["units"][6], attacked["units"][0], False, battlefield)
+        self.assertEqual((attacked["horses"][0]["health"], attacked["units"][0]["health"]), (1, 3))
+        self.assertNotIn("armor_blocked", attacked["history"][-1])
+        record_attack(attacked, attacked["units"][6], attacked["units"][0], False, battlefield)
+        self.assertEqual(attacked["horses"], [])
+        self.assertIsNone(attacked["units"][0]["mount_id"])
+        self.assertTrue(attacked["history"][-1]["horse_killed"])
+        self.assertEqual(attacked["units"][0]["health"], 3)
+        record_attack(attacked, attacked["units"][6], attacked["units"][0], False, battlefield)
+        self.assertEqual(attacked["units"][0]["health"], 3)  # Mail protects the dismounted rider.
+
+    def test_mounted_soldier_cannot_crew_catapult_or_attack_across_swamp(self):
+        battlefield = self.horse_map()
+        battlefield["catapults"].append({"x": 2, "y": 6})
+        state = self.mount(initial_state(battlefield), battlefield)
+        state["units"][0]["fight_points"] = 1
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "aim_catapult", "unit_id": 0, "catapult_id": 1,
+                                 "x": 5, "y": 6}, battlefield)
+        battlefield["terrain"] = [{"x": 3, "y": 6, "type": "swamp"}]
+        state["units"][6].update(x=3, y=6)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+
+    def test_old_matches_and_rider_casualties_leave_horses_available(self):
+        battlefield = self.horse_map()
+        state = self.mount(initial_state(battlefield), battlefield)
+        state["units"][0]["health"] = 1
+        state["units"][6]["x"], state["units"][6]["y"] = 2, 5
+        from ..engine import record_casualty
+        record_casualty(state, state["units"][6], state["units"][0])
+        self.assertIsNone(state["horses"][0]["rider_id"])
+        legacy = initial_state()
+        del legacy["horses"]
+        for unit in legacy["units"]:
+            del unit["mount_id"]
+        self.assertEqual(apply_action(legacy, {"type": "end_turn"})["horses"], [])
+
+
 class UnitEquipmentTests(TestCase):
     def test_equipment_is_explicit_and_no_unit_has_a_type(self):
         battlefield = default_map()

@@ -27,6 +27,9 @@ MAP = {
 }
 MOVE_POINTS = 4
 TERRAIN_COSTS = {"road": 1, "grass": 2, "mud": 3, "swamp": 4}
+MOUNTED_TERRAIN_COSTS = {"road": 1, "grass": 2, "mud": 4}
+HORSE_MOVE_POINTS = 6
+HORSE_HEALTH = 2
 MAX_HEALTH = 3
 FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
@@ -81,6 +84,7 @@ def normalize_unit(unit):
     result.setdefault("tools", [])
     result.setdefault("armor", None)
     result.setdefault("armor_equipped", result["armor"] is not None)
+    result.setdefault("mount_id", None)
     return result
 
 
@@ -109,7 +113,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
@@ -304,6 +308,22 @@ def validate_map(map_data):
                 or (point["x"], point["y"]) in seen_catapults):
             raise InvalidMap("Catapults need distinct open ground tiles away from the objective.")
         seen_catapults.add((point["x"], point["y"]))
+    horses = map_data.get("horses", [])
+    if not isinstance(horses, list) or len(horses) > 16:
+        raise InvalidMap("Horses must be a list of at most 16 open ground tiles.")
+    seen_horses = set()
+    for point in horses:
+        if (not isinstance(point, dict) or set(point) != {"x", "y"}
+                or type(point["x"]) is not int or type(point["y"]) is not int
+                or not is_walkable(point["x"], point["y"], map_data)
+                or is_house(point["x"], point["y"], map_data)
+                or tile_height(point["x"], point["y"], map_data) != 0
+                or (point["x"], point["y"]) == (objective["x"], objective["y"])
+                or (point["x"], point["y"]) in seen_horses
+                or any(tile["x"] == point["x"] and tile["y"] == point["y"] and tile["type"] == "swamp"
+                       for tile in terrain)):
+            raise InvalidMap("Horses need distinct open, flat, outdoor tiles away from the objective and swamps.")
+        seen_horses.add((point["x"], point["y"]))
     items = map_data.get("items", [])
     if not isinstance(items, list) or len(items) > 32:
         raise InvalidMap("Items must be a list of at most 32 healing potions.")
@@ -382,11 +402,16 @@ def tile_height(x, y, map_data=MAP, elevations=None):
                  if tile["x"] == x and tile["y"] == y), 0)
 
 
-def can_step(start, end, map_data=MAP, elevations=None):
+def can_step(start, end, map_data=MAP, elevations=None, mounted=False):
     if not is_walkable(*end, map_data):
+        return False
+    if mounted and any(tile["x"] == end[0] and tile["y"] == end[1] and tile["type"] == "swamp"
+                       for tile in map_data.get("terrain", ())):
         return False
     before_house = house_at(*start, map_data)
     after_house = house_at(*end, map_data)
+    if mounted and (before_house is not None or after_house is not None):
+        return False
     if before_house != after_house:
         if before_house is not None and after_house is not None:
             return False
@@ -401,9 +426,9 @@ def can_step(start, end, map_data=MAP, elevations=None):
         return False
     high = end if after > before else start
     if elevations is not None:
-        return elevations[high].get("access") in ("ladder", "ramp")
+        return elevations[high].get("access") in (("ramp",) if mounted else ("ladder", "ramp"))
     return any(tile["x"] == high[0] and tile["y"] == high[1]
-               and tile.get("access") in ("ladder", "ramp")
+               and tile.get("access") in (("ramp",) if mounted else ("ladder", "ramp"))
                for tile in map_data.get("elevation", []))
 
 
@@ -453,8 +478,10 @@ def can_ranged_attack(attacker, target, map_data=MAP):
                                   (target["x"], target["y"]), map_data))
 
 
-def terrain_cost_index(map_data):
-    return {(tile["x"], tile["y"]): TERRAIN_COSTS[tile["type"]] for tile in map_data.get("terrain", ())}
+def terrain_cost_index(map_data, mounted=False):
+    costs = MOUNTED_TERRAIN_COSTS if mounted else TERRAIN_COSTS
+    return {(tile["x"], tile["y"]): costs.get(tile["type"])
+            for tile in map_data.get("terrain", ())}
 
 
 def affordable_steps(path, budget, terrain_costs):
@@ -470,11 +497,12 @@ def affordable_steps(path, budget, terrain_costs):
     return steps, spent
 
 
-def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None):
-    if not is_walkable(*goal, map_data) or goal in blocked:
+def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None, mounted=False):
+    if (not is_walkable(*goal, map_data) or goal in blocked
+            or mounted and house_at(*goal, map_data) is not None):
         return None
     elevations = elevation_index(map_data)
-    terrain_costs = terrain_cost_index(map_data)
+    terrain_costs = terrain_cost_index(map_data, mounted)
     frontier = [(0, 0, start)]
     sequence = 0
     distances = {start: 0}
@@ -487,7 +515,8 @@ def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None):
             break
         x, y = current
         for neighbor in neighbors(x, y):
-            if neighbor in blocked or not can_step(current, neighbor, map_data, elevations):
+            if (neighbor in blocked or not can_step(current, neighbor, map_data, elevations, mounted)
+                    or terrain_costs.get(neighbor, 1) is None):
                 continue
             cost = terrain_costs.get(neighbor, 1)
             if max_step_cost is not None and cost > max_step_cost:
@@ -528,13 +557,25 @@ def weight_penalty(unit, items=()):
 
 def move_allowance(unit, items=()):
     morale = unit.get("morale", STARTING_MORALE)
-    return max(1, MOVE_POINTS + (unit.get("rank") == "veteran")
-               + (morale == MAX_MORALE) - (morale <= 1) - weight_penalty(unit, items))
+    mounted = unit.get("mount_id") is not None
+    return max(1, (HORSE_MOVE_POINTS if mounted else MOVE_POINTS) + (unit.get("rank") == "veteran")
+               + (morale == MAX_MORALE) - (morale <= 1) - (0 if mounted else weight_penalty(unit, items)))
+
+
+def change_mount_movement(unit, old_capacity, items):
+    """Change riding allowance without restoring points already spent this turn."""
+    capacity = max(1, unit.get("move_capacity", old_capacity) + move_allowance(unit, items) - old_capacity)
+    spent = max(0, unit.get("move_capacity", old_capacity) - unit["move_points"])
+    unit["move_capacity"] = capacity
+    unit["move_points"] = max(0, capacity - spent)
 
 
 def refresh_inventory_movement(unit, old_penalty, items):
     """Preserve points spent this turn when changing a load, without resetting morale/rank bonuses."""
-    new_penalty = weight_penalty(unit, items)
+    if unit.get("mount_id") is not None:
+        old_penalty = new_penalty = 0
+    else:
+        new_penalty = weight_penalty(unit, items)
     if "move_capacity" not in unit:
         # Older matches do not record how many points were already spent this turn.
         unit["move_points"] = max(0, unit["move_points"] + old_penalty - new_penalty)
@@ -588,6 +629,9 @@ def record_casualty(state, killer, casualty):
     for item in state.get("items", []):
         if item["carrier_id"] == casualty["id"]:
             item.update(carrier_id=None, x=casualty["x"], y=casualty["y"])
+    for horse in state.get("horses", []):
+        if horse["rider_id"] == casualty["id"]:
+            horse["rider_id"] = None
     state["units"].remove(casualty)
     return morale_changes
 
@@ -609,13 +653,22 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
              if ranged and target.get("cover_turn") != state["turn"] else None)
     if cover:
         target["cover_turn"] = state["turn"]
-    absorbed = 0 if cover else min(damage, armor_remaining(target, state["turn"]))
+    horse = next((horse for horse in state.get("horses", ()) if horse["id"] == target.get("mount_id")), None)
+    absorbed = 0 if cover or horse else min(damage, armor_remaining(target, state["turn"]))
     if absorbed:
         target["armor_absorbed"] = (target.get("armor_absorbed", 0)
                                     if target.get("armor_turn") == state["turn"] else 0) + absorbed
         target["armor_turn"] = state["turn"]
-    damage = min(0 if cover else damage - absorbed, target["health"])
-    target["health"] -= damage
+    damage = min(0 if cover else damage - absorbed, horse["health"] if horse else target["health"])
+    if horse:
+        horse["health"] -= damage
+        if horse["health"] <= 0:
+            state["horses"].remove(horse)
+            old_capacity = move_allowance(target, state.get("items", ()))
+            target["mount_id"] = None
+            change_mount_movement(target, old_capacity, state.get("items", ()))
+    else:
+        target["health"] -= damage
     killed = target["health"] <= 0
     morale_changes = record_casualty(state, attacker, target) if killed else []
     state["history"] = (state["history"] + [{
@@ -625,6 +678,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"horse_hit": True, "horse_killed": horse["health"] <= 0} if horse else {}),
         **({"weapon": weapon} if weapon else {}),
     } | ({"cover": cover} if cover else {}) | ({"armor_blocked": absorbed,
         "target_armor": target["armor"]} if absorbed else {})])[-HISTORY_LIMIT:]
@@ -638,7 +692,8 @@ def defender_destinations(unit, map_data=MAP, blocked=(), items=()):
     sequence = 0
     destinations = []
     elevations = elevation_index(map_data)
-    terrain_costs = terrain_cost_index(map_data)
+    mounted = unit.get("mount_id") is not None
+    terrain_costs = terrain_cost_index(map_data, mounted)
     allowance = move_allowance(unit, items)
     while frontier:
         distance, _, (x, y) = heappop(frontier)
@@ -648,7 +703,8 @@ def defender_destinations(unit, map_data=MAP, blocked=(), items=()):
             destinations.append((x, y))
         for neighbor in neighbors(x, y):
             if (neighbor in blocked or neighbor == objective
-                    or not can_step((x, y), neighbor, map_data, elevations)):
+                    or not can_step((x, y), neighbor, map_data, elevations, mounted)
+                    or terrain_costs.get(neighbor, 1) is None):
                 continue
             new_distance = distance + terrain_costs.get(neighbor, 1)
             if new_distance <= allowance and new_distance < distances.get(neighbor, float("inf")):
@@ -696,9 +752,10 @@ def resolve_defender_goals(state, goals, map_data=MAP):
             if not destinations:
                 continue
         route = find_path(start, (x, y), map_data, blocked=blocked | {objective},
-                          max_step_cost=move_allowance(unit, state.get("items", ())))
+                          max_step_cost=move_allowance(unit, state.get("items", ())),
+                          mounted=unit.get("mount_id") is not None)
         affordable, _ = affordable_steps(route or [], move_allowance(unit, state.get("items", ())),
-                                          terrain_cost_index(map_data))
+                                          terrain_cost_index(map_data, unit.get("mount_id") is not None))
         along_route = [tile for tile in affordable if tile in destinations]
         if along_route:
             destination = along_route[-1]
@@ -748,6 +805,7 @@ def initial_state(map_data=MAP):
                 "tools": list(point.get("tools", [])),
                 "armor": point.get("armor"),
                 "armor_equipped": point.get("armor") is not None,
+                "mount_id": None,
                 **({"is_king": True} if normalize_position(point).get("is_king") else {}),
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
@@ -771,6 +829,11 @@ def initial_state(map_data=MAP):
             {"id": index, "x": point["x"], "y": point["y"], "ammo": CATAPULT_AMMO,
              "reload_turns": 0, "aim": None}
             for index, point in enumerate(map_data.get("catapults", []))
+        ],
+        "horses": [
+            {"id": index, "x": point["x"], "y": point["y"], "health": HORSE_HEALTH,
+             "max_health": HORSE_HEALTH, "rider_id": None}
+            for index, point in enumerate(map_data.get("horses", []))
         ],
         "wall_damage": [],
         "breaches": [],
@@ -807,7 +870,8 @@ def king_is_guarded(state):
 def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
-            "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor"):
+            "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
+            "mount", "dismount"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -830,9 +894,39 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "catapults": [
             {**catapult, "aim": catapult.get("aim"), "reload_turns": catapult.get("reload_turns", 0)}
             for catapult in state.get("catapults", [])
-        ], "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
+        ], "horses": [dict(horse) for horse in state.get("horses", [])],
+        "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] in ("mount", "dismount"):
+        mounting = action["type"] == "mount"
+        required = {"type", "unit_id", "horse_id"} if mounting else {"type", "unit_id"}
+        if set(action) != required or type(action["unit_id"]) is not int or (mounting and type(action["horse_id"]) is not int):
+            raise InvalidAction("Choose a soldier and a valid horse.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if unit is None or unit["fight_points"] < 1:
+            raise InvalidAction("A living soldier needs one fight point to mount or dismount.")
+        if mounting:
+            horse = next((horse for horse in next_state["horses"] if horse["id"] == action["horse_id"]), None)
+            if (not horse or horse["rider_id"] is not None or unit["mount_id"] is not None
+                    or (horse["x"], horse["y"]) != (unit["x"], unit["y"])
+                    or house_at(unit["x"], unit["y"], map_data) is not None):
+                raise InvalidAction("Stand on an unmounted horse on open, level ground.")
+        else:
+            horse = next((horse for horse in next_state["horses"] if horse["id"] == unit["mount_id"]), None)
+            if horse is None:
+                raise InvalidAction("This soldier is not mounted.")
+        old_capacity = move_allowance(unit, next_state["items"])
+        unit["mount_id"] = horse["id"] if mounting else None
+        horse["rider_id"] = unit["id"] if mounting else None
+        change_mount_movement(unit, old_capacity, next_state["items"])
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"], "horse_id": horse["id"],
+        }])[-HISTORY_LIMIT:]
+        return next_state
     if action["type"] == "equip_armor":
         if (set(action) != {"type", "unit_id", "equipped"}
                 or type(action["unit_id"]) is not int or type(action["equipped"]) is not bool):
@@ -905,7 +999,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                      and unit.get("side", "attackers") == "attackers"), None)
         catapult = next((item for item in next_state["catapults"] if item["id"] == action["catapult_id"]), None)
         if (not unit or not catapult or (unit["x"], unit["y"]) != (catapult["x"], catapult["y"])
-                or unit["fight_points"] < 1):
+                or unit["fight_points"] < 1 or unit["mount_id"] is not None):
             raise InvalidAction("A soldier on the catapult needs a fight point to crew it.")
         if catapult["ammo"] < 1:
             raise InvalidAction("The catapult is out of ammunition.")
@@ -1037,10 +1131,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 })
         elif (abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) != 1
               or attacker["z"] != target["z"]
-              or not can_step((attacker["x"], attacker["y"]), (target["x"], target["y"]), map_data)):
+              or not can_step((attacker["x"], attacker["y"]), (target["x"], target["y"]), map_data,
+                              mounted=attacker["mount_id"] is not None)):
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
-        record_attack(next_state, attacker, target, ranged, map_data)
+        record_attack(next_state, attacker, target, ranged, map_data,
+                      damage=2 if not ranged and attacker["mount_id"] is not None else ATTACK_DAMAGE)
         if map_data.get("mission") == "capture_king" and target.get("is_king") and target["health"] <= 0:
             next_state["defeated"] = True
         return next_state
@@ -1074,15 +1170,18 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("Invalid defender destination.")
             objective = (map_data["objective"]["x"], map_data["objective"]["y"])
             path = find_path(start, (x, y), map_data, blocked=blocked | {objective},
-                             max_step_cost=unit["move_points"])
+                             max_step_cost=unit["move_points"], mounted=unit["mount_id"] is not None)
             if path is None:
                 raise InvalidAction("Invalid defender destination.")
             old_x = unit["x"]
             unit["x"], unit["y"] = path[-1]
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
-            terrain_costs = terrain_cost_index(map_data)
+            terrain_costs = terrain_cost_index(map_data, unit["mount_id"] is not None)
             unit["move_points"] -= sum(terrain_costs.get(tile, 1) for tile in path)
+            for horse in next_state["horses"]:
+                if horse["rider_id"] == unit["id"]:
+                    horse["x"], horse["y"] = unit["x"], unit["y"]
         for defender in [unit for unit in next_state["units"]
                          if unit.get("side") == "defenders" and not unit.get("is_king")]:
             if defender["fight_points"] < 1:
@@ -1169,13 +1268,18 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 target = (x, y)
         path = find_path((unit["x"], unit["y"]), target, map_data, blocked=blocked,
                          max_step_cost=max(unit.get("move_capacity", move_allowance(unit, next_state["items"])),
-                                           move_allowance(unit, next_state["items"])))
+                                           move_allowance(unit, next_state["items"])),
+                         mounted=unit["mount_id"] is not None)
         if path:
-            steps, spent = affordable_steps(path, unit["move_points"], terrain_cost_index(map_data))
+            steps, spent = affordable_steps(path, unit["move_points"],
+                                            terrain_cost_index(map_data, unit["mount_id"] is not None))
             if not steps:
                 continue
             old_x = unit["x"]
             unit["x"], unit["y"] = steps[-1]
+            for horse in next_state["horses"]:
+                if horse["rider_id"] == unit["id"]:
+                    horse["x"], horse["y"] = unit["x"], unit["y"]
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= spent

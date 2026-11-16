@@ -361,6 +361,32 @@ export function createBattlefieldRenderer(canvas) {
     ctx.restore();
   }
 
+  function drawHorse(horse) {
+    const p = project(horse.x, horse.y);
+    const scale = tileW / 64;
+    ctx.save();
+    ctx.translate(p.x, p.y + tileH * .45);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#604331";
+    ctx.beginPath();
+    ctx.ellipse(0, -7, 13, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(7, -21, 5, 15);
+    ctx.beginPath();
+    ctx.ellipse(12, -20, 6, 4, -.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#382b26";
+    ctx.lineWidth = 3;
+    for (const x of [-9, -4, 6, 10]) {
+      ctx.beginPath(); ctx.moveTo(x, -3); ctx.lineTo(x + 1, 5); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = "#32271e";
+    ctx.fillRect(p.x - 12, p.y - tileH * .35, 24, 3);
+    ctx.fillStyle = "#e4b571";
+    ctx.fillRect(p.x - 12, p.y - tileH * .35, 24 * horse.health / horse.max_health, 3);
+  }
+
   function drawPotion(item) {
     const p = project(item.x, item.y);
     const size = Math.max(4, tileW * .095);
@@ -429,7 +455,7 @@ export function createBattlefieldRenderer(canvas) {
     const scale = tileW / 64;
 
     ctx.save();
-    ctx.translate(p.x, p.y + tileH * .48);
+    ctx.translate(p.x, p.y + tileH * .48 - (unit.mount_id != null ? tileH * .4 : 0));
     ctx.scale(scale, scale);
     ctx.fillStyle = "rgba(24,30,22,.35)";
     ctx.beginPath();
@@ -493,9 +519,9 @@ export function createBattlefieldRenderer(canvas) {
     ctx.restore();
     const healthRatio = Math.max(0, unit.health / unit.max_health);
     ctx.fillStyle = "rgba(20,25,20,.8)";
-    ctx.fillRect(p.x - 10, p.y - tileH * .25, 20, 3);
+    ctx.fillRect(p.x - 10, p.y - tileH * (unit.mount_id != null ? .85 : .25), 20, 3);
     ctx.fillStyle = healthRatio > .5 ? "#9aba78" : healthRatio > .25 ? "#d8b260" : "#bd6c58";
-    ctx.fillRect(p.x - 10, p.y - tileH * .25, 20 * healthRatio, 3);
+    ctx.fillRect(p.x - 10, p.y - tileH * (unit.mount_id != null ? .85 : .25), 20 * healthRatio, 3);
     if (unit.side === "defenders") {
       ctx.strokeStyle = "#b5c9e6";
       ctx.lineWidth = 2;
@@ -632,6 +658,8 @@ export function createBattlefieldRenderer(canvas) {
     });
     (simulation.catapults || []).forEach(catapult =>
       layers.push({ depth: catapult.x + catapult.y + .35, kind: "catapult", catapult }));
+    (simulation.horses || []).forEach(horse =>
+      layers.push({ depth: horse.x + horse.y + .45, kind: "horse", horse }));
     (simulation.items || []).filter(item => item.carrier_id === null).forEach(item =>
       layers.push({ depth: item.x + item.y + .4, kind: "potion", item }));
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
@@ -649,6 +677,7 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "object") drawObject(layer.obj);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
+      else if (layer.kind === "horse") drawHorse(layer.horse);
       else if (layer.kind === "potion") drawPotion(layer.item);
       else drawUnit(layer.unit, time);
     }

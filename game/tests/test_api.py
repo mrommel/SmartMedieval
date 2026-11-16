@@ -35,6 +35,36 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_seeded_horse_mounts_moves_and_persists_across_resume(self):
+        self.game = SingleGame.objects.get(slug="greywatch-hamlet")
+        started = self.start().json()
+        self.assertEqual(started["map"]["horses"], [{"x": 2, "y": 6}])
+        self.assertEqual(started["state"]["horses"][0]["health"], 2)
+        self.assertEqual(started["state"]["units"][0]["mount_id"], None)
+        self.assertEqual(self.action(0, {"type": "mount", "unit_id": 0, "horse_id": False}).status_code, 400)
+        self.assertEqual(self.action(0, {"type": "mount", "unit_id": 6, "horse_id": 0}).status_code, 400)
+        mounted = self.action(0, {"type": "mount", "unit_id": 0, "horse_id": 0})
+        self.assertEqual(mounted.status_code, 200)
+        self.assertEqual((mounted.json()["state"]["units"][0]["mount_id"],
+                          mounted.json()["state"]["units"][0]["next_move_capacity"]), (0, 6))
+        self.assertEqual(self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).status_code, 409)
+        moved = self.action(1, {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual((moved.json()["state"]["units"][0]["x"],
+                          moved.json()["state"]["horses"][0]["x"]), (3, 3))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], moved.json()["state"])
+        self.assertEqual(self.action(2, {"type": "dismount", "unit_id": 0}).status_code, 400)
+        ended = self.action(2, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        ai_input = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual(ai_input["units"][0]["mount_id"], 0)
+        self.assertEqual(ai_input["horses"][0]["health"], 2)
+        dismounted = self.action(3, {"type": "dismount", "unit_id": 0})
+        self.assertEqual(dismounted.status_code, 200)
+        self.assertIsNone(dismounted.json()["state"]["horses"][0]["rider_id"])
+        self.assertEqual(dismounted.json()["state"]["units"][0]["next_move_capacity"], 4)
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["horses"][0]["x"], 3)
+
     def test_inventory_weight_updates_movement_preview_and_resumes(self):
         battlefield = default_map()
         battlefield["startPositions"][0]["armor"] = "leather"

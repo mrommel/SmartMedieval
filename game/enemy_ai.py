@@ -36,11 +36,12 @@ def enemy_turn(state, map_data, combat_events=None):
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "weapon", "tools", "armor", "armor_equipped", "is_king", "x", "y", "health", "fight_points", "reload_turns",
-                "move_points", "z",
+                "move_points", "z", "mount_id",
             )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit"),
                   "armor_remaining": armor_remaining(unit, state["turn"])}
             for unit in (normalize_unit(value) for value in state["units"])
         ],
+        "horses": state.get("horses", []),
     }
     request_data = {
         "model": AI_MODEL,
@@ -75,6 +76,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "soldiers with swords before they can capture him. "
                 "Equipped leather absorbs one damage per turn and mail absorbs two; cover blocks the first "
                 "ranged hit before armor. Armor also protects against melee and catapult hits. "
+                "A mounted attacker has six base movement points, cannot enter houses or swamps, "
+                "deals two sword melee damage, and takes hits on the horse (two health) before the rider. "
                 "Issue at most 8 orders and at most one per defender. "
                 "Omit units that should hold position. Do not issue attacker orders."
             )},

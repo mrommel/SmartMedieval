@@ -10,7 +10,9 @@ export function previewMovement(map, units, unit, destination) {
     }
   });
   const elevations = new Map((map.elevation || []).map(tile => [key(tile.x, tile.y), tile]));
-  const costs = { road: 1, grass: 2, mud: 3, swamp: 4 };
+  const mounted = unit.mount_id != null;
+  const costs = mounted ? { road: 1, grass: 2, mud: 4, swamp: Infinity } :
+    { road: 1, grass: 2, mud: 3, swamp: 4 };
   const terrain = new Map((map.terrain || []).map(tile => [key(tile.x, tile.y), costs[tile.type]]));
   const costAt = tile => terrain.get(key(tile.x, tile.y)) || 1;
   const objects = new Set((map.objects || []).map(tile => key(tile.x, tile.y)));
@@ -31,6 +33,7 @@ export function previewMovement(map, units, unit, destination) {
   const canStep = (from, to) => {
     if (!walkable(to.x, to.y)) return false;
     const before = houseAt(from.x, from.y), after = houseAt(to.x, to.y);
+    if (mounted && (before !== null || after !== null)) return false;
     if (before !== after) {
       if (before !== null && after !== null) return false;
       const door = map.houses[before === null ? after : before].door;
@@ -42,12 +45,13 @@ export function previewMovement(map, units, unit, destination) {
     const fromHeight = fromTile?.height || 0, toHeight = toTile?.height || 0;
     if (fromHeight === toHeight) return true;
     if (Math.abs(fromHeight - toHeight) !== 1) return false;
-    return ["ladder", "ramp"].includes((toHeight > fromHeight ? toTile : fromTile)?.access);
+    return (mounted ? ["ramp"] : ["ladder", "ramp"]).includes((toHeight > fromHeight ? toTile : fromTile)?.access);
   };
 
   if (!unit.move_points) return { status: "exhausted", path: [] };
   const goal = key(destination.x, destination.y);
-  if (!walkable(destination.x, destination.y) || blocked.has(goal)) return { status: "unreachable", path: [] };
+  if (!walkable(destination.x, destination.y) || blocked.has(goal) ||
+      (mounted && houseAt(destination.x, destination.y) !== null)) return { status: "unreachable", path: [] };
   const start = key(unit.x, unit.y);
   const maxStepCost = Math.max(unit.move_capacity ?? unit.next_move_capacity ?? unit.move_points,
     unit.next_move_capacity ?? unit.move_points);

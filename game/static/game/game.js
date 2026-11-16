@@ -27,6 +27,7 @@ import { previewMovement } from "./path_preview.js";
   const healButton = document.getElementById("heal-potion");
   const healTarget = document.getElementById("heal-target");
   const armorButton = document.getElementById("equip-armor");
+  const mountButton = document.getElementById("mount-horse");
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
@@ -38,7 +39,7 @@ import { previewMovement } from "./path_preview.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], catapults: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  const simulation = { units: [], catapults: [], horses: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
   let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
@@ -77,6 +78,12 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
     const medic = selectedMedic();
+    const availableHorse = simulation.horses.find(horse => medic && horse.rider_id === null &&
+      horse.x === medic.x && horse.y === medic.y);
+    mountButton.hidden = !simulation.horses.length;
+    mountButton.textContent = medic?.mount_id != null ? "Dismount" : "Mount";
+    mountButton.disabled = pendingAction || paused || ended || !medic?.fight_points ||
+      (medic.mount_id == null && !availableHorse);
     armorButton.hidden = !medic?.armor;
     armorButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
     armorButton.textContent = medic?.armor_equipped ? "Remove armor" : "Equip armor";
@@ -94,9 +101,9 @@ import { previewMovement } from "./path_preview.js";
       !promotionCandidate();
     captureButton.disabled = pendingAction || paused || ended || captureCandidate() === null;
     aimButton.hidden = fireButton.hidden = !simulation.catapults.length;
-    aimButton.disabled = pendingAction || paused || ended || !crew || !crew.unit.fight_points || !crew.catapult.ammo;
+    aimButton.disabled = pendingAction || paused || ended || !crew || crew.unit.mount_id != null || !crew.unit.fight_points || !crew.catapult.ammo;
     fireButton.disabled = pendingAction || paused || ended || !crew || !crew.unit.fight_points ||
-      !crew.catapult.ammo || !crew.catapult.aim || crew.catapult.reload_turns > 0;
+      crew.unit.mount_id != null || !crew.catapult.ammo || !crew.catapult.aim || crew.catapult.reload_turns > 0;
     aimButton.setAttribute("aria-pressed", String(aimingCatapult));
     aimButton.textContent = aimingCatapult ? "Cancel aim" : "Aim catapult";
     pauseButton.disabled = ended;
@@ -194,6 +201,8 @@ import { previewMovement } from "./path_preview.js";
   function canMeleeAttack(attacker, target) {
     if (Math.abs(attacker.x - target.x) + Math.abs(attacker.y - target.y) !== 1 ||
         renderer.tileHeight(attacker.x, attacker.y) !== renderer.tileHeight(target.x, target.y)) return false;
+    if (attacker.mount_id != null && (houseAt(target.x, target.y) >= 0 ||
+        mapData?.terrain?.some(tile => tile.x === target.x && tile.y === target.y && tile.type === "swamp"))) return false;
     const from = houseAt(attacker.x, attacker.y), to = houseAt(target.x, target.y);
     if (from === to) return true;
     if (from >= 0 && to >= 0) return false;
@@ -228,7 +237,9 @@ import { previewMovement } from "./path_preview.js";
       const { route } = movementPreview;
       if (route.status === "reachable") {
         const unit = selected[0];
-        const load = unit.carried_weight == null ? "" : ` · load ${unit.carried_weight}/${unit.max_carry_weight} (${unit.weight_penalty} MP penalty)`;
+        const load = unit.carried_weight == null ? "" : unit.mount_id != null ?
+          ` · mounted (load ${unit.carried_weight}/${unit.max_carry_weight} does not slow the horse)` :
+          ` · load ${unit.carried_weight}/${unit.max_carry_weight} (${unit.weight_penalty} MP penalty)`;
         routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.totalCost} MP total · ${route.thisTurnCost} MP this turn (${route.thisTurn} ${route.thisTurn === 1 ? "tile" : "tiles"})${load}${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · route may require more movement per turn" : ""}.`;
       } else {
         routeStatus.textContent = route.status === "exhausted" ? "No movement points left. End the turn to move again." :
@@ -309,11 +320,13 @@ import { previewMovement } from "./path_preview.js";
 
   function describeCursor(cursor) {
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
+    const horse = simulation.horses.find(item => item.x === cursor.x && item.y === cursor.y);
     const potion = simulation.items.some(item => item.carrier_id === null && item.x === cursor.x && item.y === cursor.y);
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
-      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon}`} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}`
+      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon}`} #${unit.id + 1}${unit.mount_id != null ? `, mounted (horse ${horse?.health ?? "?"} HP)` : horse ? ", horse available" : ""}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}`
       : potion ? "healing potion"
+      : horse ? `horse (${horse.health}/${horse.max_health} HP); move a soldier here to mount`
       : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
         objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" :
         renderer.isHouseDoor(cursor.x, cursor.y) ? "house door" :
@@ -372,6 +385,7 @@ import { previewMovement } from "./path_preview.js";
     const unit = selected.length === 1 ? selected[0] : null;
     const crew = selectedCrew();
     const potions = unit ? simulation.items.filter(item => item.carrier_id === unit.id).length : 0;
+    const horse = unit ? simulation.horses.find(item => item.id === unit.mount_id) : null;
     if (unit) {
       const identity = document.createElement("div");
       identity.className = "selected-identity";
@@ -382,7 +396,7 @@ import { previewMovement } from "./path_preview.js";
       nextTurn.className = "next-turn-preview";
       nextTurn.textContent = unit.next_move_capacity == null || unit.next_fight_capacity == null
         ? "Next turn: allowance unavailable until the game refreshes."
-        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank${unit.carried_weight == null ? "" : " and load"})`;
+        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank${horse ? " and mount" : unit.carried_weight == null ? "" : " and load"})`;
       selectedStats.replaceChildren(identity,
         statRow("Health", unit.health, unit.max_health, "HP", "health"),
         statRow("Morale", unit.morale ?? 3, 5, "", "morale"),
@@ -390,10 +404,13 @@ import { previewMovement } from "./path_preview.js";
         statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
         nextTurn,
         detailRow("Weapon", unit.weapon || "none"),
+        detailRow("Horse", horse ? `${horse.health}/${horse.max_health} HP · mounted; sword melee deals 2 damage` :
+          simulation.horses.some(item => item.rider_id === null && item.x === unit.x && item.y === unit.y)
+            ? "Available here · mount for one fight point" : "On foot"),
         detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
         detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
-        ...(unit.carried_weight == null ? [] : [detailRow("Load", `${unit.carried_weight}/${unit.max_carry_weight} weight · −${unit.weight_penalty} MP/turn (1 per 3 weight; minimum 1 MP)`)]),
+        ...(unit.carried_weight == null ? [] : [detailRow("Load", `${unit.carried_weight}/${unit.max_carry_weight} weight · ${horse ? "no mounted penalty" : `−${unit.weight_penalty} MP/turn (1 per 3 weight; minimum 1 MP)`}`)]),
         ...(["longbow", "crossbow"].includes(unit.weapon)
           ? [detailRow("Reload", unit.reload_turns ? `${unit.reload_turns} turn(s) left` : "Ready")]
           : []),
@@ -426,6 +443,8 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} captured the living king.`;
       } else if (event.type === "equip_armor") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.equipped ? "equipped" : "removed"} ${event.armor} armor.`;
+      } else if (event.type === "mount" || event.type === "dismount") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "mount" ? "mounted" : "dismounted"} horse #${event.horse_id + 1}.`;
       } else if (event.type === "aim_catapult") {
         item.textContent = `Turn ${event.turn} · ${actor} aimed the catapult at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "catapult_wall" || event.type === "catapult_miss") {
@@ -438,7 +457,7 @@ import { previewMovement } from "./path_preview.js";
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
@@ -469,6 +488,7 @@ import { previewMovement } from "./path_preview.js";
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
     simulation.catapults = snapshot.state.catapults || [];
+    simulation.horses = snapshot.state.horses || [];
     simulation.items = snapshot.state.items || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;
@@ -580,7 +600,7 @@ import { previewMovement } from "./path_preview.js";
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
       if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.is_king) ? "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -705,6 +725,15 @@ import { previewMovement } from "./path_preview.js";
   armorButton.addEventListener("click", () => {
     const soldier = selectedMedic();
     if (soldier?.armor && !armorButton.disabled) sendAction({ type: "equip_armor", unit_id: soldier.id, equipped: !soldier.armor_equipped });
+  });
+  mountButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (!soldier || mountButton.disabled) return;
+    if (soldier.mount_id != null) sendAction({ type: "dismount", unit_id: soldier.id });
+    else {
+      const horse = simulation.horses.find(item => item.rider_id === null && item.x === soldier.x && item.y === soldier.y);
+      if (horse) sendAction({ type: "mount", unit_id: soldier.id, horse_id: horse.id });
+    }
   });
   pauseButton.addEventListener("click", () => {
     if (simulation.captured || simulation.defeated) return;

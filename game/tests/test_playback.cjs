@@ -193,6 +193,42 @@ test("route preview follows weight-adjusted current and future allowances", () =
   assert.equal(route.turns, 3);
 });
 
+test("mounted preview avoids swamps, houses and ladders while costing 4 MP on mud", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, houses: [{ left: 2, right: 3, top: 1, bottom: 2,
+      door: { x: 2, y: 1 } }], terrain: [{ x: 1, y: 0, type: "mud" },
+      { x: 0, y: 1, type: "swamp" }] };
+  const rider = { id: 0, x: 0, y: 0, mount_id: 0, move_points: 5,
+    move_capacity: 6, next_move_capacity: 6 };
+  const mud = previewMovement(map, [rider], rider, { x: 1, y: 0 });
+  assert.equal(mud.totalCost, 4);
+  assert.equal(mud.thisTurnCost, 4);
+  assert.equal(previewMovement(map, [rider], rider, { x: 0, y: 1 }).status, "unreachable");
+  assert.equal(previewMovement(map, [rider], rider, { x: 2, y: 1 }).status, "unreachable");
+  const ladder = { ...map, elevation: [{ x: 1, y: 0, height: 1, access: "ladder" }] };
+  assert.equal(previewMovement(ladder, [rider], rider, { x: 1, y: 0 }).status, "unreachable");
+  ladder.elevation[0].access = "ramp";
+  assert.equal(previewMovement(ladder, [rider], rider, { x: 1, y: 0 }).status, "reachable");
+});
+
+test("horse controls send mount and dismount orders and show mount status", async () => {
+  const game = setup();
+  game.snapshot.map.horses = [{ x: 0, y: 0 }];
+  game.snapshot.state.horses = [{ id: 0, x: 0, y: 0, health: 2, max_health: 2, rider_id: null }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("mount-horse").disabled, false);
+  assert.match(game.get("selected-stats").textContent, /Available here/);
+  await game.get("mount-horse").fire("click");
+  assert.equal(game.actions.at(-1).type, "mount");
+  assert.equal(game.actions.at(-1).horse_id, 0);
+  game.snapshot.state.units[0].mount_id = 0;
+  game.snapshot.state.horses[0].rider_id = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("mount-horse").textContent, "Dismount");
+  await game.get("mount-horse").fire("click");
+  assert.equal(game.actions.at(-1).type, "dismount");
+});
+
 test("route preview chooses cheaper terrain and never splits a costly tile between turns", () => {
   const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
     gate: { x: 6, y: 7 }, terrain: [{ x: 1, y: 0, type: "swamp" },
