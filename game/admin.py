@@ -23,7 +23,10 @@ class SingleGameAdmin(admin.ModelAdmin):
         ("Battlefield", {"fields": ("map_definition",), "description": (
             "Edit cols, rows, keep bounds, gate, objective, startPositions and "
             "enemyStartPositions as JSON. Each side needs 1-64 units with x, y and "
-            "a type: vanguard, longbow or crossbow. All units must be able to reach "
+            "weapon: sword, longbow or crossbow. Optional tools are up to two labels; "
+            "optional armor is leather (weight 1, absorbs 1 damage per turn) or mail "
+            "(weight 3, absorbs 2). Armor starts equipped; weight does not yet affect movement. "
+            "All units must be able to reach "
             "the objective; defenders cannot start on it or on an attacker. "
             "Optional elevation: [{\"x\": 3, \"y\": 5, \"height\": 1, \"access\": \"ramp\"}]. "
             "Heights are 1-3; only a ladder or ramp on the higher tile permits a one-level step. "

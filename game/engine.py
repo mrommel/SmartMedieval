@@ -37,6 +37,11 @@ CATAPULT_RELOAD = 2
 WALL_HEALTH = 2
 INVENTORY_LIMIT = 2
 POTION_HEAL = 2
+ARMOR_STATS = {
+    # Armor absorbs this many HP of damage per turn; weight is carried even when removed.
+    "leather": {"protection": 1, "weight": 1},
+    "mail": {"protection": 2, "weight": 3},
+}
 RANGED_WEAPON_STATS = {
     # End-turn processing ticks cooldowns, including the transition after firing.
     "longbow": {"range": 5, "reload_turns": 2},
@@ -67,6 +72,8 @@ def normalize_unit(unit):
     if unit.get("type") == "king":
         result["is_king"] = True
     result.setdefault("tools", [])
+    result.setdefault("armor", None)
+    result.setdefault("armor_equipped", result["armor"] is not None)
     return result
 
 
@@ -232,9 +239,10 @@ def validate_map(map_data):
             legacy = set(position) == {"x", "y", "type"} and position["type"] in LEGACY_WEAPONS
             if legacy:
                 position = normalize_position(position)
-            if (not {"x", "y", "weapon"} <= set(position) <= {"x", "y", "weapon", "tools", "is_king"}
+            if (not {"x", "y", "weapon"} <= set(position) <= {"x", "y", "weapon", "tools", "is_king", "armor"}
                     or type(position["x"]) is not int or type(position["y"]) is not int
                      or position["weapon"] not in ("sword", "longbow", "crossbow", None)
+                     or position.get("armor") not in (None, *ARMOR_STATS)
                      or (position["weapon"] is None) != position.get("is_king", False)
                      or ("is_king" in position and position["is_king"] is not True)
                      or (position.get("is_king", False) and (name != "enemyStartPositions" or mission != "capture_king"))
@@ -503,13 +511,29 @@ def record_casualty(state, killer, casualty):
     return morale_changes
 
 
+def armor_remaining(unit, turn):
+    """Armor protection is spent by hits, not by equipping or blocked shots."""
+    if not unit.get("armor_equipped", unit.get("armor") is not None):
+        return 0
+    armor = unit.get("armor")
+    if armor not in ARMOR_STATS:
+        return 0
+    spent = unit.get("armor_absorbed", 0) if unit.get("armor_turn") == turn else 0
+    return max(0, ARMOR_STATS[armor]["protection"] - spent)
+
+
 def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_DAMAGE, weapon=None):
     """Resolve damage and retain a compact, chronological account of combat."""
     cover = (ranged_cover(attacker, target, map_data)
              if ranged and target.get("cover_turn") != state["turn"] else None)
     if cover:
         target["cover_turn"] = state["turn"]
-    damage = min(0 if cover else damage, target["health"])
+    absorbed = 0 if cover else min(damage, armor_remaining(target, state["turn"]))
+    if absorbed:
+        target["armor_absorbed"] = (target.get("armor_absorbed", 0)
+                                    if target.get("armor_turn") == state["turn"] else 0) + absorbed
+        target["armor_turn"] = state["turn"]
+    damage = min(0 if cover else damage - absorbed, target["health"])
     target["health"] -= damage
     killed = target["health"] <= 0
     morale_changes = record_casualty(state, attacker, target) if killed else []
@@ -521,7 +545,8 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
         **({"weapon": weapon} if weapon else {}),
-    } | ({"cover": cover} if cover else {})])[-HISTORY_LIMIT:]
+    } | ({"cover": cover} if cover else {}) | ({"armor_blocked": absorbed,
+        "target_armor": target["armor"]} if absorbed else {})])[-HISTORY_LIMIT:]
 
 
 def defender_destinations(unit, map_data=MAP, blocked=()):
@@ -630,6 +655,8 @@ def initial_state(map_data=MAP):
                 "z": tile_height(point["x"], point["y"], map_data),
                 "weapon": normalize_position(point)["weapon"],
                 "tools": list(point.get("tools", [])),
+                "armor": point.get("armor"),
+                "armor_equipped": point.get("armor") is not None,
                 **({"is_king": True} if normalize_position(point).get("is_king") else {}),
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
@@ -689,7 +716,7 @@ def king_is_guarded(state):
 def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
-            "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item"):
+            "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -715,6 +742,23 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         ], "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "equip_armor":
+        if (set(action) != {"type", "unit_id", "equipped"}
+                or type(action["unit_id"]) is not int or type(action["equipped"]) is not bool):
+            raise InvalidAction("Choose a soldier and whether to equip their armor.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (unit is None or unit["armor"] not in ARMOR_STATS or unit["fight_points"] < 1
+                or unit["armor_equipped"] == action["equipped"]):
+            raise InvalidAction("A living soldier needs armor and a fight point to change equipment.")
+        unit["armor_equipped"] = action["equipped"]
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": "equip_armor", "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"],
+            "armor": unit["armor"], "equipped": unit["armor_equipped"],
+        }])[-HISTORY_LIMIT:]
+        return next_state
     if action["type"] in ("pickup_item", "drop_item", "use_item"):
         operation = action["type"]
         required_fields = {"type", "unit_id", "item_id"} | ({"target_id"} if operation == "use_item" else set())

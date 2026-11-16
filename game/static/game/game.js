@@ -26,6 +26,7 @@ import { previewMovement } from "./path_preview.js";
   const dropButton = document.getElementById("drop-potion");
   const healButton = document.getElementById("heal-potion");
   const healTarget = document.getElementById("heal-target");
+  const armorButton = document.getElementById("equip-armor");
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
@@ -76,6 +77,9 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
     const medic = selectedMedic();
+    armorButton.hidden = !medic?.armor;
+    armorButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
+    armorButton.textContent = medic?.armor_equipped ? "Remove armor" : "Equip armor";
     const carried = medic && simulation.items.filter(item => item.carrier_id === medic.id);
     const hasPotions = Boolean(mapData?.items?.length);
     pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
@@ -382,6 +386,7 @@ import { previewMovement } from "./path_preview.js";
         statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
         nextTurn,
         detailRow("Weapon", unit.weapon || "none"),
+        detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
         detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(["longbow", "crossbow"].includes(unit.weapon)
@@ -414,6 +419,8 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} promoted to veteran (morale ${event.morale_change}).`;
       } else if (event.type === "capture") {
         item.textContent = `Turn ${event.turn} · ${actor} captured the living king.`;
+      } else if (event.type === "equip_armor") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.equipped ? "equipped" : "removed"} ${event.armor} armor.`;
       } else if (event.type === "aim_catapult") {
         item.textContent = `Turn ${event.turn} · ${actor} aimed the catapult at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "catapult_wall" || event.type === "catapult_miss") {
@@ -426,7 +433,7 @@ import { previewMovement } from "./path_preview.js";
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
@@ -568,7 +575,7 @@ import { previewMovement } from "./path_preview.js";
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
       if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.is_king) ? "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : "Order received."));
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -689,6 +696,10 @@ import { previewMovement } from "./path_preview.js";
     const medic = selectedMedic();
     const item = simulation.items.find(item => medic && item.carrier_id === medic.id);
     if (item && !healButton.disabled) sendAction({ type: "use_item", unit_id: medic.id, item_id: item.id, target_id: Number(healTarget.value) });
+  });
+  armorButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (soldier?.armor && !armorButton.disabled) sendAction({ type: "equip_armor", unit_id: soldier.id, equipped: !soldier.armor_equipped });
   });
   pauseButton.addEventListener("click", () => {
     if (simulation.captured || simulation.defeated) return;

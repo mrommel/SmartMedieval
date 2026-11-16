@@ -565,6 +565,42 @@ test("selected soldier displays remaining stats and carried equipment after acti
   assert.equal(row("Fight").children[0].children[1].textContent, "0/1 FP left");
 });
 
+test("armor protection, weight and equip action update with the snapshot", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.armor = "mail";
+  soldier.armor_equipped = true;
+  soldier.armor_remaining = 2;
+  await game.get("continue-game").fire("click");
+  const armor = game.get("equip-armor");
+  const panel = game.get("selected-stats");
+  const armorRow = () => panel.children.find(child => child.children?.[0]?.textContent === "Armor");
+  assert.equal(armor.hidden, false);
+  assert.equal(armor.disabled, false);
+  assert.equal(armor.textContent, "Remove armor");
+  assert.equal(armorRow().children[1].textContent, "mail · worn · 2/2 protection left this turn · weight 3");
+  await armor.fire("click");
+  assert.equal(game.actions.at(-1).type, "equip_armor");
+  assert.equal(game.actions.at(-1).equipped, false);
+  await new Promise(setImmediate);
+  soldier.armor_equipped = false;
+  soldier.armor_remaining = 0;
+  soldier.fight_points = 0;
+  game.snapshot.state.history = [
+    { turn: 1, type: "equip_armor", actor_id: 0, actor_side: "attackers", actor_weapon: "sword",
+      armor: "mail", equipped: false },
+    { turn: 1, type: "attack", actor_id: 1, actor_side: "defenders", actor_weapon: "sword",
+      target_id: 0, target_side: "attackers", target_weapon: "sword", target_armor: "mail",
+      armor_blocked: 2, damage: 0, killed: false, morale_changes: [] }
+  ];
+  await game.get("continue-game").fire("click");
+  assert.equal(armor.textContent, "Equip armor");
+  assert.equal(armor.disabled, true);
+  assert.match(armorRow().textContent, /carried · 0\/2 protection left this turn · weight 3/);
+  assert.match(game.get("combat-history-list").children[0].textContent, /removed mail armor/);
+  assert.match(game.get("combat-history-list").children[1].textContent, /mail armor absorbed 2/);
+});
+
 test("selected panel separates turn capacity from future morale and rank bonuses", async () => {
   const game = setup();
   const soldier = game.snapshot.state.units[0];

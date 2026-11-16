@@ -4,7 +4,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-from .engine import STARTING_MORALE, InvalidAction, apply_action, battle_map, normalize_unit, resolve_defender_goals
+from .engine import STARTING_MORALE, InvalidAction, apply_action, armor_remaining, battle_map, normalize_unit, resolve_defender_goals
 
 
 AI_URL = "http://127.0.0.1:11435/v1/chat/completions"
@@ -34,9 +34,10 @@ def enemy_turn(state, map_data, combat_events=None):
                    "breaches": state.get("breaches", [])},
         "units": [
             {key: unit.get(key) for key in (
-                "id", "side", "weapon", "tools", "is_king", "x", "y", "health", "fight_points", "reload_turns",
+                "id", "side", "weapon", "tools", "armor", "armor_equipped", "is_king", "x", "y", "health", "fight_points", "reload_turns",
                 "move_points", "z",
-            )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit")}
+            )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit"),
+                  "armor_remaining": armor_remaining(unit, state["turn"])}
             for unit in (normalize_unit(value) for value in state["units"])
         ],
     }
@@ -69,6 +70,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "mission the king stays on the throne, never moves or attacks, and cannot be "
                 "ordered; keep guards adjacent to him to prevent capture, and attack nearby "
                 "soldiers with swords before they can capture him. "
+                "Equipped leather absorbs one damage per turn and mail absorbs two; cover blocks the first "
+                "ranged hit before armor. Armor also protects against melee and catapult hits. "
                 "Issue at most 8 orders and at most one per defender. "
                 "Omit units that should hold position. Do not issue attacker orders."
             )},

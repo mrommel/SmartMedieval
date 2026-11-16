@@ -63,7 +63,7 @@
 - [x] Show the selected soldier's current HP, morale, remaining movement/fight points, weapon, tools, potions, and reload/catapult status in a dedicated sidebar readout; refresh on selection and after each action.
 - [x] Refine the selected-soldier UI with labeled stat rows and graphical remaining/max indicators, mobile styling and text equivalents for screen readers. Keep current-turn capacities separate from projected next-turn allowances after morale changes or promotion; test empty/group selections, zero points, reload, death, and resume.
 - [ ] Manually review the selected-soldier panel on desktop/mobile screens and with a screen reader in a real browser.
-- [ ] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage.
+- [x] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage. Leather absorbs 1 damage per turn (weight 1), mail absorbs 2 (weight 3); equipping or removing costs one fight point. Catapult hits also use armor protection; weight-based movement remains separate.
 - [ ] Make carried weight (including armor, weapons, and potions) affect movement-point costs or allowances, with clear limits and feedback before issuing orders.
 - [ ] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.
 - [ ] Give ground types such as roads, grass, mud, and swamp different movement costs and traversal rules for foot units and horses; have pathfinding choose routes by move-point cost, not just tile count.

@@ -35,6 +35,40 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_armor_equipment_persists_and_ai_receives_protection(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["map"]["startPositions"][0]["armor"], "leather")
+        self.assertEqual(started["state"]["units"][0]["armor_remaining"], 1)
+        self.assertEqual(started["state"]["units"][6]["armor_remaining"], 2)
+        self.assertEqual(self.action(0, {"type": "equip_armor", "unit_id": 6,
+                                         "equipped": False}).status_code, 400)
+        removed = self.action(0, {"type": "equip_armor", "unit_id": 0, "equipped": False})
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(removed.json()["state"]["units"][0]["armor_remaining"], 0)
+        self.assertEqual(self.action(0, {"type": "equip_armor", "unit_id": 0,
+                                         "equipped": True}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "equip_armor", "unit_id": 0,
+                                         "equipped": True}).status_code, 400)
+        resumed = self.client.get(reverse("current-game")).json()
+        self.assertEqual(resumed["state"], removed.json()["state"])
+        self.assertFalse(GameInstance.objects.get(pk=started["id"]).state["units"][0]["armor_equipped"])
+        next_turn = self.action(1, {"type": "end_turn"})
+        self.assertEqual(next_turn.status_code, 200)
+        context = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual(context["units"][0]["armor"], "leather")
+        self.assertEqual(context["units"][0]["armor_remaining"], 0)
+        self.assertEqual(context["units"][6]["armor_remaining"], 2)
+        equipped = self.action(2, {"type": "equip_armor", "unit_id": 0, "equipped": True})
+        self.assertEqual(equipped.status_code, 200)
+        self.assertEqual(equipped.json()["state"]["units"][0]["armor_remaining"], 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], equipped.json()["state"])
+
     def test_seeded_hamlet_potions_heal_and_persist_without_changing_snapshots(self):
         self.game = SingleGame.objects.get(slug="greywatch-hamlet")
         started = self.start().json()

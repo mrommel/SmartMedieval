@@ -2,7 +2,7 @@ from django.test import TestCase
 
 from ..engine import (
     HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
-    has_line_of_sight, initial_state, is_walkable, normalize_map, resolve_defender_goals, validate_map,
+    has_line_of_sight, initial_state, is_walkable, normalize_map, record_attack, resolve_defender_goals, validate_map,
 )
 
 
@@ -47,6 +47,104 @@ class UnitEquipmentTests(TestCase):
         self.assertTrue(initial_state(throne)["units"][6]["is_king"])
         self.assertEqual(normalize_map(throne)["enemyStartPositions"][0],
                          {"x": 14, "y": 7, "weapon": None, "is_king": True})
+
+
+class ArmorTests(TestCase):
+    def test_map_validates_armor_and_old_units_remain_unarmored(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        self.assertEqual((state["units"][0]["armor"], state["units"][6]["armor"]), ("leather", "mail"))
+        self.assertTrue(state["units"][0]["armor_equipped"])
+        self.assertIsNone(state["units"][1]["armor"])
+        for bad in ("plate", "", 1, False, [], {}):
+            battlefield["startPositions"][0]["armor"] = bad
+            with self.subTest(armor=bad), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        del state["units"][0]["armor"]
+        del state["units"][0]["armor_equipped"]
+        self.assertIsNone(apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)["units"][0]["armor"])
+
+    def test_melee_absorbs_only_two_mail_damage_per_turn_and_refreshes(self):
+        battlefield = default_map()
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        state["units"][0].update(x=12, y=4)
+        state["units"][1].update(x=12, y=6, rank="veteran", fight_points=2)
+        for attacker_id, remaining in ((0, 3), (1, 3), (1, 2)):
+            state = apply_action(state, {"type": "attack", "unit_id": attacker_id, "target_id": 6}, battlefield)
+            self.assertEqual(state["units"][6]["health"], remaining)
+        self.assertEqual([event.get("armor_blocked", 0) for event in state["history"]], [1, 1, 0])
+        self.assertEqual(state["history"][-1]["damage"], 1)
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(state["turn"], 2)
+        state = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertEqual(state["units"][6]["health"], 2)
+        self.assertEqual(state["history"][-1]["armor_blocked"], 1)
+
+    def test_cover_then_armor_absorbs_ranged_hits_without_consuming_cover(self):
+        battlefield = default_map()
+        battlefield["objects"] = [{"x": 5, "y": 4, "type": "tree"}]
+        battlefield["enemyStartPositions"][0]["armor"] = "leather"
+        state = initial_state(battlefield)
+        state["units"][2].update(x=3, y=5)
+        state["units"][3].update(x=2, y=5)
+        state["units"][6].update(x=6, y=5)
+        state = apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
+        self.assertEqual(state["history"][-1]["cover"], "tree")
+        self.assertNotIn("armor_blocked", state["history"][-1])
+        self.assertNotIn("armor_absorbed", state["units"][6])
+        state = apply_action(state, {"type": "ranged_attack", "unit_id": 3, "target_id": 6}, battlefield)
+        self.assertEqual(state["history"][-1]["armor_blocked"], 1)
+        self.assertEqual(state["units"][6]["health"], 3)
+        state["units"][4].update(x=4, y=5)
+        state = apply_action(state, {"type": "ranged_attack", "unit_id": 4, "target_id": 6}, battlefield)
+        self.assertEqual(state["units"][6]["health"], 2)
+
+    def test_catapult_damage_and_defender_attacks_use_the_same_armor(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        state = apply_action(state, {"type": "aim_catapult", "unit_id": 1,
+                                     "catapult_id": 0, "x": 12, "y": 5}, battlefield)
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        state = apply_action(state, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0}, battlefield)
+        self.assertEqual(state["units"][6]["health"], 3)
+        self.assertEqual(state["history"][-1]["armor_blocked"], 2)
+        self.assertEqual(state["history"][-1]["weapon"], "catapult")
+        state["units"] = [state["units"][0], state["units"][6]]
+        state["units"][0].update(x=12, y=6)
+        state = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual(state["units"][0]["health"], 3)
+        self.assertEqual(state["history"][-1]["armor_blocked"], 1)
+
+    def test_equipping_costs_a_fight_point_and_cannot_restore_spent_protection(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        state["units"][0].update(rank="veteran", fight_points=2)
+        record_attack(state, state["units"][6], state["units"][0], False, battlefield)
+        original_health = state["units"][0]["health"]
+        for equipped in (False, True):
+            state = apply_action(state, {"type": "equip_armor", "unit_id": 0, "equipped": equipped}, battlefield)
+            self.assertEqual(state["history"][-1]["type"], "equip_armor")
+            self.assertEqual(state["history"][-1]["equipped"], equipped)
+        self.assertEqual(state["units"][0]["fight_points"], 0)
+        self.assertEqual(state["units"][0]["armor_absorbed"], 1)
+        record_attack(state, state["units"][6], state["units"][0], True, battlefield)
+        self.assertEqual(state["units"][0]["health"], original_health)
+        record_attack(state, state["units"][6], state["units"][0], True, battlefield)
+        self.assertEqual(state["units"][0]["health"], original_health - 1)
+        for action in ({"type": "equip_armor", "unit_id": 0, "equipped": False},
+                       {"type": "equip_armor", "unit_id": 6, "equipped": False},
+                       {"type": "equip_armor", "unit_id": 1, "equipped": True},
+                       {"type": "equip_armor", "unit_id": 0, "equipped": 1},
+                       {"type": "equip_armor", "unit_id": 0, "equipped": True, "armor": "mail"}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
 
 
 class FieldMedicineTests(TestCase):

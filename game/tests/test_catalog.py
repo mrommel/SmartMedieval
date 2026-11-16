@@ -51,7 +51,36 @@ class GameCatalogApiTests(TestCase):
                          [{"x": 7, "y": 4}, {"x": 7, "y": 10}])
         validate_map(game.map_definition)
         self.assertEqual(len(initial_state(game.map_definition)["units"]), 7)
+        self.assertEqual(game.map_definition["startPositions"][0]["armor"], "leather")
+        self.assertEqual(game.map_definition["enemyStartPositions"][0]["armor"], "mail")
         self.assertIn(game.name, [entry["name"] for entry in self.client.get(reverse("single-games-api")).json()])
+
+    def test_armor_upgrade_preserves_custom_maps_and_active_matches(self):
+        upgrade = import_module("game.migrations.0011_seed_hamlet_armor")
+        game = SingleGame.objects.get(slug="greywatch-hamlet")
+        armored = deepcopy(game.map_definition)
+        previous = deepcopy(upgrade.PREVIOUS_HAMLET)
+        game.map_definition = previous
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(single_game=game, source_game=game,
+                                            map_definition=deepcopy(previous), state=initial_state(previous))
+        schema_editor = type("Editor", (), {"connection": type("Connection", (), {"alias": "default"})()})()
+        upgrade.equip_seeded_hamlet(apps, schema_editor)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition, armored)
+        self.assertEqual(match.map_definition, previous)
+        self.assertIsNone(match.state["units"][0]["armor"])
+        upgrade.equip_seeded_hamlet(apps, schema_editor)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, armored)
+        custom = deepcopy(previous)
+        custom["startPositions"][0]["armor"] = "mail"
+        game.map_definition = custom
+        game.save(update_fields=["map_definition"])
+        upgrade.equip_seeded_hamlet(apps, schema_editor)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, custom)
 
     def test_house_door_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0008_hamlet_house_doors")
@@ -87,6 +116,8 @@ class GameCatalogApiTests(TestCase):
         upgrade = import_module("game.migrations.0009_hamlet_healing_potions")
         game = SingleGame.objects.get(slug="greywatch-hamlet")
         upgraded = deepcopy(game.map_definition)
+        del upgraded["startPositions"][0]["armor"]
+        del upgraded["enemyStartPositions"][0]["armor"]
         previous = deepcopy(upgrade.PREVIOUS_HAMLET)
         game.map_definition = previous
         game.save(update_fields=["map_definition"])
