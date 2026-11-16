@@ -57,6 +57,7 @@ RANGED_WEAPON_STATS = {
     "longbow": {"range": 5, "reload_turns": 2},
     "crossbow": {"range": 6, "reload_turns": 3},
 }
+VISION_RANGE = 6
 LEGACY_WEAPONS = {"vanguard": "sword", "longbow": "longbow", "crossbow": "crossbow", "king": None}
 
 
@@ -113,8 +114,10 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
+    if "fog_of_war" in map_data and type(map_data["fog_of_war"]) is not bool:
+        raise InvalidMap("fog_of_war must be true or false.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
         raise InvalidMap("Mission must be courtyard or capture_king.")
@@ -468,6 +471,35 @@ def has_line_of_sight(start, end, map_data=MAP):
     return True
 
 
+def visible_tiles(state, map_data=MAP, side="attackers"):
+    """Share daylight sight within six tiles, through clear rays or an adjacent doorway."""
+    battlefield = battle_map(map_data, state)
+    visible = set()
+    for unit in state["units"]:
+        if unit.get("side", "attackers") != side:
+            continue
+        start = (unit["x"], unit["y"])
+        visible.add(start)
+        for y in range(max(0, unit["y"] - VISION_RANGE), min(battlefield["rows"], unit["y"] + VISION_RANGE + 1)):
+            for x in range(max(0, unit["x"] - VISION_RANGE), min(battlefield["cols"], unit["x"] + VISION_RANGE + 1)):
+                tile = (x, y)
+                if tile in visible:
+                    continue
+                if (abs(x - unit["x"]) + abs(y - unit["y"]) == 1
+                        and can_step(start, tile, battlefield)) or has_line_of_sight(start, tile, battlefield):
+                    visible.add(tile)
+    return visible
+
+
+def remember_visibility(state, map_data=MAP):
+    """Remember discovered ground in the server-owned snapshot, not enemy positions."""
+    if map_data.get("fog_of_war", False):
+        explored = {(tile["x"], tile["y"]) for tile in state.get("explored", ())}
+        explored.update(visible_tiles(state, map_data))
+        state["explored"] = [{"x": x, "y": y} for x, y in sorted(explored)]
+    return state
+
+
 def can_ranged_attack(attacker, target, map_data=MAP):
     stats = RANGED_WEAPON_STATS.get(normalize_unit(attacker)["weapon"])
     if not stats or attacker.get("reload_turns", 0) > 0:
@@ -649,6 +681,9 @@ def armor_remaining(unit, turn):
 
 def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_DAMAGE, weapon=None):
     """Resolve damage and retain a compact, chronological account of combat."""
+    fog = map_data.get("fog_of_war", False)
+    enemy = attacker if attacker.get("side", "attackers") == "defenders" else target
+    witnessed = not fog or (enemy["x"], enemy["y"]) in visible_tiles(state, map_data)
     cover = (ranged_cover(attacker, target, map_data)
              if ranged and target.get("cover_turn") != state["turn"] else None)
     if cover:
@@ -678,6 +713,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"witnessed": witnessed} if fog else {}),
         **({"horse_hit": True, "horse_killed": horse["health"] <= 0} if horse else {}),
         **({"weapon": weapon} if weapon else {}),
     } | ({"cover": cover} if cover else {}) | ({"armor_blocked": absorbed,
@@ -793,7 +829,7 @@ def initial_state(map_data=MAP):
     if enemy_positions is None:
         enemy_positions = [legacy_enemy_position(map_data)]
     attackers = map_data["startPositions"]
-    return {
+    state = {
         "turn": 1,
         "units": [
             {
@@ -842,6 +878,7 @@ def initial_state(map_data=MAP):
             for index, item in enumerate(map_data.get("items", []))
         ],
     }
+    return remember_visibility(state, map_data)
 
 
 def capture_status(state, map_data=MAP):
@@ -926,7 +963,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
             "actor_side": "attackers", "actor_weapon": unit["weapon"], "horse_id": horse["id"],
         }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] == "equip_armor":
         if (set(action) != {"type", "unit_id", "equipped"}
                 or type(action["unit_id"]) is not int or type(action["equipped"]) is not bool):
@@ -943,7 +980,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "actor_side": "attackers", "actor_weapon": unit["weapon"],
             "armor": unit["armor"], "equipped": unit["armor_equipped"],
         }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] in ("pickup_item", "drop_item", "use_item"):
         operation = action["type"]
         required_fields = {"type", "unit_id", "item_id"} | ({"target_id"} if operation == "use_item" else set())
@@ -987,7 +1024,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "item_id": item["id"],
             **({"target_id": target["id"], "healed": healed} if operation == "use_item" else {}),
         }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] in ("aim_catapult", "fire_catapult"):
         aiming = action["type"] == "aim_catapult"
         if (set(action) != ({"type", "unit_id", "catapult_id", "x", "y"} if aiming else
@@ -1053,7 +1090,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                     "turn": state["turn"], "type": "catapult_miss", "actor_id": unit["id"],
                     "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": x, "y": y,
                 }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] == "capture":
         if (map_data.get("mission") != "capture_king" or set(action) != {"type", "unit_id"}
                 or type(action["unit_id"]) is not int):
@@ -1077,7 +1114,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "target_id": king["id"], "target_side": "defenders", "target_weapon": king["weapon"],
             "target_is_king": True,
         }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] == "promote":
         if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
             raise InvalidAction("Choose one soldier to promote.")
@@ -1093,7 +1130,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "actor_side": "attackers", "actor_weapon": unit["weapon"],
             "morale_change": STARTING_MORALE - MAX_MORALE,
         }])[-HISTORY_LIMIT:]
-        return next_state
+        return remember_visibility(next_state, map_data)
     if action["type"] in ("attack", "ranged_attack"):
         ranged = action["type"] == "ranged_attack"
         if set(action) != {"type", "unit_id", "target_id"}:
@@ -1105,8 +1142,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         attacker, target = units.get(unit_id), units.get(target_id)
         if attacker is None or attacker.get("side", "attackers") != "attackers":
             raise InvalidAction("Only your soldiers can attack.")
-        if target is None or target.get("side", "attackers") != "defenders":
-            raise InvalidAction("Choose a living defender as the target.")
+        if (target is None or target.get("side", "attackers") != "defenders"
+                or map_data.get("fog_of_war", False) and (target["x"], target["y"]) not in visible_tiles(state, map_data)):
+            raise InvalidAction("Choose a visible defender as the target." if map_data.get("fog_of_war", False)
+                                else "Choose a living defender as the target.")
         if ranged and attacker["weapon"] not in RANGED_WEAPON_STATS:
             raise InvalidAction("Only soldiers carrying bows or crossbows can make ranged attacks.")
         if not ranged and attacker["weapon"] in RANGED_WEAPON_STATS:
@@ -1139,7 +1178,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                       damage=2 if not ranged and attacker["mount_id"] is not None else ATTACK_DAMAGE)
         if map_data.get("mission") == "capture_king" and target.get("is_king") and target["health"] <= 0:
             next_state["defeated"] = True
-        return next_state
+        return remember_visibility(next_state, map_data)
 
     if action["type"] == "end_turn":
         if set(action) != {"type"}:
@@ -1210,6 +1249,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                         "type": "projectile", "weapon": defender["weapon"],
                         "from": {"x": defender["x"], "y": defender["y"]},
                         "to": {"x": target["x"], "y": target["y"]},
+                        **({"witnessed": (defender["x"], defender["y"]) in visible_tiles(next_state, map_data)}
+                           if map_data.get("fog_of_war", False) else {}),
                     })
             record_attack(next_state, defender, target, ranged, map_data)
         next_state["defeated"] = not any(
@@ -1234,7 +1275,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
-        return next_state
+        return remember_visibility(next_state, map_data)
 
     if set(action) != {"type", "units", "x", "y"}:
         raise InvalidAction("Invalid movement action.")
@@ -1286,4 +1327,4 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             moved = True
     if not moved:
         raise InvalidAction("That route is blocked, too costly for this turn, or the units are already there.")
-    return next_state
+    return remember_visibility(next_state, map_data)

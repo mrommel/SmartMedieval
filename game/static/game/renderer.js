@@ -620,6 +620,17 @@ export function createBattlefieldRenderer(canvas) {
     }
   }
 
+  function drawFog(visible, explored) {
+    if (!visible) return;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const key = `${x},${y}`;
+        if (visible.has(key)) continue;
+        polygon(diamond(x, y), explored?.has(key) ? "rgba(19,31,37,.62)" : "rgba(12,21,30,.89)");
+      }
+    }
+  }
+
   function draw(time, scene) {
     ({ simulation, cursor, camera, hasAttackOption } = scene);
     if (!width || !height) return;
@@ -685,6 +696,7 @@ export function createBattlefieldRenderer(canvas) {
     (simulation.catapults || []).forEach(drawAimMarker);
     drawMovementPreview(scene.movementPreview);
     drawProjectiles(time);
+    drawFog(simulation.visible, simulation.explored);
     if (cursor.visible) {
       polygon(diamond(cursor.x, cursor.y), "rgba(241,211,137,.16)", "#ffe2a1", 2);
     }

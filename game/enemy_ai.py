@@ -4,7 +4,8 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-from .engine import STARTING_MORALE, InvalidAction, apply_action, armor_remaining, battle_map, normalize_unit, resolve_defender_goals
+from .engine import (STARTING_MORALE, InvalidAction, apply_action, armor_remaining, battle_map,
+                     normalize_unit, resolve_defender_goals, visible_tiles)
 
 
 AI_URL = "http://127.0.0.1:11435/v1/chat/completions"
@@ -25,6 +26,7 @@ def enemy_turn(state, map_data, combat_events=None):
     if not settings.ENEMY_AI_API_KEY:
         raise EnemyAIError("Enemy AI is not configured. Set SPLASH_API_KEY in .env.", 503)
 
+    sight = visible_tiles(state, map_data, "defenders") if map_data.get("fog_of_war", False) else None
     battlefield = {
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
@@ -40,8 +42,10 @@ def enemy_turn(state, map_data, combat_events=None):
             )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit"),
                   "armor_remaining": armor_remaining(unit, state["turn"])}
             for unit in (normalize_unit(value) for value in state["units"])
+            if sight is None or unit.get("side", "attackers") == "defenders" or (unit["x"], unit["y"]) in sight
         ],
-        "horses": state.get("horses", []),
+        "horses": [horse for horse in state.get("horses", [])
+                   if sight is None or horse["rider_id"] is None or (horse["x"], horse["y"]) in sight],
     }
     request_data = {
         "model": AI_MODEL,
@@ -74,6 +78,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "mission the king stays on the throne, never moves or attacks, and cannot be "
                 "ordered; keep guards adjacent to him to prevent capture, and attack nearby "
                 "soldiers with swords before they can capture him. "
+                "On fog_of_war maps the units list contains only attackers currently in sight; "
+                "do not infer the locations of hidden attackers from their absence. "
                 "Equipped leather absorbs one damage per turn and mail absorbs two; cover blocks the first "
                 "ranged hit before armor. Armor also protects against melee and catapult hits. "
                 "A mounted attacker has six base movement points, cannot enter houses or swamps, "

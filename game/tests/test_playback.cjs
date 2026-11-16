@@ -39,10 +39,14 @@ function setup(savedSpeed = null, catalogFetch = null) {
     return nodes.get(id);
   };
   let draws = 0;
+  const fogFills = [];
   const ctx = new Proxy({}, { get(_, name) {
     if (name === "createLinearGradient") return () => ({ addColorStop() {} });
     if (name === "clearRect") return () => { draws++; };
     return () => {};
+  }, set(_, name, value) {
+    if (name === "fillStyle" && typeof value === "string" && value.startsWith("rgba(12,21,30,")) fogFills.push(value);
+    return true;
   } });
   get("battlefield-canvas").getContext = () => ctx;
   const storage = new Map(savedSpeed === null ? [] : [["greywatch.animationSpeed", savedSpeed]]);
@@ -105,11 +109,39 @@ function setup(savedSpeed = null, catalogFetch = null) {
     "\nthis.previewMovement = previewMovement;", context);
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
-    get, store, snapshot, actions, draws: () => draws, postCount: () => postCount,
+    get, store, snapshot, actions, fogFills, draws: () => draws, postCount: () => postCount,
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer,
     createInput: context.createBattlefieldInput
   };
 }
+
+test("fog shrouds unseen tiles and does not report lost contact as a casualty", async () => {
+  const game = setup();
+  game.snapshot.map.fog_of_war = true;
+  game.snapshot.map.has_items = true;
+  game.snapshot.map.objects = [{ x: 1, y: 0, type: "tree" }];
+  game.snapshot.state.visible = [{ x: 0, y: 0 }];
+  game.snapshot.state.explored = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("enemy-count").textContent, "0 IN SIGHT");
+  assert.equal(game.get("pickup-potion").hidden, false);
+  assert.ok(game.fogFills.length > 0);
+  const canvas = game.get("battlefield-canvas");
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /out of sight/);
+  assert.doesNotMatch(game.get("cursor-status").textContent, /tree/);
+  game.snapshot.state.visible.push({ x: 0, y: 1 });
+  game.snapshot.state.units.push({ id: 1, side: "defenders", weapon: "sword", x: 0, y: 1,
+    health: 3, max_health: 3, fight_points: 1 });
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("enemy-count").textContent, "1 IN SIGHT");
+  game.snapshot.state.visible.pop();
+  game.snapshot.state.units.pop();
+  await game.get("end-turn").fire("click");
+  assert.equal(game.get("enemy-count").textContent, "0 IN SIGHT");
+  assert.doesNotMatch(game.get("toast").textContent, /fallen|damage to defenders/);
+});
 
 test("throne mission enables capture only for an unguarded adjacent king", async () => {
   const game = setup();

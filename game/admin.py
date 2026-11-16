@@ -50,6 +50,8 @@ class SingleGameAdmin(admin.ModelAdmin):
             "placed away from the keep; all units must still reach the objective. "
             "Optional catapults: [{\"x\": 3, \"y\": 7}]. Up to 16 distinct open ground "
             "tiles away from the objective; a soldier on the tile can aim and fire. "
+            "Optional fog_of_war: true shares daylight sight within six tiles and remembers "
+            "explored ground; hidden units and supplies are not sent to the browser. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

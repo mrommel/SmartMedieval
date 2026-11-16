@@ -11,6 +11,24 @@ from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameCatalogApiTests(TestCase):
+    def test_seeded_reconnaissance_is_playable_and_preserves_existing_matches(self):
+        upgrade = import_module("game.migrations.0014_seed_reconnaissance")
+        game = SingleGame.objects.get(slug="greywatch-reconnaissance")
+        self.assertTrue(game.map_definition["fog_of_war"])
+        validate_map(game.map_definition)
+        self.assertEqual(list(Scenario.objects.get(slug="scout-greywatch").games.all()), [game])
+        match = GameInstance.objects.create(single_game=game, source_game=game,
+                                            map_definition=deepcopy(game.map_definition),
+                                            state=initial_state(game.map_definition))
+        game.map_definition["startPositions"][0]["armor"] = "leather"
+        game.save(update_fields=["map_definition"])
+        schema_editor = type("Editor", (), {"connection": type("Connection", (), {"alias": "default"})()})()
+        upgrade.seed_reconnaissance(apps, schema_editor)
+        match.refresh_from_db()
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition["startPositions"][0]["armor"], "leather")
+        self.assertNotIn("armor", match.map_definition["startPositions"][0])
+
     def test_equipment_upgrade_keeps_active_match_and_is_repeatable(self):
         upgrade = import_module("game.migrations.0010_unit_equipment")
         game = SingleGame.objects.get(slug="greywatch-assault")

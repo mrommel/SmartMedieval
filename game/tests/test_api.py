@@ -35,6 +35,90 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def fog_game(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]
+        battlefield["enemyStartPositions"] = [{"x": 9, "y": 6, "weapon": "sword"}]
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"},
+                                {"x": 9, "y": 6, "type": "healing_potion"}]
+        battlefield["horses"] = [{"x": 9, "y": 6}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+
+    def test_fog_hides_enemy_roster_supplies_history_and_ai_positions_until_spotted(self):
+        self.fog_game()
+        started = self.start().json()
+        self.assertNotIn("enemyStartPositions", started["map"])
+        self.assertNotIn("items", started["map"])
+        self.assertNotIn("horses", started["map"])
+        self.assertTrue(started["map"]["has_items"])
+        self.assertEqual([unit["id"] for unit in started["state"]["units"]], [0])
+        self.assertEqual([item["id"] for item in started["state"]["items"]], [0])
+        self.assertEqual(started["state"]["horses"], [])
+        self.assertNotIn({"x": 9, "y": 6}, started["state"]["visible"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["units"][1]["x"], 9)
+        self.assertEqual(self.action(0, {"type": "attack", "unit_id": 0, "target_id": 1}).json(),
+                         self.action(0, {"type": "attack", "unit_id": 0, "target_id": 99}).json())
+        self.assertEqual(self.client.get(reverse("current-game")).json(), started)
+        ended = self.action(0, {"type": "end_turn"}).json()
+        ai_input = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual([unit["id"] for unit in ai_input["units"]], [1])
+        self.assertEqual(ended["state"]["units"][0]["id"], 0)
+        spotted = self.action(1, {"type": "move", "units": [0], "x": 3, "y": 6}).json()
+        self.assertEqual([unit["id"] for unit in spotted["state"]["units"]], [0, 1])
+        self.assertEqual([item["id"] for item in spotted["state"]["items"]], [0, 1])
+        self.assertEqual(len(spotted["state"]["horses"]), 1)
+        self.assertIn({"x": 9, "y": 6}, spotted["state"]["explored"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], spotted["state"])
+        self.assertEqual(self.action(2, {"type": "end_turn"}).status_code, 200)
+        ai_input = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual([unit["id"] for unit in ai_input["units"]], [0, 1])
+        lost = self.action(3, {"type": "move", "units": [0], "x": 2, "y": 6}).json()
+        self.assertEqual([unit["id"] for unit in lost["state"]["units"]], [0])
+        self.assertIn({"x": 9, "y": 6}, lost["state"]["explored"])
+        self.assertNotIn({"x": 9, "y": 6}, lost["state"]["visible"])
+
+    def test_hidden_catapult_hit_keeps_target_and_unwitnessed_history_private(self):
+        self.fog_game()
+        battlefield = self.game.map_definition
+        battlefield["catapults"] = [{"x": 2, "y": 6}]
+        self.game.save(update_fields=["map_definition"])
+        started = self.start().json()
+        self.assertEqual(self.action(0, {"type": "aim_catapult", "unit_id": 0,
+                                         "catapult_id": 0, "x": 9, "y": 6}).status_code, 200)
+        self.action(1, {"type": "end_turn"})
+        fired = self.action(2, {"type": "fire_catapult", "unit_id": 0, "catapult_id": 0}).json()
+        self.assertEqual([event["type"] for event in fired["state"]["history"]], ["aim_catapult"])
+        self.assertEqual(fired["combat_events"][0]["weapon"], "catapult")
+        self.assertNotIn("witnessed", json.dumps(fired))
+        self.assertNotIn("target_id", json.dumps(fired["state"]["history"]))
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["units"][1]["health"], 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], fired["state"])
+
+    def test_hidden_king_does_not_reveal_guard_status_and_defeat_reports_cause(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["mission"] = "capture_king"
+        battlefield["enemyStartPositions"] = [
+            {"x": 14, "y": 7, "weapon": None, "is_king": True},
+            {"x": 13, "y": 7, "weapon": "sword"},
+        ]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["state"]["capture_status"], "CAPTURE THE KING")
+        self.assertFalse(started["state"]["king_fallen"])
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"].pop(-2)
+        instance.state["defeated"] = True
+        instance.save(update_fields=["state"])
+        defeated = self.client.get(reverse("current-game")).json()
+        self.assertEqual(defeated["state"]["capture_status"], "DEFEATED")
+        self.assertTrue(defeated["state"]["king_fallen"])
+
     def test_seeded_horse_mounts_moves_and_persists_across_resume(self):
         self.game = SingleGame.objects.get(slug="greywatch-hamlet")
         started = self.start().json()

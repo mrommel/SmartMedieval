@@ -3,8 +3,57 @@ from django.test import TestCase
 from ..engine import (
     HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
     carried_weight, has_line_of_sight, initial_state, is_walkable, move_allowance, normalize_map,
-    record_attack, resolve_defender_goals, validate_map,
+    record_attack, resolve_defender_goals, validate_map, visible_tiles,
 )
+
+
+class FogOfWarTests(TestCase):
+    def fog_map(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "crossbow"}]
+        battlefield["enemyStartPositions"] = [{"x": 9, "y": 6, "weapon": "sword"}]
+        return battlefield
+
+    def test_map_requires_boolean_and_old_games_do_not_gain_fog(self):
+        battlefield = self.fog_map()
+        validate_map(battlefield)
+        for value in (0, 1, None, "true", []):
+            battlefield["fog_of_war"] = value
+            with self.subTest(value=value), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        self.assertNotIn("explored", initial_state())
+
+    def test_sight_and_discovery_follow_moves_and_defenders_disappear_without_erasing_terrain(self):
+        battlefield = self.fog_map()
+        state = initial_state(battlefield)
+        self.assertIn((8, 6), visible_tiles(state, battlefield))
+        self.assertNotIn((9, 6), visible_tiles(state, battlefield))
+        with self.assertRaisesMessage(InvalidAction, "visible defender"):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, battlefield)
+        state = apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)
+        self.assertIn((9, 6), visible_tiles(state, battlefield))
+        self.assertIn({"x": 9, "y": 6}, state["explored"])
+        state = apply_action(state, {"type": "end_turn"}, battlefield,
+                             enemy_orders=[{"unit_id": 1, "x": 10, "y": 6}])
+        self.assertNotIn((10, 6), visible_tiles(state, battlefield))
+        self.assertIn({"x": 9, "y": 6}, state["explored"])
+
+    def test_breached_walls_and_doorways_reveal_opponents(self):
+        battlefield = self.fog_map()
+        state = initial_state(battlefield)
+        state["units"][0].update(x=10, y=5)
+        state["units"][1].update(x=12, y=5)
+        self.assertNotIn((12, 5), visible_tiles(state, battlefield))
+        state["breaches"] = [{"x": 11, "y": 5}]
+        self.assertIn((12, 5), visible_tiles(state, battlefield))
+
+        battlefield["houses"] = [{"left": 4, "right": 5, "top": 2, "bottom": 3,
+                                  "door": {"x": 4, "y": 3}}]
+        state["units"][0].update(x=3, y=3)
+        state["units"][1].update(x=4, y=3)
+        self.assertIn((4, 3), visible_tiles(state, battlefield))
+        self.assertNotIn((4, 2), visible_tiles(state, battlefield))
 
 
 class HorsebackRidingTests(TestCase):

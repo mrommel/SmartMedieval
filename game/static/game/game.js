@@ -39,7 +39,7 @@ import { previewMovement } from "./path_preview.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], catapults: [], horses: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  const simulation = { units: [], catapults: [], horses: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0, visible: null, explored: null };
   let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
@@ -88,7 +88,7 @@ import { previewMovement } from "./path_preview.js";
     armorButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
     armorButton.textContent = medic?.armor_equipped ? "Remove armor" : "Equip armor";
     const carried = medic && simulation.items.filter(item => item.carrier_id === medic.id);
-    const hasPotions = Boolean(mapData?.items?.length);
+    const hasPotions = Boolean(mapData?.has_items ?? mapData?.items?.length);
     pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
     pickupButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points ||
       carried.length >= 2 || (medic.carried_weight != null && medic.carried_weight >= (medic.max_carry_weight ?? 8)) ||
@@ -319,6 +319,10 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function describeCursor(cursor) {
+    if (simulation.visible && !simulation.visible.has(`${cursor.x},${cursor.y}`)) {
+      cursorStatus.textContent = `Tile ${cursor.x + 1}, ${cursor.y + 1}: ${simulation.explored.has(`${cursor.x},${cursor.y}`) ? "out of sight" : "unexplored"}.`;
+      return;
+    }
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
     const horse = simulation.horses.find(item => item.x === cursor.x && item.y === cursor.y);
     const potion = simulation.items.some(item => item.carrier_id === null && item.x === cursor.x && item.y === cursor.y);
@@ -481,12 +485,16 @@ import { previewMovement } from "./path_preview.js";
     document.getElementById("mission-help").textContent = throneMission
       ? "Reach the throne room. Defeat guards beside the king, then select a soldier with a sword on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
+    if (mapData.fog_of_war) document.getElementById("mission-help").textContent +=
+      " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
     previewMap = { ...mapData, breaches: snapshot.state.breaches || [] };
     previewKey = null;
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
+    simulation.visible = snapshot.state.visible ? new Set(snapshot.state.visible.map(tile => `${tile.x},${tile.y}`)) : null;
+    simulation.explored = snapshot.state.explored ? new Set(snapshot.state.explored.map(tile => `${tile.x},${tile.y}`)) : null;
     simulation.catapults = snapshot.state.catapults || [];
     simulation.horses = snapshot.state.horses || [];
     simulation.items = snapshot.state.items || [];
@@ -507,7 +515,7 @@ import { previewMovement } from "./path_preview.js";
       { weapon: "crossbow", name: "Crossbows", icon: "✣", role: "ranged support" }
     ];
     rosterCount.textContent = `${attackers.length} SOLDIERS`;
-    enemyCount.textContent = `${defenders.length} DEFENDERS`;
+    enemyCount.textContent = mapData.fog_of_war ? `${defenders.length} IN SIGHT` : `${defenders.length} DEFENDERS`;
     rosterList.replaceChildren(...roster.filter(item => attackers.some(unit => unit.weapon === item.weapon)).map(item => {
       const row = document.createElement("div");
       row.className = "roster-unit";
@@ -539,7 +547,7 @@ import { previewMovement } from "./path_preview.js";
     renderHistory(snapshot.state.history);
     victoryNode.hidden = !simulation.captured && !simulation.defeated;
     victoryNode.classList.toggle("defeat", simulation.defeated);
-    const kingAlive = defenders.some(unit => unit.is_king);
+    const kingAlive = mapData.fog_of_war ? !snapshot.state.king_fallen : defenders.some(unit => unit.is_king);
     victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated
       ? throneMission && !kingAlive ? "THE KING HAS FALLEN" : "THE COMPANY HAS FALLEN"
       : throneMission ? "THE KING IS CAPTIVE" : "GREYWATCH HAS FALLEN";
@@ -552,13 +560,15 @@ import { previewMovement } from "./path_preview.js";
     updateMovementPreview();
   }
 
-  function combatSummary(before, after) {
+  function combatSummary(before, after, history = []) {
     const remaining = new Map(after.map(unit => [unit.id, unit]));
     const damage = { attackers: 0, defenders: 0 };
     const losses = { attackers: 0, defenders: 0 };
     for (const unit of before) {
       const current = remaining.get(unit.id);
       const side = unit.side === "defenders" ? "defenders" : "attackers";
+      if (!current && side === "defenders" && mapData?.fog_of_war &&
+          !history.some(event => event.target_id === unit.id && event.killed)) continue;
       damage[side] += Math.max(0, unit.health - (current?.health || 0));
       if (!current) losses[side]++;
     }
@@ -595,11 +605,13 @@ import { previewMovement } from "./path_preview.js";
     try {
       const snapshot = await api("/api/games/actions/", { revision, action });
       const wasCaptured = simulation.captured;
-      const combat = combatSummary(simulation.units, snapshot.state.units);
+      const combat = combatSummary(simulation.units, snapshot.state.units, snapshot.state.history);
       applySnapshot(snapshot);
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
       if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
-      else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.is_king) ? "The king was killed. Mission failed." : "Your company has been defeated.");
+      else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
+        (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
+        "The king was killed. Mission failed." : "Your company has been defeated.");
       else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {

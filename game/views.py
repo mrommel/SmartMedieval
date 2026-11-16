@@ -10,7 +10,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .enemy_ai import EnemyAIError, enemy_turn
 from .engine import (MAX_CARRY_WEIGHT, InvalidAction, apply_action, armor_remaining, capture_status,
                      carried_weight, fight_allowance, initial_state, move_allowance,
-                     normalize_history_event, normalize_map, normalize_unit, weight_penalty)
+                     normalize_history_event, normalize_map, normalize_unit, visible_tiles, weight_penalty)
 from .models import GameInstance, Scenario, SingleGame
 
 
@@ -48,22 +48,57 @@ def single_games_api(request):
 
 def serialize_instance(instance):
     entry = instance.scenario if instance.scenario_id else instance.single_game
+    map_data = normalize_map(instance.map_definition)
+    state = instance.state
+    fog = map_data.get("fog_of_war", False)
+    visible = visible_tiles(state, map_data) if fog else set()
+    friendly_ids = {unit["id"] for unit in state["units"] if unit.get("side", "attackers") == "attackers"}
+    units = [unit for unit in state["units"] if not fog or unit.get("side", "attackers") == "attackers"
+             or (unit["x"], unit["y"]) in visible]
+    history = [normalize_history_event(event) for event in state.get("history", [])
+               if not fog or event.get("witnessed", True)]
+    if fog:
+        # A map definition is an editor document, not a player-safe battlefield snapshot.
+        map_data = {key: value for key, value in map_data.items()
+                    if key not in ("enemyStartPositions", "items", "horses")}
+        map_data["has_items"] = bool(instance.map_definition.get("items"))
+        history = [{key: value for key, value in event.items() if key != "witnessed"}
+                   | ({"morale_changes": [change for change in event["morale_changes"]
+                                           if change["unit_id"] < len(instance.map_definition["startPositions"])]}
+                      if "morale_changes" in event else {}) for event in history]
+    status = capture_status(state, instance.map_definition)
+    if fog and status == "KING GUARDED":
+        king = next((unit for unit in units if unit.get("is_king")), None)
+        if king is None or not any(unit.get("side") == "defenders" and not unit.get("is_king")
+                                   and abs(unit["x"] - king["x"]) + abs(unit["y"] - king["y"]) == 1
+                                   and unit["z"] == king["z"] for unit in units):
+            status = "CAPTURE THE KING"
     return {
         "id": str(instance.pk),
         "kind": "scenarios" if instance.scenario_id else "single-games",
         "game_id": instance.source_game_id or instance.single_game_id,
         "entry": serialize_catalog_entry(entry),
-        "map": normalize_map(instance.map_definition),
+        "map": map_data,
         "state": {
-            **instance.state,
+            **state,
             "units": [{**normalize_unit(unit), "armor_remaining": armor_remaining(unit, instance.state["turn"]),
                        "carried_weight": carried_weight(unit, instance.state.get("items", ())),
                        "max_carry_weight": MAX_CARRY_WEIGHT,
                        "weight_penalty": weight_penalty(unit, instance.state.get("items", ())),
                        "next_move_capacity": move_allowance(unit, instance.state.get("items", ())),
-                       "next_fight_capacity": fight_allowance(unit)} for unit in instance.state["units"]],
-            "history": [normalize_history_event(event) for event in instance.state.get("history", [])],
-            "capture_status": capture_status(instance.state, instance.map_definition),
+                       "next_fight_capacity": fight_allowance(unit)} for unit in units],
+            "history": history,
+            **({"items": [item for item in state.get("items", []) if item["carrier_id"] in friendly_ids
+                           or (item["x"], item["y"]) in visible],
+                "horses": [horse for horse in state.get("horses", [])
+                           if (horse["x"], horse["y"]) in visible],
+                "visible": [{"x": x, "y": y} for x, y in sorted(visible)],
+                "explored": [{"x": x, "y": y} for x, y in sorted(
+                    {(tile["x"], tile["y"]) for tile in state.get("explored", ())} | visible)],
+                "king_fallen": state.get("defeated", False) and instance.map_definition.get("mission") == "capture_king"
+                and not any(unit.get("is_king") for unit in state["units"])}
+               if fog else {}),
+            "capture_status": status,
         },
         "revision": instance.revision,
     }
@@ -155,4 +190,7 @@ def game_action(request):
         return JsonResponse({"error": "Game state has changed. Reload the match."}, status=409)
     instance.state = state
     instance.revision += 1
+    if instance.map_definition.get("fog_of_war", False):
+        combat_events = [{key: value for key, value in event.items() if key != "witnessed"}
+                         for event in combat_events if event.get("witnessed", True)]
     return JsonResponse({**serialize_instance(instance), "combat_events": combat_events})
