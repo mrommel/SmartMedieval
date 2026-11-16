@@ -37,6 +37,11 @@ CATAPULT_RELOAD = 2
 WALL_HEALTH = 2
 INVENTORY_LIMIT = 2
 POTION_HEAL = 2
+MAX_CARRY_WEIGHT = 8
+WEAPON_WEIGHTS = {None: 0, "sword": 1, "longbow": 2, "crossbow": 3}
+TOOL_WEIGHT = 1
+POTION_WEIGHT = 1
+WEIGHT_PER_MOVE_PENALTY = 3
 ARMOR_STATS = {
     # Armor absorbs this many HP of damage per turn; weight is carried even when removed.
     "leather": {"protection": 1, "weight": 1},
@@ -460,9 +465,38 @@ def neighbors(x, y):
     return ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
 
 
-def move_allowance(unit):
+def carried_weight(unit, items=()):
+    """Everything carried counts, including unequipped armor and tools."""
+    weapon = unit.get("weapon", LEGACY_WEAPONS.get(unit.get("type")))
+    return (WEAPON_WEIGHTS.get(weapon, 0)
+            + ARMOR_STATS.get(unit.get("armor"), {}).get("weight", 0)
+            + len(unit.get("tools", [])) * TOOL_WEIGHT
+            + sum(unit.get("id") is not None and item.get("carrier_id") == unit["id"]
+                  for item in items) * POTION_WEIGHT)
+
+
+def weight_penalty(unit, items=()):
+    return carried_weight(unit, items) // WEIGHT_PER_MOVE_PENALTY
+
+
+def move_allowance(unit, items=()):
     morale = unit.get("morale", STARTING_MORALE)
-    return MOVE_POINTS + (unit.get("rank") == "veteran") + (morale == MAX_MORALE) - (morale <= 1)
+    return max(1, MOVE_POINTS + (unit.get("rank") == "veteran")
+               + (morale == MAX_MORALE) - (morale <= 1) - weight_penalty(unit, items))
+
+
+def refresh_inventory_movement(unit, old_penalty, items):
+    """Preserve points spent this turn when changing a load, without resetting morale/rank bonuses."""
+    new_penalty = weight_penalty(unit, items)
+    if "move_capacity" not in unit:
+        # Older matches do not record how many points were already spent this turn.
+        unit["move_points"] = max(0, unit["move_points"] + old_penalty - new_penalty)
+        return
+    previous_capacity = unit["move_capacity"]
+    capacity = max(1, previous_capacity + old_penalty - new_penalty)
+    spent = max(0, previous_capacity - unit["move_points"])
+    unit["move_capacity"] = capacity
+    unit["move_points"] = max(0, capacity - spent)
 
 
 def fight_allowance(unit):
@@ -660,8 +694,8 @@ def initial_state(map_data=MAP):
                 **({"is_king": True} if normalize_position(point).get("is_king") else {}),
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
-                "move_points": MOVE_POINTS,
-                "move_capacity": MOVE_POINTS,
+                "move_points": move_allowance(point),
+                "move_capacity": move_allowance(point),
                 "health": MAX_HEALTH,
                 "max_health": MAX_HEALTH,
                 "fight_points": FIGHT_POINTS,
@@ -773,10 +807,14 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             if (item["carrier_id"] is not None or (item["x"], item["y"]) != (unit["x"], unit["y"]) or
                     sum(other["carrier_id"] == unit["id"] for other in next_state["items"]) >= INVENTORY_LIMIT):
                 raise InvalidAction("Stand on the potion with room to carry it (maximum two).")
+            if carried_weight(unit, next_state["items"]) + POTION_WEIGHT > MAX_CARRY_WEIGHT:
+                raise InvalidAction("This soldier cannot carry more than eight weight.")
+            old_penalty = weight_penalty(unit, next_state["items"])
             item.update(carrier_id=unit["id"], x=None, y=None)
         elif item["carrier_id"] != unit["id"]:
             raise InvalidAction("That soldier is not carrying this potion.")
         elif operation == "drop_item":
+            old_penalty = weight_penalty(unit, next_state["items"])
             item.update(carrier_id=None, x=unit["x"], y=unit["y"])
         else:
             target = next((other for other in next_state["units"] if other["id"] == action["target_id"]
@@ -788,7 +826,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("Heal a wounded ally on your tile or an adjacent reachable tile at the same height.")
             healed = min(POTION_HEAL, target["max_health"] - target["health"])
             target["health"] += healed
+            old_penalty = weight_penalty(unit, next_state["items"])
             next_state["items"].remove(item)
+        refresh_inventory_movement(unit, old_penalty, next_state["items"])
         unit["fight_points"] -= 1
         next_state["history"] = (next_state["history"] + [{
             "turn": state["turn"], "type": operation, "actor_id": unit["id"],
@@ -958,7 +998,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
-            unit["move_capacity"] = unit["move_points"] = move_allowance(unit)
+            unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
             unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
             unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         ordered = set()
@@ -1031,7 +1071,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["turn"] += 1
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
-                unit["move_capacity"] = unit["move_points"] = move_allowance(unit)
+                unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         return next_state

@@ -84,7 +84,8 @@ import { previewMovement } from "./path_preview.js";
     const hasPotions = Boolean(mapData?.items?.length);
     pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
     pickupButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points ||
-      carried.length >= 2 || !simulation.items.some(item => item.carrier_id === null && item.x === medic.x && item.y === medic.y);
+      carried.length >= 2 || (medic.carried_weight != null && medic.carried_weight >= (medic.max_carry_weight ?? 8)) ||
+      !simulation.items.some(item => item.carrier_id === null && item.x === medic.x && item.y === medic.y);
     dropButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points || !carried.length;
     healButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points || !carried.length || !healTarget.children.length;
     healTarget.disabled = pendingAction || paused || ended || !medic || !carried.length || !healTarget.children.length;
@@ -226,7 +227,9 @@ import { previewMovement } from "./path_preview.js";
     if (movementPreview) {
       const { route } = movementPreview;
       if (route.status === "reachable") {
-        routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.path.length} MP total · ${route.thisTurn} this turn${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · later turns needed (future allowance unavailable)" : ""}.`;
+        const unit = selected[0];
+        const load = unit.carried_weight == null ? "" : ` · load ${unit.carried_weight}/${unit.max_carry_weight} (${unit.weight_penalty} MP penalty)`;
+        routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.path.length} MP total · ${route.thisTurn} this turn${load}${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · later turns needed (future allowance unavailable)" : ""}.`;
       } else {
         routeStatus.textContent = route.status === "exhausted" ? "No movement points left. End the turn to move again." :
           route.status === "already_there" ? "Soldier is already on this tile." : "Unreachable: blocked route or occupied destination.";
@@ -378,7 +381,7 @@ import { previewMovement } from "./path_preview.js";
       nextTurn.className = "next-turn-preview";
       nextTurn.textContent = unit.next_move_capacity == null || unit.next_fight_capacity == null
         ? "Next turn: allowance unavailable until the game refreshes."
-        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank)`;
+        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank${unit.carried_weight == null ? "" : " and load"})`;
       selectedStats.replaceChildren(identity,
         statRow("Health", unit.health, unit.max_health, "HP", "health"),
         statRow("Morale", unit.morale ?? 3, 5, "", "morale"),
@@ -389,6 +392,7 @@ import { previewMovement } from "./path_preview.js";
         detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
         detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
+        ...(unit.carried_weight == null ? [] : [detailRow("Load", `${unit.carried_weight}/${unit.max_carry_weight} weight · −${unit.weight_penalty} MP/turn (1 per 3 weight; minimum 1 MP)`)]),
         ...(["longbow", "crossbow"].includes(unit.weapon)
           ? [detailRow("Reload", unit.reload_turns ? `${unit.reload_turns} turn(s) left` : "Ready")]
           : []),

@@ -8,8 +8,9 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from .enemy_ai import EnemyAIError, enemy_turn
-from .engine import (InvalidAction, apply_action, armor_remaining, capture_status, fight_allowance, initial_state,
-                     move_allowance, normalize_history_event, normalize_map, normalize_unit)
+from .engine import (MAX_CARRY_WEIGHT, InvalidAction, apply_action, armor_remaining, capture_status,
+                     carried_weight, fight_allowance, initial_state, move_allowance,
+                     normalize_history_event, normalize_map, normalize_unit, weight_penalty)
 from .models import GameInstance, Scenario, SingleGame
 
 
@@ -56,7 +57,10 @@ def serialize_instance(instance):
         "state": {
             **instance.state,
             "units": [{**normalize_unit(unit), "armor_remaining": armor_remaining(unit, instance.state["turn"]),
-                       "next_move_capacity": move_allowance(unit),
+                       "carried_weight": carried_weight(unit, instance.state.get("items", ())),
+                       "max_carry_weight": MAX_CARRY_WEIGHT,
+                       "weight_penalty": weight_penalty(unit, instance.state.get("items", ())),
+                       "next_move_capacity": move_allowance(unit, instance.state.get("items", ())),
                        "next_fight_capacity": fight_allowance(unit)} for unit in instance.state["units"]],
             "history": [normalize_history_event(event) for event in instance.state.get("history", [])],
             "capture_status": capture_status(instance.state, instance.map_definition),

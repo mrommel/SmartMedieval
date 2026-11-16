@@ -2,7 +2,8 @@ from django.test import TestCase
 
 from ..engine import (
     HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
-    has_line_of_sight, initial_state, is_walkable, normalize_map, record_attack, resolve_defender_goals, validate_map,
+    carried_weight, has_line_of_sight, initial_state, is_walkable, move_allowance, normalize_map,
+    record_attack, resolve_defender_goals, validate_map,
 )
 
 
@@ -145,6 +146,71 @@ class ArmorTests(TestCase):
                        {"type": "equip_armor", "unit_id": 0, "equipped": True, "armor": "mail"}):
             with self.subTest(action=action), self.assertRaises(InvalidAction):
                 apply_action(state, action, battlefield)
+
+
+class CarriedWeightTests(TestCase):
+    def test_equipment_weight_sets_initial_allowances_even_when_armor_is_removed(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0].update(armor="mail", tools=["rope"])
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        self.assertEqual((carried_weight(state["units"][0]), state["units"][0]["move_points"]), (5, 3))
+        self.assertEqual((carried_weight(state["units"][6]), state["units"][6]["move_points"]), (4, 3))
+        self.assertEqual((carried_weight(state["units"][4]), state["units"][4]["move_points"]), (3, 3))
+        state = apply_action(state, {"type": "equip_armor", "unit_id": 0, "equipped": False}, battlefield)
+        self.assertEqual((carried_weight(state["units"][0]), state["units"][0]["move_points"]), (5, 3))
+        self.assertEqual(move_allowance({**state["units"][0], "morale": 0}), 2)
+        self.assertEqual(move_allowance({**state["units"][0], "morale": 0, "weapon": "crossbow",
+                                         "tools": ["rope", "spade"]}), 1)
+
+    def test_pickup_drop_and_use_adjust_remaining_points_without_resetting_spent_movement(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}] * 2
+        state = initial_state(battlefield)
+        state["units"][0]["fight_points"] = 3
+        state["units"][0]["move_points"] = 2  # Two MP already spent this turn.
+        pickup = lambda item_id: {"type": "pickup_item", "unit_id": 0, "item_id": item_id}
+        state = apply_action(state, pickup(0), battlefield)
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["move_points"]), (4, 2))
+        state = apply_action(state, pickup(1), battlefield)
+        self.assertEqual((carried_weight(state["units"][0], state["items"]),
+                          state["units"][0]["move_capacity"], state["units"][0]["move_points"]), (3, 3, 1))
+        self.assertEqual(move_allowance(state["units"][0], state["items"]), 3)
+        state["units"][0]["health"] = 1
+        state = apply_action(state, {"type": "use_item", "unit_id": 0, "item_id": 1, "target_id": 0}, battlefield)
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["move_points"]), (4, 2))
+        state["units"][0]["fight_points"] = 1
+        state = apply_action(state, {"type": "drop_item", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["move_points"]), (4, 2))
+
+        legacy = initial_state(battlefield)
+        legacy["units"][0].update(move_points=1)
+        del legacy["units"][0]["move_capacity"]
+        legacy = apply_action(legacy, pickup(0), battlefield)
+        self.assertNotIn("move_capacity", legacy["units"][0])
+        self.assertEqual(legacy["units"][0]["move_points"], 1)
+
+    def test_overweight_potion_is_rejected_without_changing_state(self):
+        battlefield = default_map()
+        battlefield["startPositions"][4].update(armor="mail", tools=["rope", "spade"])
+        battlefield["items"] = [{"x": 4, "y": 8, "type": "healing_potion"}]
+        state = initial_state(battlefield)
+        self.assertEqual((carried_weight(state["units"][4]), state["units"][4]["move_capacity"]), (8, 2))
+        with self.assertRaisesMessage(InvalidAction, "eight weight"):
+            apply_action(state, {"type": "pickup_item", "unit_id": 4, "item_id": 0}, battlefield)
+        self.assertIsNone(state["items"][0]["carrier_id"])
+
+    def test_load_limits_orders_and_defender_destinations(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "mail"
+        battlefield["enemyStartPositions"][0]["armor"] = "mail"
+        state = initial_state(battlefield)
+        self.assertEqual(state["units"][0]["move_points"], 3)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 2, "y": 2}, battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["y"],
+                          moved["units"][0]["move_points"]), (2, 3, 0))
+        destinations = defender_destinations(state["units"][6], battlefield)
+        self.assertNotIn((8, 5), destinations)  # Four tiles from the armored guard.
 
 
 class FieldMedicineTests(TestCase):

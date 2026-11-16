@@ -35,6 +35,26 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_inventory_weight_updates_movement_preview_and_resumes(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["armor"] = "leather"
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        unit = started["state"]["units"][0]
+        self.assertEqual((unit["carried_weight"], unit["max_carry_weight"], unit["weight_penalty"],
+                          unit["move_points"], unit["next_move_capacity"]), (2, 8, 0, 4, 4))
+        picked = self.action(0, {"type": "pickup_item", "unit_id": 0, "item_id": 0}).json()
+        unit = picked["state"]["units"][0]
+        self.assertEqual((unit["carried_weight"], unit["weight_penalty"], unit["move_points"],
+                          unit["move_capacity"], unit["next_move_capacity"]), (3, 1, 3, 3, 3))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], picked["state"])
+        ended = self.action(1, {"type": "end_turn"}).json()
+        self.assertEqual((ended["state"]["units"][0]["move_points"],
+                          ended["state"]["units"][0]["next_move_capacity"]), (3, 3))
+
     def test_armor_equipment_persists_and_ai_receives_protection(self):
         battlefield = default_map()
         battlefield["startPositions"][0]["armor"] = "leather"

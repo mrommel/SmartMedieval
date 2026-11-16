@@ -183,6 +183,16 @@ test("route preview uses server neighbor order, occupancy, breaches, and turn co
     { x: 2, y: 0 }).status, "exhausted");
 });
 
+test("route preview follows weight-adjusted current and future allowances", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 } };
+  const unit = { id: 0, x: 0, y: 0, move_points: 1, next_move_capacity: 2,
+    carried_weight: 8, max_carry_weight: 8, weight_penalty: 2 };
+  const route = previewMovement(map, [unit], unit, { x: 4, y: 0 });
+  assert.equal(route.thisTurn, 1);
+  assert.equal(route.turns, 3);
+});
+
 test("renderer draws reachable route steps and unreachable markers", () => {
   const game = setup();
   const renderer = game.createRenderer(game.get("battlefield-canvas"));
@@ -599,6 +609,24 @@ test("armor protection, weight and equip action update with the snapshot", async
   assert.match(armorRow().textContent, /carried · 0\/2 protection left this turn · weight 3/);
   assert.match(game.get("combat-history-list").children[0].textContent, /removed mail armor/);
   assert.match(game.get("combat-history-list").children[1].textContent, /mail armor absorbed 2/);
+});
+
+test("load penalty and carrying limit are visible before moving or picking up", async () => {
+  const game = setup();
+  const unit = game.snapshot.state.units[0];
+  Object.assign(unit, { carried_weight: 8, max_carry_weight: 8, weight_penalty: 2,
+    move_points: 1, move_capacity: 2, next_move_capacity: 2 });
+  game.snapshot.map.items = [{ x: 0, y: 0, type: "healing_potion" }];
+  game.snapshot.state.items = [{ id: 0, x: 0, y: 0, type: "healing_potion", carrier_id: null }];
+  await game.get("continue-game").fire("click");
+  const load = game.get("selected-stats").children.find(row => row.children?.[0]?.textContent === "Load");
+  assert.match(load.textContent, /8\/8 weight · −2 MP\/turn/);
+  assert.equal(game.get("pickup-potion").disabled, true);
+  const canvas = game.get("battlefield-canvas");
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "ArrowDown", preventDefault() {} });
+  assert.match(game.get("route-status").textContent, /1 this turn · load 8\/8 \(2 MP penalty\)/);
+  assert.match(game.get("selected-stats").textContent, /Projected next turn: 2 MP/);
 });
 
 test("selected panel separates turn capacity from future morale and rank bonuses", async () => {
