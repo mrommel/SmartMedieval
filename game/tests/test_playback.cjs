@@ -11,15 +11,18 @@ const launchScript = fs.readFileSync(path.join(__dirname, "../static/game/launch
 
 function element() {
   const listeners = {};
+  let text = "";
   return {
     hidden: false, disabled: false, value: "1", style: {}, dataset: {},
+    get textContent() { return text + (this.children || []).map(child => child.textContent).join(""); },
+    set textContent(value) { text = String(value); this.children = []; },
     classList: { add() {}, remove() {}, toggle() {} },
     addEventListener(type, handler) { listeners[type] = handler; },
     setAttribute(name, value) { this[name] = value; },
     querySelector() { return element(); },
     getBoundingClientRect() { return { width: 600, height: 400, left: 0, top: 0 }; },
     setPointerCapture() {}, append(...children) { this.children = [...(this.children || []), ...children]; },
-    replaceChildren(...children) { this.children = children; },
+    replaceChildren(...children) { text = ""; this.children = children; },
     fire(type, event = {}) { return listeners[type]?.(event); }
   };
 }
@@ -48,7 +51,8 @@ function setup(savedSpeed = null, catalogFetch = null) {
     map: { cols: 4, rows: 4, keep: { left: 1, right: 2, top: 1, bottom: 2 },
       gate: { x: 1, y: 2 }, objective: { x: 2, y: 2 }, startPositions: [{ x: 0, y: 0 }] },
     state: { units: [{ id: 0, x: 0, y: 0, side: "attackers", weapon: "sword", tools: [],
-      rank: "recruit", morale: 3, move_points: 3, fight_points: 1,
+      rank: "recruit", morale: 3, move_points: 3, move_capacity: 4, next_move_capacity: 4,
+      fight_points: 1, fight_capacity: 1, next_fight_capacity: 1,
       health: 3, max_health: 3 }], captured: false, defeated: false,
     capture_progress: 0, capture_status: "UNCLAIMED", turn: 1 }
   };
@@ -441,17 +445,93 @@ test("selected soldier displays remaining stats and carried equipment after acti
   game.snapshot.state.units[0].tools = ["rope"];
   await game.get("continue-game").fire("click");
   const panel = game.get("selected-stats");
-  assert.match(panel.textContent, /Health 3\/3 HP · Morale 3\/5/);
-  assert.match(panel.textContent, /Movement 3 MP left · Fight 1 FP left/);
-  assert.match(panel.textContent, /Weapon sword/);
-  assert.match(panel.textContent, /Tools rope/);
+  const row = label => panel.children.find(child =>
+    child.children?.[0]?.children?.[0]?.textContent === label || child.children?.[0]?.textContent === label);
+  assert.equal(row("Health").children[0].children[1].textContent, "3/3 HP");
+  assert.equal(row("Morale").children[0].children[1].textContent, "3/5");
+  assert.equal(row("Movement").children[0].children[1].textContent, "3/4 MP left");
+  assert.equal(row("Movement").children[1].children[0].style.width, "75%");
+  assert.equal(row("Fight").children[0].children[1].textContent, "1/1 FP left");
+  assert.equal(row("Weapon").children[1].textContent, "sword");
+  assert.equal(row("Tools").children[1].textContent, "rope");
   game.snapshot.state.units[0].health = 1;
   game.snapshot.state.units[0].morale = 5;
   game.snapshot.state.units[0].move_points = 0;
   game.snapshot.state.units[0].fight_points = 0;
   await game.get("end-turn").fire("click");
-  assert.match(panel.textContent, /Health 1\/3 HP · Morale 5\/5/);
-  assert.match(panel.textContent, /Movement 0 MP left · Fight 0 FP left/);
+  assert.equal(row("Health").children[0].children[1].textContent, "1/3 HP");
+  assert.equal(row("Morale").children[0].children[1].textContent, "5/5");
+  assert.equal(row("Movement").children[0].children[1].textContent, "0/4 MP left");
+  assert.equal(row("Movement").children[1].children[0].style.width, "0%");
+  assert.equal(row("Fight").children[0].children[1].textContent, "0/1 FP left");
+});
+
+test("selected panel separates turn capacity from future morale and rank bonuses", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.morale = 5;
+  soldier.move_points = 1;
+  soldier.fight_points = 0;
+  soldier.next_move_capacity = 5;
+  await game.get("continue-game").fire("click");
+  const panel = game.get("selected-stats");
+  const stat = label => panel.children.find(child => child.children?.[0]?.children?.[0]?.textContent === label);
+  assert.equal(stat("Movement").children[0].children[1].textContent, "1/4 MP left");
+  assert.equal(stat("Movement").children[1].children[0].style.width, "25%");
+  assert.equal(panel.children.find(child => child.className === "next-turn-preview").textContent,
+    "Projected next turn: 5 MP · 1 FP (at current morale and rank)");
+  soldier.morale = 3;
+  soldier.rank = "veteran";
+  soldier.next_fight_capacity = 2;
+  await game.get("promote").fire("click");
+  await new Promise(setImmediate);
+  assert.equal(stat("Fight").children[0].children[1].textContent, "0/1 FP left");
+  assert.equal(panel.children.find(child => child.className === "next-turn-preview").textContent,
+    "Projected next turn: 5 MP · 2 FP (at current morale and rank)");
+});
+
+test("selection changes, casualties and resume clear stale readouts", async () => {
+  const game = setup();
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, y: 1 });
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const key = (name, shiftKey = false) => canvas.fire("keydown", { key: name, shiftKey, preventDefault() {} });
+  canvas.fire("focus");
+  key("Enter", true);
+  assert.match(game.get("selected-stats").textContent, /Select a soldier to inspect/);
+  assert.equal(game.get("selected-stats").children.length, 0);
+  key("Enter");
+  key("ArrowDown");
+  key("Enter", true);
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  key("Enter");
+  assert.match(game.get("selected-stats").textContent, /Soldier #2/);
+  game.snapshot.state.units.pop();
+  await game.get("end-turn").fire("click");
+  assert.match(game.get("selected-stats").textContent, /Select a soldier to inspect/);
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /Select a soldier to inspect/);
+});
+
+test("ranged reload and older saves without turn capacities remain readable", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.weapon = "crossbow";
+  soldier.reload_turns = 2;
+  delete soldier.move_capacity;
+  delete soldier.fight_capacity;
+  await game.get("continue-game").fire("click");
+  const panel = game.get("selected-stats");
+  const stat = label => panel.children.find(child => child.children?.[0]?.children?.[0]?.textContent === label);
+  assert.equal(stat("Movement").children[0].children[1].textContent, "3 MP left");
+  assert.equal(stat("Movement").children.length, 1, "do not invent a current-turn maximum for an old save");
+  assert.equal(panel.children.at(-1).children[1].textContent, "2 turn(s) left");
+  soldier.reload_turns = 0;
+  soldier.move_capacity = 4;
+  soldier.fight_capacity = 1;
+  await game.get("continue-game").fire("click");
+  assert.equal(panel.children.at(-1).children[1].textContent, "Ready");
+  assert.equal(stat("Movement").children[1].children[0].style.width, "75%");
 });
 
 test("keyboard cursor selects groups, moves, attacks, and cannot order while paused", async () => {
@@ -521,7 +601,7 @@ test("catapult crew can aim at walls using the keyboard and fire when ready", as
   assert.equal(game.get("aim-catapult").hidden, false);
   assert.equal(game.get("aim-catapult").disabled, false);
   assert.equal(game.get("fire-catapult").disabled, true);
-  assert.match(game.get("selected-stats").textContent, /Catapult 3 stones/);
+  assert.equal(game.get("selected-stats").children.at(-1).children[1].textContent, "3 stones");
   game.get("aim-catapult").fire("click");
   const canvas = game.get("battlefield-canvas");
   for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "Enter"]) {
@@ -562,7 +642,7 @@ test("potions appear on the map and enable pickup, drop, and allied healing", as
   game.snapshot.state.history = [{ turn: 1, type: "pickup_item", actor_id: 0,
     actor_side: "attackers", actor_type: "vanguard", item_id: 0 }];
   await game.get("continue-game").fire("click");
-  assert.match(game.get("selected-stats").textContent, /Potions 1\/2/);
+  assert.equal(game.get("selected-stats").children.find(child => child.children?.[0]?.textContent === "Potions").children[1].textContent, "1/2");
   assert.equal(game.get("drop-potion").disabled, false);
   assert.equal(game.get("heal-potion").disabled, false);
   assert.equal(game.get("heal-target").children[0].value, "1");

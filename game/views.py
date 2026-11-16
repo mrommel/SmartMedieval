@@ -8,7 +8,8 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from .enemy_ai import EnemyAIError, enemy_turn
-from .engine import InvalidAction, apply_action, capture_status, initial_state, normalize_history_event, normalize_map, normalize_unit
+from .engine import (InvalidAction, apply_action, capture_status, fight_allowance, initial_state,
+                     move_allowance, normalize_history_event, normalize_map, normalize_unit)
 from .models import GameInstance, Scenario, SingleGame
 
 
@@ -54,7 +55,8 @@ def serialize_instance(instance):
         "map": normalize_map(instance.map_definition),
         "state": {
             **instance.state,
-            "units": [normalize_unit(unit) for unit in instance.state["units"]],
+            "units": [{**normalize_unit(unit), "next_move_capacity": move_allowance(unit),
+                       "next_fight_capacity": fight_allowance(unit)} for unit in instance.state["units"]],
             "history": [normalize_history_event(event) for event in instance.state.get("history", [])],
             "capture_status": capture_status(instance.state, instance.map_definition),
         },

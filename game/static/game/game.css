@@ -142,7 +142,21 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .roster-unit small { color: #98a195; font-size: 8px; }
 .health-dot { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: #87a777; box-shadow: 0 0 5px #87a77788; }
 .roster #selected-unit-title { margin: 10px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
-.selected-stats { margin: 8px 0 11px; padding: 10px; border: 1px solid var(--line); color: #e2d3ac; background: rgba(0,0,0,.12); font-size: 10px; line-height: 1.8; white-space: pre-line; overflow-wrap: anywhere; }
+.selected-stats { margin: 8px 0 11px; padding: 11px; border: 1px solid var(--line); color: #e2d3ac; background: rgba(0,0,0,.12); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.selected-identity { margin-bottom: 10px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.stat-row { margin-top: 9px; }
+.stat-row-header, .selected-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; }
+.stat-row-header span, .selected-detail span { color: #b6bdad; }
+.stat-row-header strong, .selected-detail strong { color: var(--ink); font-weight: 600; }
+.stat-track { height: 5px; margin-top: 4px; overflow: hidden; border-radius: 3px; background: #39453d; }
+.stat-fill { height: 100%; background: #d3b36e; transition: width .18s ease; }
+.stat-track.health .stat-fill { background: #9aba78; }
+.stat-track.health.low .stat-fill { background: #d38370; }
+.stat-track.morale .stat-fill { background: #a4b9d1; }
+.stat-track.fight .stat-fill { background: #d89474; }
+.next-turn-preview { margin: 12px 0 10px; padding: 7px 8px; border-left: 2px solid #d3b36e; color: #e2d3ac; background: rgba(211,179,110,.07); font-size: 10px; }
+.selected-detail { padding: 6px 0; border-top: 1px solid var(--line); }
+.selected-detail strong { min-width: 0; text-align: right; }
 .enemy-roster { display: flex; justify-content: space-between; padding: 11px 0 7px; border-top: 1px solid var(--line); color: #b5c9e6; font-size: 8px; font-weight: 700; letter-spacing: .08em; }
 .enemy-roster span { color: #b5c9e6; }
 .combat-history { padding: 14px 0; border-bottom: 1px solid var(--line); }
@@ -196,6 +210,7 @@ kbd { padding: 2px 4px; border: 1px solid #566057; border-radius: 2px; color: #e
   .order-readout { width: 100%; justify-content: center; padding-top: 8px; border-top: 1px solid var(--line); font-size: 7px; }
   .briefing { grid-template-columns: 1fr; padding: 14px; }
   .briefing-title, .briefing-copy, .roster, .combat-history, .howto, .field-quote, .playback-settings { grid-column: 1; }
+  .selected-stats { padding: 12px; font-size: 12px; }
   .howto { grid-row: auto; }
   .field-quote { margin-top: 10px; }
   .page-foot { font-size: 7px; }

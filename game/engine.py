@@ -634,9 +634,11 @@ def initial_state(map_data=MAP):
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
                 "move_points": MOVE_POINTS,
+                "move_capacity": MOVE_POINTS,
                 "health": MAX_HEALTH,
                 "max_health": MAX_HEALTH,
                 "fight_points": FIGHT_POINTS,
+                "fight_capacity": FIGHT_POINTS,
                 "reload_turns": 0,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
@@ -912,8 +914,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
-            unit["move_points"] = move_allowance(unit)
-            unit["fight_points"] = fight_allowance(unit)
+            unit["move_capacity"] = unit["move_points"] = move_allowance(unit)
+            unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
             unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         ordered = set()
         for order in enemy_orders:
@@ -985,8 +987,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["turn"] += 1
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
-                unit["move_points"] = move_allowance(unit)
-                unit["fight_points"] = fight_allowance(unit)
+                unit["move_capacity"] = unit["move_points"] = move_allowance(unit)
+                unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
         return next_state
 

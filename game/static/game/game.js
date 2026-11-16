@@ -290,15 +290,78 @@ import { createLaunchUI } from "./launch.js";
     draw();
   }
 
+  function statRow(label, remaining, maximum, unit, tone) {
+    const row = document.createElement("div");
+    row.className = "stat-row";
+    const header = document.createElement("div");
+    header.className = "stat-row-header";
+    const title = document.createElement("span");
+    title.textContent = label;
+    const value = document.createElement("strong");
+    value.textContent = maximum == null ? `${remaining} ${unit} left` :
+      `${remaining}/${maximum}${unit ? ` ${unit}` : ""}${unit === "MP" || unit === "FP" ? " left" : ""}`;
+    header.append(title, value);
+    row.append(header);
+    if (maximum > 0) {
+      const track = document.createElement("div");
+      track.className = `stat-track ${tone}${tone === "health" && remaining / maximum <= .35 ? " low" : ""}`;
+      track.setAttribute("aria-hidden", "true");
+      const fill = document.createElement("div");
+      fill.className = "stat-fill";
+      fill.style.width = `${Math.round(100 * Math.max(0, Math.min(1, remaining / maximum)))}%`;
+      track.append(fill);
+      row.append(track);
+    }
+    return row;
+  }
+
+  function detailRow(label, value) {
+    const row = document.createElement("div");
+    row.className = "selected-detail";
+    const title = document.createElement("span");
+    title.textContent = label;
+    const detail = document.createElement("strong");
+    detail.textContent = value;
+    row.append(title, detail);
+    return row;
+  }
+
   function updatePromotion() {
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     const unit = selected.length === 1 ? selected[0] : null;
     const crew = selectedCrew();
     const potions = unit ? simulation.items.filter(item => item.carrier_id === unit.id).length : 0;
-    selectedStats.textContent = unit
-      ? `Soldier #${unit.id + 1} · ${unit.rank || "recruit"}\nHealth ${unit.health}/${unit.max_health} HP · Morale ${unit.morale ?? 3}/5\nMovement ${unit.move_points} MP left · Fight ${unit.fight_points} FP left\nWeapon ${unit.weapon || "none"}${unit.reload_turns ? ` · Reload ${unit.reload_turns} turns` : ""}\nTools ${unit.tools?.length ? unit.tools.join(", ") : "none"} · Potions ${potions}/2${crew ?
-        `\nCatapult ${crew.catapult.ammo} stones${crew.catapult.aim ? ` · aimed at ${crew.catapult.aim.x + 1}, ${crew.catapult.aim.y + 1}` : ""}${crew.catapult.reload_turns ? ` · reload ${crew.catapult.reload_turns}` : ""}` : ""}`
-      : selected.length ? `${selected.length} soldiers selected · choose one to inspect` : "Select a soldier to inspect their condition and equipment.";
+    if (unit) {
+      const identity = document.createElement("div");
+      identity.className = "selected-identity";
+      identity.textContent = `Soldier #${unit.id + 1} · ${unit.rank || "recruit"}`;
+      const moveCapacity = unit.move_capacity ?? null;
+      const fightCapacity = unit.fight_capacity ?? null;
+      const nextTurn = document.createElement("p");
+      nextTurn.className = "next-turn-preview";
+      nextTurn.textContent = unit.next_move_capacity == null || unit.next_fight_capacity == null
+        ? "Next turn: allowance unavailable until the game refreshes."
+        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank)`;
+      selectedStats.replaceChildren(identity,
+        statRow("Health", unit.health, unit.max_health, "HP", "health"),
+        statRow("Morale", unit.morale ?? 3, 5, "", "morale"),
+        statRow("Movement", unit.move_points, moveCapacity, "MP", "movement"),
+        statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
+        nextTurn,
+        detailRow("Weapon", unit.weapon || "none"),
+        detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
+        detailRow("Potions", `${potions}/2`),
+        ...(["longbow", "crossbow"].includes(unit.weapon)
+          ? [detailRow("Reload", unit.reload_turns ? `${unit.reload_turns} turn(s) left` : "Ready")]
+          : []),
+        ...(crew ? [detailRow("Catapult", `${crew.catapult.ammo} stones${crew.catapult.aim ?
+          ` · aimed at ${crew.catapult.aim.x + 1}, ${crew.catapult.aim.y + 1}` : ""}${crew.catapult.reload_turns ?
+          ` · reload ${crew.catapult.reload_turns}` : ""}`)] : []));
+    } else {
+      selectedStats.textContent = selected.length
+        ? `${selected.length} soldiers selected · choose one to inspect`
+        : "Select a soldier to inspect their condition and equipment.";
+    }
     updateHealTargets();
     updateControls();
   }

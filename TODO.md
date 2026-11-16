@@ -61,7 +61,8 @@
 - [x] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
 - [x] Replace unit classes with a weapon, a carried-tools list, and a separate king mission marker. Migrate saved rosters, active matches, and history, while still accepting imported legacy labels.
 - [x] Show the selected soldier's current HP, morale, remaining movement/fight points, weapon, tools, potions, and reload/catapult status in a dedicated sidebar readout; refresh on selection and after each action.
-- [ ] Refine the selected-soldier UI: use labeled stat rows and graphical remaining/max indicators; keep the panel legible beside the battlefield on desktop and below it on mobile, with text equivalents for screen readers. Distinguish current points from next-turn allowances after morale changes or promotion; test empty/group selections, zero points, reload, death, and resume.
+- [x] Refine the selected-soldier UI with labeled stat rows and graphical remaining/max indicators, mobile styling and text equivalents for screen readers. Keep current-turn capacities separate from projected next-turn allowances after morale changes or promotion; test empty/group selections, zero points, reload, death, and resume.
+- [ ] Manually review the selected-soldier panel on desktop/mobile screens and with a screen reader in a real browser.
 - [ ] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage.
 - [ ] Make carried weight (including armor, weapons, and potions) affect movement-point costs or allowances, with clear limits and feedback before issuing orders.
 - [ ] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.

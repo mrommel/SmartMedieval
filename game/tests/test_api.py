@@ -173,8 +173,12 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["map"], MAP)
         self.assertEqual(data["entry"]["name"], self.game.name)
         self.assertEqual(data["state"]["units"][0]["move_points"], 4)
+        self.assertEqual((data["state"]["units"][0]["move_capacity"],
+                          data["state"]["units"][0]["next_move_capacity"]), (4, 4))
         self.assertEqual(data["state"]["units"][0]["health"], 3)
         self.assertEqual(data["state"]["units"][0]["fight_points"], 1)
+        self.assertEqual((data["state"]["units"][0]["fight_capacity"],
+                          data["state"]["units"][0]["next_fight_capacity"]), (1, 1))
         self.assertEqual(data["state"]["units"][0]["morale"], 3)
         self.assertEqual(data["state"]["units"][0]["rank"], "recruit")
         self.assertEqual((data["state"]["units"][0]["weapon"], data["state"]["units"][0]["tools"]), ("sword", []))
@@ -186,6 +190,8 @@ class GameInstanceApiTests(TestCase):
         moved = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
         self.assertEqual(moved.status_code, 200)
         self.assertEqual(moved.json()["state"]["units"][0]["x"], 3)
+        self.assertEqual((moved.json()["state"]["units"][0]["move_points"],
+                          moved.json()["state"]["units"][0]["move_capacity"]), (3, 4))
         self.assertEqual(moved.json()["revision"], 1)
         self.assertEqual(moved.json()["combat_events"], [])
         self.assertEqual(self.client.get(reverse("current-game")).json(),
@@ -206,6 +212,20 @@ class GameInstanceApiTests(TestCase):
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))
         self.assertNotIn("test-only-key", request.data.decode())
 
+    def test_api_projects_allowances_without_changing_mid_turn_capacities(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0].update(morale=5, move_points=2)
+        instance.save(update_fields=["state"])
+        current = self.client.get(reverse("current-game")).json()["state"]["units"][0]
+        self.assertEqual((current["move_points"], current["move_capacity"], current["next_move_capacity"]),
+                         (2, 4, 5))
+        promoted = self.action(0, {"type": "promote", "unit_id": 0}).json()["state"]["units"][0]
+        self.assertEqual((promoted["move_points"], promoted["move_capacity"], promoted["next_move_capacity"],
+                          promoted["fight_points"], promoted["fight_capacity"], promoted["next_fight_capacity"]),
+                         (2, 4, 5, 1, 1, 2))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["units"][0], promoted)
+
     def test_legacy_match_resumes_without_unit_types_and_converts_on_action(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])
@@ -215,6 +235,8 @@ class GameInstanceApiTests(TestCase):
         for unit in instance.state["units"]:
             unit["type"] = {"sword": "vanguard", "longbow": "longbow", "crossbow": "crossbow"}[unit.pop("weapon")]
             del unit["tools"]
+            del unit["move_capacity"]
+            del unit["fight_capacity"]
         instance.state["history"] = [{"turn": 1, "type": "promote", "actor_id": 0,
                                       "actor_side": "attackers", "actor_type": "vanguard", "morale_change": -2}]
         instance.save(update_fields=["map_definition", "state"])
@@ -222,6 +244,8 @@ class GameInstanceApiTests(TestCase):
         self.assertNotIn("type", resumed["map"]["startPositions"][0])
         self.assertTrue(all("type" not in unit for unit in resumed["state"]["units"]))
         self.assertEqual(resumed["state"]["history"][0]["actor_weapon"], "sword")
+        self.assertNotIn("move_capacity", resumed["state"]["units"][0])
+        self.assertEqual(resumed["state"]["units"][0]["next_move_capacity"], 4)
         moved = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
         self.assertEqual(moved.status_code, 200)
         self.assertEqual(moved.json()["state"]["units"][0]["weapon"], "sword")

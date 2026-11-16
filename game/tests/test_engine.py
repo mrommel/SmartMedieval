@@ -857,6 +857,28 @@ class TurnEngineTests(TestCase):
         self.assertEqual((result["units"][0]["move_points"], result["units"][1]["move_points"]), (3, 5))
         self.assertEqual((result["units"][6]["x"], result["units"][6]["move_points"]), (7, 0))
         self.assertEqual((result["units"][7]["x"], result["units"][7]["move_points"]), (5, 0))
+        self.assertEqual((result["units"][0]["move_capacity"], result["units"][1]["move_capacity"]), (3, 5))
+        self.assertEqual((result["units"][6]["move_capacity"], result["units"][7]["move_capacity"]), (5, 3))
+
+    def test_turn_capacities_do_not_change_mid_turn_after_morale_or_promotion(self):
+        state = initial_state()
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["fight_capacity"]), (4, 1))
+        state["units"][0].update(morale=5, move_points=2, fight_points=0)
+        promoted = apply_action(state, {"type": "promote", "unit_id": 0})
+        self.assertEqual((promoted["units"][0]["move_points"], promoted["units"][0]["move_capacity"],
+                          promoted["units"][0]["fight_points"], promoted["units"][0]["fight_capacity"]),
+                         (2, 4, 0, 1))
+        following = apply_action(promoted, {"type": "end_turn"})
+        self.assertEqual((following["units"][0]["move_points"], following["units"][0]["move_capacity"],
+                          following["units"][0]["fight_points"], following["units"][0]["fight_capacity"]),
+                         (5, 5, 2, 2))
+        old = initial_state()
+        for unit in old["units"]:
+            del unit["move_capacity"]
+            del unit["fight_capacity"]
+        resumed = apply_action(old, {"type": "end_turn"})
+        self.assertTrue(all("move_capacity" in unit and "fight_capacity" in unit
+                            for unit in resumed["units"] if unit["side"] == "attackers"))
 
     def test_promotion_requires_full_morale_and_grants_points_next_turn(self):
         state = initial_state()
