@@ -30,6 +30,7 @@ def enemy_turn(state, map_data, combat_events=None):
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
                    "strongpoints": map_data.get("strongpoints", []),
                    "houses": map_data.get("houses", []), "lanes": map_data.get("lanes", []),
+                   "terrain": map_data.get("terrain", []),
                    "mission": map_data.get("mission", "courtyard"),
                    "breaches": state.get("breaches", [])},
         "units": [
@@ -49,7 +50,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "'orders' array of {\"unit_id\": integer, \"x\": integer, \"y\": integer}. "
                 "Each x,y is a goal inside the map, not a final destination. The server moves "
                 "the defender up to its move allowance toward it (normally 4, minus 1 at morale "
-                "0-1 or plus 1 at morale 5), avoiding walls and occupied tiles and stopping short of the "
+                "0-1 or plus 1 at morale 5, and reduced by carried weight), avoiding walls and "
+                "occupied tiles and stopping short of the "
                 "objective. A defender may aim at the objective but cannot occupy it. Elevated "
                 "tiles have height 1-3; only ladders and ramps on the higher tile permit a "
                 "one-level step. Wall tiles listed in breaches are open passages. After "
@@ -59,7 +61,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "Houses without doors are solid; houses with a door have walkable ground-floor tiles, "
                 "but entering and leaving is possible only through the perimeter door tile. "
                 "Shots cannot cross house walls even at doors; units in the same room can shoot each other. "
-                "Lanes are walkable. Fences block "
+                "Movement costs 1 point per unmarked tile or road, 2 on grass, 3 on mud "
+                "and 4 on swamp; a tile's full cost must fit in one turn. Lanes are visual only. Fences block "
                 "movement but not shots. Ranged weapons "
                 "need one or two full turns to reload. Prefer goals that bring ranged defenders "
                 "within a clear shot. Ground-level units beside a wall, tree, or rock on the "

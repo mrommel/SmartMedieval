@@ -53,13 +53,42 @@ class GameCatalogApiTests(TestCase):
         self.assertEqual(len(initial_state(game.map_definition)["units"]), 7)
         self.assertEqual(game.map_definition["startPositions"][0]["armor"], "leather")
         self.assertEqual(game.map_definition["enemyStartPositions"][0]["armor"], "mail")
+        self.assertIn({"x": 6, "y": 6, "type": "swamp"}, game.map_definition["terrain"])
         self.assertIn(game.name, [entry["name"] for entry in self.client.get(reverse("single-games-api")).json()])
+
+    def test_terrain_upgrade_preserves_custom_maps_and_active_matches(self):
+        upgrade = import_module("game.migrations.0012_seed_hamlet_terrain")
+        game = SingleGame.objects.get(slug="greywatch-hamlet")
+        seeded = deepcopy(game.map_definition)
+        original = deepcopy(upgrade.PREVIOUS_HAMLET)
+        game.map_definition = original
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(single_game=game, source_game=game,
+                                            map_definition=deepcopy(original), state=initial_state(original))
+        schema_editor = type("Editor", (), {"connection": type("Connection", (), {"alias": "default"})()})()
+        upgrade.seed_hamlet_terrain(apps, schema_editor)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition, seeded)
+        self.assertEqual(match.map_definition, original)
+        upgrade.seed_hamlet_terrain(apps, schema_editor)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, seeded)
+        custom = deepcopy(original)
+        custom["terrain"] = [{"x": 5, "y": 6, "type": "road"}]
+        game.map_definition = custom
+        game.save(update_fields=["map_definition"])
+        upgrade.seed_hamlet_terrain(apps, schema_editor)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, custom)
 
     def test_armor_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0011_seed_hamlet_armor")
         game = SingleGame.objects.get(slug="greywatch-hamlet")
-        armored = deepcopy(game.map_definition)
         previous = deepcopy(upgrade.PREVIOUS_HAMLET)
+        armored = deepcopy(previous)
+        armored["startPositions"][0]["armor"] = "leather"
+        armored["enemyStartPositions"][0]["armor"] = "mail"
         game.map_definition = previous
         game.save(update_fields=["map_definition"])
         match = GameInstance.objects.create(single_game=game, source_game=game,
@@ -116,6 +145,7 @@ class GameCatalogApiTests(TestCase):
         upgrade = import_module("game.migrations.0009_hamlet_healing_potions")
         game = SingleGame.objects.get(slug="greywatch-hamlet")
         upgraded = deepcopy(game.map_definition)
+        del upgraded["terrain"]
         del upgraded["startPositions"][0]["armor"]
         del upgraded["enemyStartPositions"][0]["armor"]
         previous = deepcopy(upgrade.PREVIOUS_HAMLET)

@@ -1,4 +1,4 @@
-// Keep neighbor order, occupancy, door and elevation rules in sync with engine.find_path/can_step.
+// Keep neighbor order, occupancy, terrain costs, door and elevation rules in sync with engine.find_path/can_step.
 export function previewMovement(map, units, unit, destination) {
   if (!map || !unit || !destination) return null;
   const { cols, rows } = map;
@@ -10,6 +10,9 @@ export function previewMovement(map, units, unit, destination) {
     }
   });
   const elevations = new Map((map.elevation || []).map(tile => [key(tile.x, tile.y), tile]));
+  const costs = { road: 1, grass: 2, mud: 3, swamp: 4 };
+  const terrain = new Map((map.terrain || []).map(tile => [key(tile.x, tile.y), costs[tile.type]]));
+  const costAt = tile => terrain.get(key(tile.x, tile.y)) || 1;
   const objects = new Set((map.objects || []).map(tile => key(tile.x, tile.y)));
   const breaches = new Set((map.breaches || []).map(tile => key(tile.x, tile.y)));
   const strongpoints = [{ ...map.keep, gate: map.gate }, ...(map.strongpoints || [])];
@@ -46,17 +49,57 @@ export function previewMovement(map, units, unit, destination) {
   const goal = key(destination.x, destination.y);
   if (!walkable(destination.x, destination.y) || blocked.has(goal)) return { status: "unreachable", path: [] };
   const start = key(unit.x, unit.y);
-  const frontier = [{ x: unit.x, y: unit.y }];
+  const maxStepCost = Math.max(unit.move_capacity ?? unit.next_move_capacity ?? unit.move_points,
+    unit.next_move_capacity ?? unit.move_points);
+  const frontier = [];
+  let sequence = 0;
+  const push = entry => {
+    frontier.push(entry);
+    let child = frontier.length - 1;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (frontier[parent].distance < entry.distance ||
+          (frontier[parent].distance === entry.distance && frontier[parent].order < entry.order)) break;
+      frontier[child] = frontier[parent];
+      child = parent;
+    }
+    frontier[child] = entry;
+  };
+  const pop = () => {
+    const first = frontier[0], last = frontier.pop();
+    if (frontier.length) {
+      let parent = 0;
+      while (parent * 2 + 1 < frontier.length) {
+        let child = parent * 2 + 1;
+        if (child + 1 < frontier.length && (frontier[child + 1].distance < frontier[child].distance ||
+            (frontier[child + 1].distance === frontier[child].distance &&
+              frontier[child + 1].order < frontier[child].order))) child++;
+        if (last.distance < frontier[child].distance ||
+            (last.distance === frontier[child].distance && last.order < frontier[child].order)) break;
+        frontier[parent] = frontier[child];
+        parent = child;
+      }
+      frontier[parent] = last;
+    }
+    return first;
+  };
+  push({ tile: { x: unit.x, y: unit.y }, distance: 0, order: sequence });
+  const distances = new Map([[start, 0]]);
   const previous = new Map([[start, null]]);
-  for (let index = 0; index < frontier.length; index++) {
-    const current = frontier[index];
+  while (frontier.length) {
+    const { tile: current, distance } = pop();
+    if (distance !== distances.get(key(current.x, current.y))) continue;
     if (key(current.x, current.y) === goal) break;
     for (const [x, y] of [[current.x + 1, current.y], [current.x - 1, current.y],
       [current.x, current.y + 1], [current.x, current.y - 1]]) {
       const next = key(x, y);
-      if (!previous.has(next) && !blocked.has(next) && canStep(current, { x, y })) {
+      if (blocked.has(next) || !canStep(current, { x, y })) continue;
+      const stepCost = costAt({ x, y });
+      const newDistance = distance + stepCost;
+      if (stepCost <= maxStepCost && newDistance < (distances.get(next) ?? Infinity)) {
+        distances.set(next, newDistance);
         previous.set(next, current);
-        frontier.push({ x, y });
+        push({ tile: { x, y }, distance: newDistance, order: ++sequence });
       }
     }
   }
@@ -66,9 +109,21 @@ export function previewMovement(map, units, unit, destination) {
     path.push(tile);
   }
   path.reverse();
-  const thisTurn = Math.min(path.length, unit.move_points);
+  const totalCost = path.reduce((total, tile) => total + costAt(tile), 0);
+  let thisTurn = 0, thisTurnCost = 0;
+  while (thisTurn < path.length && thisTurnCost + costAt(path[thisTurn]) <= unit.move_points) {
+    thisTurnCost += costAt(path[thisTurn++]);
+  }
   const laterCapacity = unit.next_move_capacity || null;
-  const turns = path.length <= thisTurn ? 1 : laterCapacity
-    ? 1 + Math.ceil((path.length - thisTurn) / laterCapacity) : null;
-  return { status: path.length ? "reachable" : "already_there", path, thisTurn, turns };
+  let turns = 1, index = thisTurn;
+  while (index < path.length && laterCapacity && costAt(path[index]) <= laterCapacity) {
+    turns++;
+    let spent = 0;
+    while (index < path.length && spent + costAt(path[index]) <= laterCapacity) {
+      spent += costAt(path[index++]);
+    }
+  }
+  if (index < path.length) turns = null;
+  return { status: path.length ? "reachable" : "already_there", path, thisTurn,
+    thisTurnCost, totalCost, turns };
 }

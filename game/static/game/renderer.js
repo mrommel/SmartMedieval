@@ -9,6 +9,7 @@ export function createBattlefieldRenderer(canvas) {
   let interiors = new Map();
   let doors = new Set();
   let lanes = new Set();
+  let terrain = new Map();
   let breaches = new Set();
   let wallDamage = new Set();
   let tileW = 56, tileH = 28, originX = 0, originY = 0, width = 0, height = 0;
@@ -34,6 +35,7 @@ export function createBattlefieldRenderer(canvas) {
       }
     }
     lanes = new Set((map.lanes || []).map(tile => `${tile.x},${tile.y}`));
+    terrain = new Map((map.terrain || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
     breaches = new Set((map.breaches || []).map(point => `${point.x},${point.y}`));
     wallDamage = new Set((map.wall_damage || []).map(point => `${point.x},${point.y}`));
   }
@@ -117,8 +119,19 @@ export function createBattlefieldRenderer(canvas) {
         const castle = [KEEP, ...strongpoints].some(point =>
           x >= point.left && x <= point.right && y >= point.top && y <= point.bottom);
         const path = lanes.has(`${x},${y}`) || (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
-        const palette = path ? colors.path : colors.grass;
+        const type = terrain.get(`${x},${y}`);
+        const palette = type === "road" ? colors.path : type === "grass" ? colors.grass :
+          type === "mud" ? ["#685642", "#765f47"] : type === "swamp" ? ["#465f53", "#526b5b"] :
+          path ? colors.path : colors.grass;
         polygon(tile, palette[hash(x, y) % palette.length], castle ? "rgba(53,53,43,.25)" : colors.grassLine, .7);
+
+        if (type === "mud" || type === "swamp") {
+          const center = project(x, y, 0);
+          ctx.fillStyle = type === "mud" ? "rgba(36,30,22,.55)" : "rgba(148,185,158,.55)";
+          ctx.beginPath();
+          ctx.ellipse(center.x, center.y + tileH * .58, tileW * .15, tileH * .12, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         if (isEnterableHouse(x, y)) {
           polygon(tile, "#b3a17e", "#6e5945", 1);
@@ -131,7 +144,7 @@ export function createBattlefieldRenderer(canvas) {
         }
 
         const detail = hash(x + 19, y + 31);
-        if (!castle && !path && detail % 9 === 0) {
+        if (!castle && !path && !type && detail % 9 === 0) {
           const center = project(x, y, 0);
           ctx.fillStyle = "rgba(202,195,139,.24)";
           ctx.beginPath();

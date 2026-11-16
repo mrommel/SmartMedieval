@@ -193,6 +193,26 @@ test("route preview follows weight-adjusted current and future allowances", () =
   assert.equal(route.turns, 3);
 });
 
+test("route preview chooses cheaper terrain and never splits a costly tile between turns", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, terrain: [{ x: 1, y: 0, type: "swamp" },
+      { x: 2, y: 0, type: "mud" }] };
+  const unit = { id: 0, x: 0, y: 0, move_points: 3, move_capacity: 4, next_move_capacity: 4 };
+  const route = previewMovement(map, [unit], unit, { x: 2, y: 0 });
+  assert.deepEqual(Array.from(route.path, p => [p.x, p.y]),
+    [[0, 1], [1, 1], [2, 1], [2, 0]]);
+  assert.equal(route.totalCost, 6);
+  assert.equal(route.thisTurn, 3);
+  assert.equal(route.thisTurnCost, 3);
+  assert.equal(route.turns, 2);
+  const slow = { ...unit, move_points: 1, move_capacity: 2, next_move_capacity: 2 };
+  assert.equal(previewMovement(map, [slow], slow, { x: 1, y: 0 }).status, "unreachable");
+  const forced = { ...map, objects: [{ x: 0, y: 1, type: "rock" }] };
+  const waiting = previewMovement(forced, [unit], { ...unit, move_points: 2 }, { x: 2, y: 0 });
+  assert.equal(waiting.thisTurn, 0);
+  assert.equal(waiting.turns, 3);
+});
+
 test("renderer draws reachable route steps and unreachable markers", () => {
   const game = setup();
   const renderer = game.createRenderer(game.get("battlefield-canvas"));
@@ -243,13 +263,13 @@ test("keyboard and hover preview refresh after occupancy, selection, and pause",
   const canvas = game.get("battlefield-canvas");
   const key = name => canvas.fire("keydown", { key: name, preventDefault() {} });
   canvas.fire("pointermove", { pointerType: "mouse", clientX: 268, clientY: 219.2 });
-  assert.match(game.get("route-status").textContent, /1 tile · 1 MP total · 1 this turn/);
+  assert.match(game.get("route-status").textContent, /1 tile · 1 MP total · 1 MP this turn/);
   canvas.fire("pointerleave");
   assert.match(game.get("route-status").textContent, /Hover over a tile/);
   canvas.fire("focus");
   key("ArrowDown");
   key("ArrowDown");
-  assert.match(game.get("route-status").textContent, /2 tiles · 2 MP total · 1 this turn · approximately 2 turns/);
+  assert.match(game.get("route-status").textContent, /2 tiles · 2 MP total · 1 MP this turn \(1 tile\) · approximately 2 turns/);
   game.snapshot.state.units.push({ ...soldier, id: 1, x: 0, y: 2 });
   await game.get("end-turn").fire("click");
   assert.match(game.get("route-status").textContent, /Unreachable/);
@@ -625,7 +645,7 @@ test("load penalty and carrying limit are visible before moving or picking up", 
   const canvas = game.get("battlefield-canvas");
   canvas.fire("focus");
   canvas.fire("keydown", { key: "ArrowDown", preventDefault() {} });
-  assert.match(game.get("route-status").textContent, /1 this turn · load 8\/8 \(2 MP penalty\)/);
+  assert.match(game.get("route-status").textContent, /1 MP this turn \(1 tile\) · load 8\/8 \(2 MP penalty\)/);
   assert.match(game.get("selected-stats").textContent, /Projected next turn: 2 MP/);
 });
 

@@ -229,7 +229,7 @@ import { previewMovement } from "./path_preview.js";
       if (route.status === "reachable") {
         const unit = selected[0];
         const load = unit.carried_weight == null ? "" : ` · load ${unit.carried_weight}/${unit.max_carry_weight} (${unit.weight_penalty} MP penalty)`;
-        routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.path.length} MP total · ${route.thisTurn} this turn${load}${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · later turns needed (future allowance unavailable)" : ""}.`;
+        routeStatus.textContent = `Route to tile ${destination.x + 1}, ${destination.y + 1}: ${route.path.length} ${route.path.length === 1 ? "tile" : "tiles"} · ${route.totalCost} MP total · ${route.thisTurnCost} MP this turn (${route.thisTurn} ${route.thisTurn === 1 ? "tile" : "tiles"})${load}${route.turns > 1 ? ` · approximately ${route.turns} turns if the route stays clear` : route.turns === null ? " · route may require more movement per turn" : ""}.`;
       } else {
         routeStatus.textContent = route.status === "exhausted" ? "No movement points left. End the turn to move again." :
           route.status === "already_there" ? "Soldier is already on this tile." : "Unreachable: blocked route or occupied destination.";
@@ -320,7 +320,8 @@ import { previewMovement } from "./path_preview.js";
         renderer.isEnterableHouse(cursor.x, cursor.y) ? "house interior" :
         renderer.isHouse(cursor.x, cursor.y) ? "house" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
         ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" :
-        mapData?.lanes?.some(tile => tile.x === cursor.x && tile.y === cursor.y) ? "lane" : "open ground")}.`;
+        mapData?.terrain?.find(tile => tile.x === cursor.x && tile.y === cursor.y)?.type ||
+        (mapData?.lanes?.some(tile => tile.x === cursor.x && tile.y === cursor.y) ? "lane" : "open ground"))}.`;
   }
 
   function updateSelection() {

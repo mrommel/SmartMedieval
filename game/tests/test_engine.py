@@ -775,6 +775,69 @@ class CatapultTests(TestCase):
         self.assertNotIn(6, [unit["id"] for unit in lost["units"]])
 
 
+class TerrainMovementTests(TestCase):
+    def test_terrain_validation_rejects_bad_types_positions_and_untraversable_rosters(self):
+        battlefield = default_map()
+        battlefield["terrain"] = [{"x": 3, "y": 5, "type": "mud"},
+                                  {"x": 4, "y": 5, "type": "road"}]
+        validate_map(battlefield)
+        for tiles in ("mud", [{"x": 3, "y": 5, "type": "bog"}],
+                      [{"x": 3, "y": 5, "type": ["mud"]}],
+                      [{"x": 3, "y": 5, "type": "road", "cost": 1}],
+                      [{"x": True, "y": 5, "type": "mud"}],
+                      [{"x": 3, "y": 5, "type": "mud"}] * 2,
+                      [{"x": 11, "y": 3, "type": "mud"}],
+                      [{"x": 99, "y": 5, "type": "mud"}]):
+            battlefield["terrain"] = tiles
+            with self.subTest(tiles=tiles), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "crossbow", "armor": "mail"}]
+        battlefield["terrain"] = [{"x": 14, "y": 10, "type": "swamp"}]
+        with self.assertRaisesRegex(InvalidMap, "reach the objective"):
+            validate_map(battlefield)
+
+    def test_cheaper_detour_and_spending_stop_before_unaffordable_tile(self):
+        battlefield = default_map()
+        battlefield["terrain"] = [{"x": 3, "y": 6, "type": "swamp"},
+                                  {"x": 4, "y": 6, "type": "mud"}]
+        validate_map(battlefield)
+        path = find_path((2, 6), (4, 6), battlefield)
+        self.assertEqual(path, [(2, 7), (3, 7), (4, 7), (4, 6)])
+        state = initial_state(battlefield)
+        state["units"] = [state["units"][0]]
+        result = apply_action(state, {"type": "move", "units": [0], "x": 4, "y": 6}, battlefield)
+        self.assertEqual((result["units"][0]["x"], result["units"][0]["y"], result["units"][0]["move_points"]),
+                         (4, 7, 1))
+        with self.assertRaises(InvalidAction):
+            apply_action(result, {"type": "move", "units": [0], "x": 4, "y": 6}, battlefield)
+        next_turn = apply_action(result, {"type": "end_turn"}, battlefield)
+        arrived = apply_action(next_turn, {"type": "move", "units": [0], "x": 4, "y": 6}, battlefield)
+        self.assertEqual((arrived["units"][0]["y"], arrived["units"][0]["move_points"]), (6, 1))
+        self.assertEqual(state["units"][0]["move_points"], 4)
+
+    def test_weight_restricts_swamp_and_defenders_spend_terrain_cost(self):
+        battlefield = default_map()
+        battlefield["terrain"] = [{"x": 12, "y": 6, "type": "mud"},
+                                  {"x": 12, "y": 7, "type": "grass"},
+                                  {"x": 12, "y": 8, "type": "swamp"}]
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        guard = state["units"][6]
+        guard.update(x=12, y=5, weapon="crossbow", armor="mail", move_points=2)
+        self.assertEqual(move_allowance(guard), 2)
+        self.assertNotIn((12, 6), defender_destinations({**guard, "move_points": 2}, battlefield))
+        guard.update(weapon="sword", armor=None)
+        self.assertIn((12, 6), defender_destinations(guard, battlefield))
+        moved = apply_action(state, {"type": "end_turn"}, battlefield,
+                             enemy_orders=[{"unit_id": 6, "x": 12, "y": 6}])
+        self.assertEqual((moved["units"][6]["y"], moved["units"][6]["move_points"]), (6, 1))
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "end_turn"}, battlefield,
+                         enemy_orders=[{"unit_id": 6, "x": 12, "y": 8}])
+
+
 class TurnEngineTests(TestCase):
     def test_combat_history_records_player_attack_casualty_and_morale(self):
         state = initial_state()

@@ -1,5 +1,6 @@
 from collections import deque
 from copy import deepcopy
+from heapq import heappop, heappush
 from math import cos, pi, sin
 
 
@@ -25,6 +26,7 @@ MAP = {
     "catapults": [{"x": 3, "y": 7}],
 }
 MOVE_POINTS = 4
+TERRAIN_COSTS = {"road": 1, "grass": 2, "mud": 3, "swamp": 4}
 MAX_HEALTH = 3
 FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
@@ -107,7 +109,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
@@ -223,6 +225,20 @@ def validate_map(map_data):
                 or (lane["x"], lane["y"]) in seen_lanes):
             raise InvalidMap("Lanes must be unique open ground tiles without elevation.")
         seen_lanes.add((lane["x"], lane["y"]))
+    terrain = map_data.get("terrain", [])
+    if not isinstance(terrain, list) or len(terrain) > cols * rows:
+        raise InvalidMap("Terrain must be a list of unique open ground tiles.")
+    seen_terrain = set()
+    for tile in terrain:
+        if (not isinstance(tile, dict) or set(tile) != {"x", "y", "type"}
+                or type(tile["x"]) is not int or type(tile["y"]) is not int
+                or type(tile["type"]) is not str or tile["type"] not in TERRAIN_COSTS
+                or (tile["x"], tile["y"]) in seen_terrain
+                or (tile["x"], tile["y"]) in seen
+                or is_house(tile["x"], tile["y"], map_data)
+                or not is_walkable(tile["x"], tile["y"], map_data)):
+            raise InvalidMap("Terrain tiles must be distinct open ground tiles of type road, grass, mud or swamp.")
+        seen_terrain.add((tile["x"], tile["y"]))
     objective = map_data["objective"]
     if is_house(objective["x"], objective["y"], map_data) or not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
@@ -266,7 +282,8 @@ def validate_map(map_data):
                 guards += not position.get("is_king", False)
                 if position.get("is_king", False) != (tile == (objective["x"], objective["y"])) and mission == "capture_king":
                     raise InvalidMap("The king must start on the throne and guards must start elsewhere.")
-            if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data) is None:
+            if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data,
+                         max_step_cost=move_allowance(position)) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
             if name == "enemyStartPositions" and mission != "capture_king" and tile == (
                     objective["x"], objective["y"]):
@@ -436,21 +453,51 @@ def can_ranged_attack(attacker, target, map_data=MAP):
                                   (target["x"], target["y"]), map_data))
 
 
-def find_path(start, goal, map_data=MAP, blocked=()):
+def terrain_cost_index(map_data):
+    return {(tile["x"], tile["y"]): TERRAIN_COSTS[tile["type"]] for tile in map_data.get("terrain", ())}
+
+
+def affordable_steps(path, budget, terrain_costs):
+    """Return the traversable prefix and MP spent without splitting a step across turns."""
+    steps = []
+    spent = 0
+    for tile in path:
+        cost = terrain_costs.get(tile, 1)
+        if spent + cost > budget:
+            break
+        steps.append(tile)
+        spent += cost
+    return steps, spent
+
+
+def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None):
     if not is_walkable(*goal, map_data) or goal in blocked:
         return None
     elevations = elevation_index(map_data)
-    frontier = deque([start])
+    terrain_costs = terrain_cost_index(map_data)
+    frontier = [(0, 0, start)]
+    sequence = 0
+    distances = {start: 0}
     previous = {start: None}
     while frontier:
-        current = frontier.popleft()
+        distance, _, current = heappop(frontier)
+        if distance != distances[current]:
+            continue
         if current == goal:
             break
         x, y = current
         for neighbor in neighbors(x, y):
-            if neighbor not in previous and neighbor not in blocked and can_step(current, neighbor, map_data, elevations):
+            if neighbor in blocked or not can_step(current, neighbor, map_data, elevations):
+                continue
+            cost = terrain_costs.get(neighbor, 1)
+            if max_step_cost is not None and cost > max_step_cost:
+                continue
+            new_distance = distance + cost
+            if new_distance < distances.get(neighbor, float("inf")):
+                distances[neighbor] = new_distance
                 previous[neighbor] = current
-                frontier.append(neighbor)
+                sequence += 1
+                heappush(frontier, (new_distance, sequence, neighbor))
     if goal not in previous:
         return None
     path = []
@@ -583,24 +630,31 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_armor": target["armor"]} if absorbed else {})])[-HISTORY_LIMIT:]
 
 
-def defender_destinations(unit, map_data=MAP, blocked=()):
+def defender_destinations(unit, map_data=MAP, blocked=(), items=()):
     start = (unit["x"], unit["y"])
     objective = (map_data["objective"]["x"], map_data["objective"]["y"])
-    frontier = deque([(start, 0)])
-    visited = {start}
+    frontier = [(0, 0, start)]
+    distances = {start: 0}
+    sequence = 0
     destinations = []
     elevations = elevation_index(map_data)
+    terrain_costs = terrain_cost_index(map_data)
+    allowance = move_allowance(unit, items)
     while frontier:
-        (x, y), distance = frontier.popleft()
+        distance, _, (x, y) = heappop(frontier)
+        if distance != distances[x, y]:
+            continue
         if (x, y) != start and (x, y) != objective:
             destinations.append((x, y))
-        if distance == move_allowance(unit):
-            continue
         for neighbor in neighbors(x, y):
-            if (neighbor not in visited and neighbor not in blocked and neighbor != objective
-                    and can_step((x, y), neighbor, map_data, elevations)):
-                visited.add(neighbor)
-                frontier.append((neighbor, distance + 1))
+            if (neighbor in blocked or neighbor == objective
+                    or not can_step((x, y), neighbor, map_data, elevations)):
+                continue
+            new_distance = distance + terrain_costs.get(neighbor, 1)
+            if new_distance <= allowance and new_distance < distances.get(neighbor, float("inf")):
+                distances[neighbor] = new_distance
+                sequence += 1
+                heappush(frontier, (new_distance, sequence, neighbor))
     return destinations
 
 
@@ -631,7 +685,7 @@ def resolve_defender_goals(state, goals, map_data=MAP):
         if (x, y) == start:
             continue
         blocked = set(positions.values()) - {start}
-        destinations = defender_destinations(unit, map_data, blocked)
+        destinations = defender_destinations(unit, map_data, blocked, state.get("items", ()))
         if not destinations:
             continue
         # A nearby garrison must not abandon the objective unless another defender
@@ -641,8 +695,11 @@ def resolve_defender_goals(state, goals, map_data=MAP):
             destinations = [tile for tile in destinations if guarding(tile)]
             if not destinations:
                 continue
-        route = find_path(start, (x, y), map_data, blocked=blocked | {objective})
-        along_route = [tile for tile in (route or [])[:move_allowance(unit)] if tile in destinations]
+        route = find_path(start, (x, y), map_data, blocked=blocked | {objective},
+                          max_step_cost=move_allowance(unit, state.get("items", ())))
+        affordable, _ = affordable_steps(route or [], move_allowance(unit, state.get("items", ())),
+                                          terrain_cost_index(map_data))
+        along_route = [tile for tile in affordable if tile in destinations]
         if along_route:
             destination = along_route[-1]
         else:
@@ -1013,15 +1070,19 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             unit = defenders[unit_id]
             start = (unit["x"], unit["y"])
             blocked = {(other["x"], other["y"]) for other in next_state["units"] if other is not unit}
-            if (x, y) not in defender_destinations(unit, map_data, blocked):
+            if (x, y) not in defender_destinations(unit, map_data, blocked, next_state["items"]):
                 raise InvalidAction("Invalid defender destination.")
             objective = (map_data["objective"]["x"], map_data["objective"]["y"])
-            path = find_path(start, (x, y), map_data, blocked=blocked | {objective})
+            path = find_path(start, (x, y), map_data, blocked=blocked | {objective},
+                             max_step_cost=unit["move_points"])
+            if path is None:
+                raise InvalidAction("Invalid defender destination.")
             old_x = unit["x"]
             unit["x"], unit["y"] = path[-1]
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
-            unit["move_points"] -= len(path)
+            terrain_costs = terrain_cost_index(map_data)
+            unit["move_points"] -= sum(terrain_costs.get(tile, 1) for tile in path)
         for defender in [unit for unit in next_state["units"]
                          if unit.get("side") == "defenders" and not unit.get("is_king")]:
             if defender["fight_points"] < 1:
@@ -1106,15 +1167,19 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             target = (x + round(cos(angle)), y + round(sin(angle)))
             if not is_walkable(*target, map_data) or target in blocked:
                 target = (x, y)
-        path = find_path((unit["x"], unit["y"]), target, map_data, blocked=blocked)
+        path = find_path((unit["x"], unit["y"]), target, map_data, blocked=blocked,
+                         max_step_cost=max(unit.get("move_capacity", move_allowance(unit, next_state["items"])),
+                                           move_allowance(unit, next_state["items"])))
         if path:
-            steps = path[:unit["move_points"]]
+            steps, spent = affordable_steps(path, unit["move_points"], terrain_cost_index(map_data))
+            if not steps:
+                continue
             old_x = unit["x"]
             unit["x"], unit["y"] = steps[-1]
             unit["z"] = tile_height(unit["x"], unit["y"], map_data)
             unit["facing"] = 1 if unit["x"] >= old_x else -1
-            unit["move_points"] -= len(steps)
+            unit["move_points"] -= spent
             moved = True
     if not moved:
-        raise InvalidAction("That route is blocked or the units are already there.")
+        raise InvalidAction("That route is blocked, too costly for this turn, or the units are already there.")
     return next_state
