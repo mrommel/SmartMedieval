@@ -107,7 +107,7 @@ import { previewMovement } from "./path_preview.js";
         (selectedGear.type === "weapon" ? { sword: 1, longbow: 2, crossbow: 3 }[selectedGear.name] :
           { leather: 1, mail: 3 }[selectedGear.name]) > (medic.max_carry_weight ?? 8));
     const carried = medic && simulation.items.filter(item => item.type === "healing_potion" && item.carrier_id === medic.id);
-    const hasPotions = Boolean(mapData?.has_items ?? mapData?.items?.length);
+    const hasPotions = Boolean(mapData?.has_items ?? mapData?.items?.some(item => item.type === "healing_potion"));
     pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
     pickupButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points ||
       carried.length >= 2 || (medic.carried_weight != null && medic.carried_weight >= (medic.max_carry_weight ?? 8)) ||

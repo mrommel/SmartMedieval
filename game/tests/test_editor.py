@@ -39,6 +39,8 @@ class GameEditorTests(TestCase):
                                    "gate": {"x": 7, "y": 4}}]
         custom["houses"] = [{"left": 6, "right": 7, "top": 9, "bottom": 10}]
         custom["lanes"] = [{"x": 7, "y": 7}]
+        custom["items"] = [{"x": 2, "y": 6, "type": "weapon", "name": "longbow"},
+                           {"x": 3, "y": 7, "type": "armor", "name": "leather"}]
         response = self.client.post(reverse("admin:game_singlegame_add"), {
             "name": "New match", "slug": "new-match", "description": "New battlefield.",
             "introduction": "Advance.", "sort_order": 2, "is_available": "on",

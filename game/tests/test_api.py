@@ -35,6 +35,40 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_authored_equipment_launch_and_resume(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "weapon", "name": "longbow"},
+                                {"x": 3, "y": 7, "type": "armor", "name": "mail"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["map"]["items"], battlefield["items"])
+        self.assertEqual([(item["id"], item["type"], item["name"]) for item in started["state"]["items"]],
+                         [(0, "weapon", "longbow"), (1, "armor", "mail")])
+        self.assertEqual(self.action(0, {"type": "pickup_item", "unit_id": 0, "item_id": 0}).status_code, 400)
+        armored = self.action(0, {"type": "pickup_equipment", "unit_id": 1, "item_id": 1}).json()
+        self.assertEqual(armored["state"]["units"][1]["armor"], "mail")
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], armored["state"])
+
+    def test_fog_hides_authored_equipment_until_spotted(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]
+        battlefield["enemyStartPositions"] = [{"x": 9, "y": 6, "weapon": "sword"}]
+        battlefield["items"] = [{"x": 9, "y": 6, "type": "armor", "name": "mail"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertNotIn("items", started["map"])
+        self.assertFalse(started["map"]["has_items"])
+        self.assertEqual(started["state"]["items"], [])
+        spotted = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).json()
+        self.assertEqual(spotted["state"]["items"], [
+            {"id": 0, "type": "armor", "name": "mail", "x": 9, "y": 6, "carrier_id": None},
+        ])
+
     def fog_game(self):
         battlefield = default_map()
         battlefield["fog_of_war"] = True

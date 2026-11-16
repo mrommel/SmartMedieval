@@ -329,16 +329,19 @@ def validate_map(map_data):
         seen_horses.add((point["x"], point["y"]))
     items = map_data.get("items", [])
     if not isinstance(items, list) or len(items) > 32:
-        raise InvalidMap("Items must be a list of at most 32 healing potions.")
+        raise InvalidMap("Items must be a list of at most 32 potions or pieces of equipment.")
     seen_items = set()
     for item in items:
-        if (not isinstance(item, dict) or set(item) != {"x", "y", "type"}
+        if (not isinstance(item, dict) or set(item) not in ({"x", "y", "type"}, {"x", "y", "type", "name"})
                 or type(item["x"]) is not int or type(item["y"]) is not int
-                or item["type"] != "healing_potion"
+                or not ((item["type"] == "healing_potion" and "name" not in item)
+                        or (item["type"] == "weapon" and item.get("name") in ("sword", "longbow", "crossbow"))
+                        or (item["type"] == "armor" and isinstance(item.get("name"), str)
+                            and item["name"] in ARMOR_STATS))
                 or not is_walkable(item["x"], item["y"], map_data)
                 or tile_height(item["x"], item["y"], map_data) != 0
                 or (item["x"], item["y"]) in seen_items):
-            raise InvalidMap("Healing potions need distinct walkable ground tiles.")
+            raise InvalidMap("Items need valid types and names on distinct walkable ground tiles.")
         seen_items.add((item["x"], item["y"]))
     if "enemyStartPositions" not in map_data:
         legacy_enemy_position(map_data)
@@ -890,7 +893,8 @@ def initial_state(map_data=MAP):
         "wall_damage": [],
         "breaches": [],
         "items": [
-            {"id": index, "type": "healing_potion", "x": item["x"], "y": item["y"], "carrier_id": None}
+            {"id": index, "type": item["type"], **({"name": item["name"]} if "name" in item else {}),
+             "x": item["x"], "y": item["y"], "carrier_id": None}
             for index, item in enumerate(map_data.get("items", []))
         ],
         "next_item_id": len(map_data.get("items", [])),

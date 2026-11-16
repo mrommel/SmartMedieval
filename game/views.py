@@ -61,7 +61,8 @@ def serialize_instance(instance):
         # A map definition is an editor document, not a player-safe battlefield snapshot.
         map_data = {key: value for key, value in map_data.items()
                     if key not in ("enemyStartPositions", "items", "horses")}
-        map_data["has_items"] = bool(instance.map_definition.get("items"))
+        map_data["has_items"] = any(item["type"] == "healing_potion"
+                                    for item in instance.map_definition.get("items", ()))
         history = [{key: value for key, value in event.items() if key != "witnessed"}
                    | ({"morale_changes": [change for change in event["morale_changes"]
                                            if change["unit_id"] < len(instance.map_definition["startPositions"])]}

@@ -402,6 +402,54 @@ class CarriedWeightTests(TestCase):
 
 
 class EquipmentRecoveryTests(TestCase):
+    def test_authored_ground_equipment_can_be_recovered_with_existing_rules(self):
+        battlefield = default_map()
+        battlefield["items"] = [
+            {"x": 2, "y": 6, "type": "weapon", "name": "longbow"},
+            {"x": 3, "y": 7, "type": "armor", "name": "mail"},
+            {"x": 4, "y": 6, "type": "healing_potion"},
+        ]
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        self.assertEqual(state["items"], [
+            {"id": 0, "type": "weapon", "name": "longbow", "x": 2, "y": 6, "carrier_id": None},
+            {"id": 1, "type": "armor", "name": "mail", "x": 3, "y": 7, "carrier_id": None},
+            {"id": 2, "type": "healing_potion", "x": 4, "y": 6, "carrier_id": None},
+        ])
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "pickup_equipment", "unit_id": 0, "item_id": 0}, battlefield)
+        unarmed = apply_action(state, {"type": "drop_weapon", "unit_id": 0}, battlefield)
+        unarmed = apply_action(unarmed, {"type": "end_turn"}, battlefield)
+        equipped = apply_action(unarmed, {"type": "pickup_equipment", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(equipped["units"][0]["weapon"], "longbow")
+        self.assertEqual(equipped["units"][0]["fight_points"], 0)
+        self.assertEqual(equipped["next_item_id"], 4)
+        armored = apply_action(state, {"type": "pickup_equipment", "unit_id": 1, "item_id": 1}, battlefield)
+        self.assertEqual(armored["units"][1]["armor"], "mail")
+        self.assertTrue(armored["units"][1]["armor_equipped"])
+        self.assertEqual(armored["units"][1]["fight_points"], 0)
+
+    def test_authored_equipment_requires_valid_kind_name_and_distinct_open_ground(self):
+        for item in (
+            {"x": 2, "y": 6, "type": "weapon"},
+            {"x": 2, "y": 6, "type": "weapon", "name": "axe"},
+            {"x": 2, "y": 6, "type": "armor", "name": []},
+            {"x": 2, "y": 6, "type": "armor", "name": "plate"},
+            {"x": 2, "y": 6, "type": "healing_potion", "name": "mail"},
+            {"x": 2, "y": 6, "type": "weapon", "name": "sword", "id": 3},
+            {"x": 11, "y": 7, "type": "armor", "name": "mail"},
+            {"x": 2, "y": True, "type": "weapon", "name": "sword"},
+        ):
+            battlefield = default_map()
+            battlefield["items"] = [item]
+            with self.subTest(item=item), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "weapon", "name": "sword"},
+                                {"x": 2, "y": 6, "type": "armor", "name": "mail"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+
     def test_casualties_drop_weapon_armor_and_potions_with_stable_ids(self):
         battlefield = default_map()
         battlefield["enemyStartPositions"][0]["armor"] = "mail"
