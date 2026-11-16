@@ -5,7 +5,7 @@ from urllib.error import URLError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from ..engine import MAP, default_map
+from ..engine import MAP, default_map, normalize_map
 from ..models import GameInstance, Scenario, SingleGame
 
 
@@ -35,6 +35,32 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_seeded_hamlet_potions_heal_and_persist_without_changing_snapshots(self):
+        self.game = SingleGame.objects.get(slug="greywatch-hamlet")
+        started = self.start().json()
+        self.assertEqual(started["map"]["items"], [
+            {"x": 2, "y": 6, "type": "healing_potion"},
+            {"x": 7, "y": 3, "type": "healing_potion"},
+        ])
+        self.assertEqual(len(started["state"]["items"]), 2)
+        picked = self.action(0, {"type": "pickup_item", "unit_id": 0, "item_id": 0})
+        self.assertEqual(picked.status_code, 200)
+        self.assertEqual(picked.json()["state"]["items"][0]["carrier_id"], 0)
+        self.assertEqual(self.action(0, {"type": "drop_item", "unit_id": 0, "item_id": 0}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "use_item", "unit_id": 0,
+                                         "item_id": 0, "target_id": 6}).status_code, 400)
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0]["health"] = 1
+        instance.state["units"][0]["fight_points"] = 1
+        instance.save(update_fields=["state"])
+        healed = self.action(1, {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 0})
+        self.assertEqual(healed.status_code, 200)
+        self.assertEqual(healed.json()["state"]["units"][0]["health"], 3)
+        self.assertEqual(healed.json()["state"]["items"][0]["id"], 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], healed.json()["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["history"][-1]["type"], "use_item")
+        self.assertEqual(self.start().json()["state"]["items"][0]["carrier_id"], None)
+
     def test_seeded_hamlet_house_entry_persists_and_ai_receives_doors(self):
         self.game = SingleGame.objects.get(slug="greywatch-hamlet")
         started = self.start().json()
@@ -59,13 +85,13 @@ class GameInstanceApiTests(TestCase):
         self.assertIn(throne.pk, [game["id"] for game in self.client.get(reverse("single-games-api")).json()])
         started = self.client.post(reverse("start-game", args=["single-games", throne.pk])).json()
         self.assertEqual(started["map"]["mission"], "capture_king")
-        king = next(unit for unit in started["state"]["units"] if unit["type"] == "king")
+        king = next(unit for unit in started["state"]["units"] if unit.get("is_king"))
         self.assertEqual((king["x"], king["y"]), (14, 7))
         self.assertEqual(started["state"]["capture_status"], "KING GUARDED")
         self.assertEqual(Client().get(reverse("current-game")).status_code, 404)
         instance = GameInstance.objects.get(pk=started["id"])
         instance.state["units"] = [unit for unit in instance.state["units"]
-                                   if unit["side"] != "defenders" or unit["type"] == "king"]
+                                   if unit["side"] != "defenders" or unit.get("is_king")]
         instance.state["units"][0].update(x=14, y=8)
         instance.save(update_fields=["state"])
         result = self.action(0, {"type": "capture", "unit_id": 0})
@@ -83,10 +109,9 @@ class GameInstanceApiTests(TestCase):
     def test_seeded_assault_catapult_actions_persist_and_ai_uses_breaches(self):
         game = SingleGame.objects.get(slug="greywatch-assault")
         self.assertEqual(game.map_definition["catapults"], [{"x": 3, "y": 7}])
-        self.assertEqual(game.map_definition["enemyStartPositions"], MAP["enemyStartPositions"])
         self.game = game
         started = self.start().json()
-        self.assertEqual(started["map"]["enemyStartPositions"], MAP["enemyStartPositions"])
+        self.assertEqual(started["map"]["enemyStartPositions"], normalize_map(game.map_definition)["enemyStartPositions"])
         self.assertEqual(started["state"]["catapults"][0]["ammo"], 3)
         aim = {"type": "aim_catapult", "unit_id": 1, "catapult_id": 0, "x": 11, "y": 7}
         self.assertEqual(self.action(0, {**aim, "x": True}).status_code, 400)
@@ -120,7 +145,7 @@ class GameInstanceApiTests(TestCase):
         throne = SingleGame.objects.get(slug="greywatch-throne-room")
         started = self.client.post(reverse("start-game", args=["single-games", throne.pk])).json()
         instance = GameInstance.objects.get(pk=started["id"])
-        king = next(unit for unit in instance.state["units"] if unit["type"] == "king")
+        king = next(unit for unit in instance.state["units"] if unit.get("is_king"))
         instance.state["units"][0].update(x=14, y=8)
         king["health"] = 1
         instance.save(update_fields=["state"])
@@ -129,7 +154,8 @@ class GameInstanceApiTests(TestCase):
         request = self.ai.call_args.args[0]
         ai_input = json.loads(json.loads(request.data)["messages"][1]["content"].split("\n")[0])
         self.assertEqual(ai_input["map"]["mission"], "capture_king")
-        self.assertIn("king", [unit["type"] for unit in ai_input["units"]])
+        self.assertTrue(any(unit["is_king"] for unit in ai_input["units"]))
+        self.assertTrue(all("type" not in unit for unit in ai_input["units"]))
         self.set_ai_orders([{"unit_id": king["id"], "x": 14, "y": 8}])
         self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 502)
         self.set_ai_orders([])
@@ -151,6 +177,8 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(data["state"]["units"][0]["fight_points"], 1)
         self.assertEqual(data["state"]["units"][0]["morale"], 3)
         self.assertEqual(data["state"]["units"][0]["rank"], "recruit")
+        self.assertEqual((data["state"]["units"][0]["weapon"], data["state"]["units"][0]["tools"]), ("sword", []))
+        self.assertTrue(all("type" not in unit for unit in data["state"]["units"]))
         self.assertEqual(data["state"]["history"], [])
         self.assertEqual(len([unit for unit in data["state"]["units"] if unit["side"] == "defenders"]), 3)
         self.assertEqual(GameInstance.objects.count(), 1)
@@ -177,6 +205,27 @@ class GameInstanceApiTests(TestCase):
                          (3, "recruit"))
         self.assertNotIn("test-only-key", json.dumps(next_turn.json()))
         self.assertNotIn("test-only-key", request.data.decode())
+
+    def test_legacy_match_resumes_without_unit_types_and_converts_on_action(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        legacy = default_map()
+        legacy["startPositions"][0] = {"x": 2, "y": 6, "type": "vanguard"}
+        instance.map_definition = legacy
+        for unit in instance.state["units"]:
+            unit["type"] = {"sword": "vanguard", "longbow": "longbow", "crossbow": "crossbow"}[unit.pop("weapon")]
+            del unit["tools"]
+        instance.state["history"] = [{"turn": 1, "type": "promote", "actor_id": 0,
+                                      "actor_side": "attackers", "actor_type": "vanguard", "morale_change": -2}]
+        instance.save(update_fields=["map_definition", "state"])
+        resumed = self.client.get(reverse("current-game")).json()
+        self.assertNotIn("type", resumed["map"]["startPositions"][0])
+        self.assertTrue(all("type" not in unit for unit in resumed["state"]["units"]))
+        self.assertEqual(resumed["state"]["history"][0]["actor_weapon"], "sword")
+        moved = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual(moved.json()["state"]["units"][0]["weapon"], "sword")
+        self.assertTrue(all("type" not in unit for unit in GameInstance.objects.get(pk=started["id"]).state["units"]))
 
     def test_elevated_map_is_snapshotted_and_shared_with_defender_ai(self):
         battlefield = default_map()
@@ -328,8 +377,8 @@ class GameInstanceApiTests(TestCase):
         units = instance.state["units"]
         units[0].update(x=4, y=6, health=1)
         units[1].update(x=5, y=7)
-        units[6].update(x=6, y=6, type="longbow")
-        units[7].update(x=7, y=7, type="crossbow")
+        units[6].update(x=6, y=6, weapon="longbow")
+        units[7].update(x=7, y=7, weapon="crossbow")
         instance.save(update_fields=["state"])
 
         result = self.action(0, {"type": "end_turn"})
@@ -409,13 +458,13 @@ class GameInstanceApiTests(TestCase):
                                    content_type="application/json")
         self.assertEqual(started.status_code, 201)
         self.assertEqual(started.json()["game_id"], second.pk)
-        self.assertEqual(started.json()["map"], custom)
+        self.assertEqual(started.json()["map"], normalize_map(custom))
         self.assertEqual(len([unit for unit in started.json()["state"]["units"] if unit["side"] == "attackers"]), 1)
         second.is_available = False
         second.save()
         self.assertEqual(self.client.post(url, data=json.dumps({"single_game_id": second.pk}),
                                           content_type="application/json").status_code, 400)
-        self.assertEqual(self.client.get(reverse("current-game")).json()["map"], custom)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["map"], normalize_map(custom))
 
     def test_active_match_keeps_its_map_after_definition_changes(self):
         custom = default_map()
@@ -425,14 +474,14 @@ class GameInstanceApiTests(TestCase):
         self.game.full_clean()
         self.game.save()
         started = self.start().json()
-        self.assertEqual(started["map"], custom)
+        self.assertEqual(started["map"], normalize_map(custom))
         self.game.map_definition = default_map()
         self.game.save()
         moved = self.action(0, {"type": "move", "units": [0], "x": 4, "y": 5})
         self.assertEqual(moved.status_code, 200)
         captured = self.action(1, {"type": "end_turn"})
         self.assertEqual(captured.json()["state"]["capture_status"], "CAPTURING")
-        self.assertEqual(captured.json()["map"], custom)
+        self.assertEqual(captured.json()["map"], normalize_map(custom))
         self.assertEqual(self.start().json()["map"], MAP)
 
     def test_enemy_ai_moves_only_defenders_and_failed_turns_are_not_saved(self):

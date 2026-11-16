@@ -4,7 +4,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 
-from .engine import STARTING_MORALE, InvalidAction, apply_action, battle_map, resolve_defender_goals
+from .engine import STARTING_MORALE, InvalidAction, apply_action, battle_map, normalize_unit, resolve_defender_goals
 
 
 AI_URL = "http://127.0.0.1:11435/v1/chat/completions"
@@ -19,7 +19,7 @@ class EnemyAIError(Exception):
 
 def enemy_turn(state, map_data, combat_events=None):
     defenders = [unit for unit in state["units"]
-                 if unit.get("side") == "defenders" and unit.get("type") != "king"]
+                 if unit.get("side") == "defenders" and not normalize_unit(unit).get("is_king")]
     if not defenders:
         return apply_action(state, {"type": "end_turn"}, map_data, combat_events=combat_events)
     if not settings.ENEMY_AI_API_KEY:
@@ -34,10 +34,10 @@ def enemy_turn(state, map_data, combat_events=None):
                    "breaches": state.get("breaches", [])},
         "units": [
             {key: unit.get(key) for key in (
-                "id", "side", "type", "x", "y", "health", "fight_points", "reload_turns",
+                "id", "side", "weapon", "tools", "is_king", "x", "y", "health", "fight_points", "reload_turns",
                 "move_points", "z",
             )} | {"morale": unit.get("morale", STARTING_MORALE), "rank": unit.get("rank", "recruit")}
-            for unit in state["units"]
+            for unit in (normalize_unit(value) for value in state["units"])
         ],
     }
     request_data = {
@@ -52,7 +52,7 @@ def enemy_turn(state, map_data, combat_events=None):
                 "objective. A defender may aim at the objective but cannot occupy it. Elevated "
                 "tiles have height 1-3; only ladders and ramps on the higher tile permit a "
                 "one-level step. Wall tiles listed in breaches are open passages. After "
-                "movement, defenders automatically attack when possible: vanguards make melee "
+                "movement, defenders automatically attack when possible: soldiers with swords make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
                 "with walls, houses, trees, rocks, and wells blocking line of sight and movement. "
                 "Houses without doors are solid; houses with a door have walkable ground-floor tiles, "
@@ -68,7 +68,7 @@ def enemy_turn(state, map_data, combat_events=None):
                 "already nearby; prioritize attackers occupying the objective. In a capture_king "
                 "mission the king stays on the throne, never moves or attacks, and cannot be "
                 "ordered; keep guards adjacent to him to prevent capture, and attack nearby "
-                "vanguards before they can capture him. "
+                "soldiers with swords before they can capture him. "
                 "Issue at most 8 orders and at most one per defender. "
                 "Omit units that should hold position. Do not issue attacker orders."
             )},

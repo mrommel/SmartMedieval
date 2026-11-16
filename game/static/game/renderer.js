@@ -348,6 +348,20 @@ export function createBattlefieldRenderer(canvas) {
     ctx.restore();
   }
 
+  function drawPotion(item) {
+    const p = project(item.x, item.y);
+    const size = Math.max(4, tileW * .095);
+    ctx.fillStyle = "#e6d3ae";
+    ctx.fillRect(p.x - size * .4, p.y + tileH * .25, size * .8, size * .4);
+    ctx.fillStyle = "#ad544f";
+    ctx.strokeStyle = "#f6d5aa";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + tileH * .48, size, size * .75, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   function drawAimMarker(catapult) {
     if (!catapult.aim) return;
     const target = project(catapult.aim.x, catapult.aim.y);
@@ -419,8 +433,8 @@ export function createBattlefieldRenderer(canvas) {
       ctx.arc(0, -10, 2, 0, Math.PI * 2);
       ctx.fill();
     }
-    const coat = unit.type === "king" ? "#9b673c" : unit.side === "defenders" ? "#566783" :
-      unit.type === "vanguard" ? "#8f5946" : unit.type === "longbow" ? "#71824e" : "#526e6b";
+    const coat = unit.is_king ? "#9b673c" : unit.side === "defenders" ? "#566783" :
+      unit.weapon === "sword" ? "#8f5946" : unit.weapon === "longbow" ? "#71824e" : "#526e6b";
     ctx.fillStyle = coat;
     ctx.beginPath();
     ctx.moveTo(-6, -7 + bob); ctx.lineTo(-5, -17 + bob);
@@ -431,12 +445,12 @@ export function createBattlefieldRenderer(canvas) {
     ctx.beginPath();
     ctx.arc(0, -20 + bob, 4.3, 0, Math.PI * 2);
     ctx.fill();
-    if (unit.type === "king") {
+    if (unit.is_king) {
       ctx.fillStyle = "#f0d47a";
       polygon([[-5, -24 + bob], [-5, -29 + bob], [-2, -26 + bob],
         [0, -31 + bob], [2, -26 + bob], [5, -29 + bob], [5, -24 + bob]], "#f0d47a", "#76542e");
     } else {
-      ctx.fillStyle = unit.type === "vanguard" ? "#615c4c" : "#665544";
+      ctx.fillStyle = unit.weapon === "sword" ? "#615c4c" : "#665544";
       ctx.beginPath();
       ctx.arc(0, -21.2 + bob, 4.2, Math.PI, Math.PI * 2);
       ctx.lineTo(3.9, -20 + bob); ctx.lineTo(-4, -20 + bob); ctx.fill();
@@ -445,19 +459,19 @@ export function createBattlefieldRenderer(canvas) {
     ctx.strokeStyle = "#d3c7a6";
     ctx.lineWidth = 1.35;
     ctx.lineCap = "round";
-    if (unit.type === "vanguard") {
+    if (unit.weapon === "sword") {
       ctx.beginPath(); ctx.moveTo(4, -12 + bob); ctx.lineTo(12, -22 + bob); ctx.stroke();
       ctx.strokeStyle = "#876846"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(-7, -12 + bob); ctx.lineTo(-10, -5 + bob); ctx.stroke();
-    } else if (unit.type === "king") {
+    } else if (unit.is_king) {
       ctx.strokeStyle = "#d8bf72";
       ctx.beginPath(); ctx.moveTo(6, -15 + bob); ctx.lineTo(7, -4 + bob); ctx.stroke();
-    } else if (unit.type === "longbow") {
+    } else if (unit.weapon === "longbow") {
       ctx.strokeStyle = "#9c7047"; ctx.lineWidth = 1.7;
       ctx.beginPath(); ctx.moveTo(7, -9 + bob); ctx.quadraticCurveTo(15, -16 + bob, 7, -24 + bob); ctx.stroke();
       ctx.strokeStyle = "#d8c99e"; ctx.lineWidth = .65;
       ctx.beginPath(); ctx.moveTo(7, -9 + bob); ctx.lineTo(7, -24 + bob); ctx.stroke();
-    } else {
+    } else if (unit.weapon === "crossbow") {
       ctx.strokeStyle = "#887253"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(5, -13 + bob); ctx.lineTo(13, -17 + bob); ctx.stroke();
       ctx.strokeStyle = "#d3c7a6"; ctx.lineWidth = 1;
@@ -583,6 +597,8 @@ export function createBattlefieldRenderer(canvas) {
     });
     (simulation.catapults || []).forEach(catapult =>
       layers.push({ depth: catapult.x + catapult.y + .35, kind: "catapult", catapult }));
+    (simulation.items || []).filter(item => item.carrier_id === null).forEach(item =>
+      layers.push({ depth: item.x + item.y + .4, kind: "potion", item }));
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     layers.sort((a, b) => a.depth - b.depth);
 
@@ -598,6 +614,7 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "object") drawObject(layer.obj);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
+      else if (layer.kind === "potion") drawPotion(layer.item);
       else drawUnit(layer.unit, time);
     }
     if (!objectiveDrawn) drawObjective(time);

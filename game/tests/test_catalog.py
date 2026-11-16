@@ -6,11 +6,42 @@ from django.contrib.staticfiles import finders
 from django.test import TestCase
 from django.urls import reverse
 
-from ..engine import default_map, initial_state, validate_map
+from ..engine import default_map, initial_state, normalize_map, validate_map
 from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameCatalogApiTests(TestCase):
+    def test_equipment_upgrade_keeps_active_match_and_is_repeatable(self):
+        upgrade = import_module("game.migrations.0010_unit_equipment")
+        game = SingleGame.objects.get(slug="greywatch-assault")
+        legacy = deepcopy(game.map_definition)
+        for name in ("startPositions", "enemyStartPositions"):
+            for point in legacy[name]:
+                point["type"] = {"sword": "vanguard", "longbow": "longbow", "crossbow": "crossbow"}[point.pop("weapon")]
+        game.map_definition = legacy
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(single_game=game, source_game=game,
+                                            map_definition=deepcopy(legacy), state=initial_state(legacy), revision=4)
+        match.state["units"][0]["type"] = "vanguard"
+        del match.state["units"][0]["weapon"]
+        match.state["history"] = [{"turn": 1, "type": "attack", "actor_type": "vanguard",
+                                   "target_type": "longbow"}]
+        match.save(update_fields=["state"])
+        schema_editor = type("Editor", (), {"connection": type("Connection", (), {"alias": "default"})()})()
+        upgrade.migrate_equipment(apps, schema_editor)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition, default_map())
+        self.assertEqual(match.map_definition, default_map())
+        self.assertEqual((match.state["units"][0]["weapon"], match.state["units"][0]["tools"]), ("sword", []))
+        self.assertNotIn("type", match.state["units"][0])
+        self.assertEqual(match.state["history"][0]["actor_weapon"], "sword")
+        self.assertEqual(match.revision, 4)
+        snapshot = deepcopy(match.state)
+        upgrade.migrate_equipment(apps, schema_editor)
+        match.refresh_from_db()
+        self.assertEqual(match.state, snapshot)
+
     def test_seeded_village_has_reachable_map_and_linked_scenario(self):
         game = SingleGame.objects.get(slug="greywatch-hamlet")
         scenario = Scenario.objects.get(slug="through-the-hamlet")
@@ -25,8 +56,10 @@ class GameCatalogApiTests(TestCase):
     def test_house_door_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0008_hamlet_house_doors")
         game = SingleGame.objects.get(slug="greywatch-hamlet")
-        upgraded = deepcopy(game.map_definition)
         previous = deepcopy(upgrade.PREVIOUS_HAMLET)
+        upgraded = deepcopy(previous)
+        upgraded["houses"][0]["door"] = {"x": 7, "y": 4}
+        upgraded["houses"][1]["door"] = {"x": 7, "y": 10}
         game.map_definition = previous
         game.save(update_fields=["map_definition"])
         match = GameInstance.objects.create(
@@ -50,6 +83,34 @@ class GameCatalogApiTests(TestCase):
         game.refresh_from_db()
         self.assertEqual(game.map_definition, custom)
 
+    def test_potion_upgrade_preserves_custom_maps_and_active_matches(self):
+        upgrade = import_module("game.migrations.0009_hamlet_healing_potions")
+        game = SingleGame.objects.get(slug="greywatch-hamlet")
+        upgraded = deepcopy(game.map_definition)
+        previous = deepcopy(upgrade.PREVIOUS_HAMLET)
+        game.map_definition = previous
+        game.save(update_fields=["map_definition"])
+        match = GameInstance.objects.create(
+            single_game=game, source_game=game,
+            map_definition=deepcopy(previous), state=initial_state(previous),
+        )
+        upgrade.stock_hamlet(apps, None)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(normalize_map(game.map_definition), upgraded)
+        self.assertEqual(match.map_definition, previous)
+        self.assertEqual(match.state["items"], [])
+        upgrade.stock_hamlet(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(normalize_map(game.map_definition), upgraded)
+        custom = deepcopy(previous)
+        custom["items"] = [{"x": 5, "y": 7, "type": "healing_potion"}]
+        game.map_definition = custom
+        game.save(update_fields=["map_definition"])
+        upgrade.stock_hamlet(apps, None)
+        game.refresh_from_db()
+        self.assertEqual(game.map_definition, custom)
+
     def test_assault_upgrade_preserves_custom_maps_and_active_matches(self):
         upgrade = import_module("game.migrations.0006_tune_greywatch_assault")
         game = SingleGame.objects.get(slug="greywatch-assault")
@@ -64,12 +125,12 @@ class GameCatalogApiTests(TestCase):
         upgrade.tune_seeded_assault(apps, None)
         game.refresh_from_db()
         match.refresh_from_db()
-        self.assertEqual(game.map_definition, default_map())
+        self.assertEqual(normalize_map(game.map_definition), default_map())
         self.assertEqual(match.map_definition, old_map)
         self.assertEqual(len(match.state["units"]), 8)
         upgrade.tune_seeded_assault(apps, None)
         game.refresh_from_db()
-        self.assertEqual(game.map_definition, default_map())
+        self.assertEqual(normalize_map(game.map_definition), default_map())
 
         custom = deepcopy(old_map)
         custom["enemyStartPositions"][0]["x"] = 13

@@ -57,7 +57,11 @@
 - [ ] Make multi-level interiors readable and selectable in the isometric view with roof/floor cutaways and floor controls; allow routes from outside to rooms, upper floors, and underground spaces.
 - [ ] Add discoverable hidden doors and passages, plus traps that can be spotted, disarmed, avoided, or triggered; include their effects in server-validated movement and enemy behavior.
 - [ ] Let units pick up, drop, carry, and equip items from ground tiles, with inventory limits and turn-based action costs; make dropped gear recoverable after a casualty.
-- [ ] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
+  - [x] Add server-owned ground potions, two-item carrying limits, fight-point-costed pickup/drop and casualty drops; general equipment remains to do.
+- [x] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
+- [x] Replace unit classes with a weapon, a carried-tools list, and a separate king mission marker. Migrate saved rosters, active matches, and history, while still accepting imported legacy labels.
+- [x] Show the selected soldier's current HP, morale, remaining movement/fight points, weapon, tools, potions, and reload/catapult status in a dedicated sidebar readout; refresh on selection and after each action.
+- [ ] Refine the selected-soldier UI: use labeled stat rows and graphical remaining/max indicators; keep the panel legible beside the battlefield on desktop and below it on mobile, with text equivalents for screen readers. Distinguish current points from next-turn allowances after morale changes or promotion; test empty/group selections, zero points, reload, death, and resume.
 - [ ] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage.
 - [ ] Make carried weight (including armor, weapons, and potions) affect movement-point costs or allowances, with clear limits and feedback before issuing orders.
 - [ ] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.

@@ -4,7 +4,7 @@ from django.db import models
 from django.db.models import Q
 from django.core.exceptions import ValidationError
 
-from .engine import InvalidMap, default_map, validate_map
+from .engine import InvalidMap, default_map, normalize_map, validate_map
 
 
 class GameCatalogEntry(models.Model):
@@ -40,6 +40,7 @@ class SingleGame(GameCatalogEntry):
             validate_map(self.map_definition)
         except InvalidMap as error:
             raise ValidationError({"map_definition": str(error)}) from error
+        self.map_definition = normalize_map(self.map_definition)
 
 
 class GameInstance(models.Model):

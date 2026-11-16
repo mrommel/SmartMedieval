@@ -10,17 +10,17 @@ MAP = {
     "gate": {"x": 14, "y": 10},
     "objective": {"x": 14, "y": 7},
     "startPositions": [
-        {"x": 2, "y": 6, "type": "vanguard"},
-        {"x": 3, "y": 7, "type": "vanguard"},
-        {"x": 2, "y": 8, "type": "longbow"},
-        {"x": 4, "y": 6, "type": "longbow"},
-        {"x": 4, "y": 8, "type": "crossbow"},
-        {"x": 5, "y": 7, "type": "crossbow"},
+        {"x": 2, "y": 6, "weapon": "sword"},
+        {"x": 3, "y": 7, "weapon": "sword"},
+        {"x": 2, "y": 8, "weapon": "longbow"},
+        {"x": 4, "y": 6, "weapon": "longbow"},
+        {"x": 4, "y": 8, "weapon": "crossbow"},
+        {"x": 5, "y": 7, "weapon": "crossbow"},
     ],
     "enemyStartPositions": [
-        {"x": 12, "y": 5, "type": "vanguard"},
-        {"x": 16, "y": 8, "type": "longbow"},
-        {"x": 14, "y": 9, "type": "crossbow"},
+        {"x": 12, "y": 5, "weapon": "sword"},
+        {"x": 16, "y": 8, "weapon": "longbow"},
+        {"x": 14, "y": 9, "weapon": "crossbow"},
     ],
     "catapults": [{"x": 3, "y": 7}],
 }
@@ -35,11 +35,50 @@ CATAPULT_AMMO = 3
 CATAPULT_RANGE = 10
 CATAPULT_RELOAD = 2
 WALL_HEALTH = 2
-RANGED_UNIT_STATS = {
+INVENTORY_LIMIT = 2
+POTION_HEAL = 2
+RANGED_WEAPON_STATS = {
     # End-turn processing ticks cooldowns, including the transition after firing.
     "longbow": {"range": 5, "reload_turns": 2},
     "crossbow": {"range": 6, "reload_turns": 3},
 }
+LEGACY_WEAPONS = {"vanguard": "sword", "longbow": "longbow", "crossbow": "crossbow", "king": None}
+
+
+def normalize_position(position):
+    point = {key: value for key, value in position.items() if key != "type"}
+    if "type" in position:
+        point["weapon"] = LEGACY_WEAPONS[position["type"]]
+        if position["type"] == "king":
+            point["is_king"] = True
+    return point
+
+
+def normalize_map(map_data):
+    """Convert persisted legacy rosters without changing the saved definition."""
+    return {**map_data, **{name: [normalize_position(point) for point in map_data[name]]
+                          for name in ("startPositions", "enemyStartPositions") if name in map_data}}
+
+
+def normalize_unit(unit):
+    result = {key: value for key, value in unit.items() if key != "type"}
+    if "weapon" not in result:
+        result["weapon"] = LEGACY_WEAPONS[unit["type"]]
+    if unit.get("type") == "king":
+        result["is_king"] = True
+    result.setdefault("tools", [])
+    return result
+
+
+def normalize_history_event(event):
+    result = {key: value for key, value in event.items() if key not in ("actor_type", "target_type")}
+    for who in ("actor", "target"):
+        legacy = event.get(f"{who}_type")
+        if legacy in LEGACY_WEAPONS:
+            result[f"{who}_weapon"] = LEGACY_WEAPONS[legacy]
+            if legacy == "king":
+                result[f"{who}_is_king"] = True
+    return result
 
 
 class InvalidAction(ValueError):
@@ -56,7 +95,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
@@ -188,22 +227,31 @@ def validate_map(map_data):
         if not isinstance(positions, list) or not 1 <= len(positions) <= 64:
             raise InvalidMap(f"Provide between 1 and 64 units in {name}.")
         for position in positions:
-            if (not isinstance(position, dict) or set(position) != {"x", "y", "type"}
+            if not isinstance(position, dict):
+                raise InvalidMap("Every starting unit needs an open tile and a supported weapon.")
+            legacy = set(position) == {"x", "y", "type"} and position["type"] in LEGACY_WEAPONS
+            if legacy:
+                position = normalize_position(position)
+            if (not {"x", "y", "weapon"} <= set(position) <= {"x", "y", "weapon", "tools", "is_king"}
                     or type(position["x"]) is not int or type(position["y"]) is not int
-                    or position["type"] not in (("vanguard", "longbow", "crossbow", "king")
-                                                if name == "enemyStartPositions" and mission == "capture_king"
-                                                else ("vanguard", "longbow", "crossbow"))
+                     or position["weapon"] not in ("sword", "longbow", "crossbow", None)
+                     or (position["weapon"] is None) != position.get("is_king", False)
+                     or ("is_king" in position and position["is_king"] is not True)
+                     or (position.get("is_king", False) and (name != "enemyStartPositions" or mission != "capture_king"))
+                     or not isinstance(position.get("tools", []), list)
+                     or len(position.get("tools", [])) > INVENTORY_LIMIT
+                     or any(not isinstance(tool, str) or not tool or len(tool) > 40 for tool in position.get("tools", []))
                     or is_house(position["x"], position["y"], map_data)
                     or not is_walkable(position["x"], position["y"], map_data)):
-                raise InvalidMap("Every starting unit needs an open tile and a supported type.")
+                raise InvalidMap("Every starting unit needs an open tile and a supported weapon.")
             tile = (position["x"], position["y"])
             if tile in occupied:
                 raise InvalidMap("Starting units must have distinct tiles.")
             occupied.add(tile)
             if name == "enemyStartPositions":
-                kings += position["type"] == "king"
-                guards += position["type"] != "king"
-                if (position["type"] == "king") != (tile == (objective["x"], objective["y"])) and mission == "capture_king":
+                kings += position.get("is_king", False)
+                guards += not position.get("is_king", False)
+                if position.get("is_king", False) != (tile == (objective["x"], objective["y"])) and mission == "capture_king":
                     raise InvalidMap("The king must start on the throne and guards must start elsewhere.")
             if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
@@ -226,6 +274,19 @@ def validate_map(map_data):
                 or (point["x"], point["y"]) in seen_catapults):
             raise InvalidMap("Catapults need distinct open ground tiles away from the objective.")
         seen_catapults.add((point["x"], point["y"]))
+    items = map_data.get("items", [])
+    if not isinstance(items, list) or len(items) > 32:
+        raise InvalidMap("Items must be a list of at most 32 healing potions.")
+    seen_items = set()
+    for item in items:
+        if (not isinstance(item, dict) or set(item) != {"x", "y", "type"}
+                or type(item["x"]) is not int or type(item["y"]) is not int
+                or item["type"] != "healing_potion"
+                or not is_walkable(item["x"], item["y"], map_data)
+                or tile_height(item["x"], item["y"], map_data) != 0
+                or (item["x"], item["y"]) in seen_items):
+            raise InvalidMap("Healing potions need distinct walkable ground tiles.")
+        seen_items.add((item["x"], item["y"]))
     if "enemyStartPositions" not in map_data:
         legacy_enemy_position(map_data)
 
@@ -353,7 +414,7 @@ def has_line_of_sight(start, end, map_data=MAP):
 
 
 def can_ranged_attack(attacker, target, map_data=MAP):
-    stats = RANGED_UNIT_STATS.get(attacker.get("type"))
+    stats = RANGED_WEAPON_STATS.get(normalize_unit(attacker)["weapon"])
     if not stats or attacker.get("reload_turns", 0) > 0:
         return False
     distance = max(abs(attacker["x"] - target["x"]), abs(attacker["y"] - target["y"]))
@@ -435,6 +496,9 @@ def record_casualty(state, killer, casualty):
                 unit["morale"] = max(0, unit["morale"] - 1)
                 if unit["morale"] != before:
                     morale_changes.append({"unit_id": unit["id"], "change": unit["morale"] - before})
+    for item in state.get("items", []):
+        if item["carrier_id"] == casualty["id"]:
+            item.update(carrier_id=None, x=casualty["x"], y=casualty["y"])
     state["units"].remove(casualty)
     return morale_changes
 
@@ -452,8 +516,9 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
     state["history"] = (state["history"] + [{
         "turn": state["turn"], "type": "ranged_attack" if ranged else "attack",
         "actor_id": attacker["id"], "actor_side": attacker.get("side", "attackers"),
-        "actor_type": attacker["type"], "target_id": target["id"],
-        "target_side": target.get("side", "attackers"), "target_type": target["type"],
+        "actor_weapon": attacker["weapon"], "target_id": target["id"],
+        "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
+        "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
         **({"weapon": weapon} if weapon else {}),
     } | ({"cover": cover} if cover else {})])[-HISTORY_LIMIT:]
@@ -482,7 +547,7 @@ def defender_destinations(unit, map_data=MAP, blocked=()):
 
 def resolve_defender_goals(state, goals, map_data=MAP):
     defenders = {unit["id"]: unit for unit in state["units"]
-                 if unit.get("side") == "defenders" and unit.get("type") != "king"}
+                 if unit.get("side") == "defenders" and not normalize_unit(unit).get("is_king")}
     if not isinstance(goals, list) or len(goals) > len(defenders):
         raise InvalidAction("Invalid defender goals.")
     orders = []
@@ -542,7 +607,7 @@ def legacy_enemy_position(map_data):
     while frontier:
         x, y = frontier.popleft()
         if (x, y) != objective and (x, y) not in occupied:
-            return {"x": x, "y": y, "type": "vanguard"}
+            return {"x": x, "y": y, "weapon": "sword"}
         for neighbor in neighbors(x, y):
             if neighbor not in visited and can_step((x, y), neighbor, map_data, elevations):
                 visited.add(neighbor)
@@ -563,7 +628,9 @@ def initial_state(map_data=MAP):
                 "x": point["x"],
                 "y": point["y"],
                 "z": tile_height(point["x"], point["y"], map_data),
-                "type": point["type"],
+                "weapon": normalize_position(point)["weapon"],
+                "tools": list(point.get("tools", [])),
+                **({"is_king": True} if normalize_position(point).get("is_king") else {}),
                 "side": "attackers" if index < len(attackers) else "defenders",
                 "facing": 1 if index < len(attackers) else -1,
                 "move_points": MOVE_POINTS,
@@ -587,6 +654,10 @@ def initial_state(map_data=MAP):
         ],
         "wall_damage": [],
         "breaches": [],
+        "items": [
+            {"id": index, "type": "healing_potion", "x": item["x"], "y": item["y"], "carrier_id": None}
+            for index, item in enumerate(map_data.get("items", []))
+        ],
     }
 
 
@@ -605,9 +676,9 @@ def capture_status(state, map_data=MAP):
 
 
 def king_is_guarded(state):
-    king = next((unit for unit in state["units"] if unit.get("type") == "king"), None)
+    king = next((unit for unit in state["units"] if normalize_unit(unit).get("is_king")), None)
     return bool(king and any(
-        unit.get("side") == "defenders" and unit.get("type") != "king"
+        unit.get("side") == "defenders" and not normalize_unit(unit).get("is_king")
         and abs(unit["x"] - king["x"]) + abs(unit["y"] - king["y"]) == 1
         and unit["z"] == king["z"] for unit in state["units"]
     ))
@@ -616,7 +687,7 @@ def king_is_guarded(state):
 def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=None):
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
-            "aim_catapult", "fire_catapult"):
+            "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -624,7 +695,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     map_data = battle_map(map_data, state)
     next_state = {**state, "units": [
         {
-            **unit,
+            **normalize_unit(unit),
             "z": tile_height(unit["x"], unit["y"], map_data),
             "health": unit.get("health", MAX_HEALTH),
             "max_health": unit.get("max_health", MAX_HEALTH),
@@ -634,12 +705,52 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "rank": unit.get("rank", "recruit"),
         }
         for unit in state["units"]
-    ], "defeated": state.get("defeated", False), "history": list(state.get("history", [])),
+    ], "defeated": state.get("defeated", False),
+        "history": [normalize_history_event(event) for event in state.get("history", [])],
         "catapults": [
             {**catapult, "aim": catapult.get("aim"), "reload_turns": catapult.get("reload_turns", 0)}
             for catapult in state.get("catapults", [])
         ], "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
-        "breaches": [dict(point) for point in state.get("breaches", [])]}
+        "breaches": [dict(point) for point in state.get("breaches", [])],
+        "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] in ("pickup_item", "drop_item", "use_item"):
+        operation = action["type"]
+        required_fields = {"type", "unit_id", "item_id"} | ({"target_id"} if operation == "use_item" else set())
+        if set(action) != required_fields or any(type(action[key]) is not int for key in required_fields - {"type"}):
+            raise InvalidAction("Choose a soldier, potion and valid healing target.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        item = next((item for item in next_state["items"] if item["id"] == action["item_id"]), None)
+        if not unit or not item or unit["fight_points"] < 1:
+            raise InvalidAction("A living soldier needs a fight point to handle a potion.")
+        if operation == "pickup_item":
+            if (item["carrier_id"] is not None or (item["x"], item["y"]) != (unit["x"], unit["y"]) or
+                    sum(other["carrier_id"] == unit["id"] for other in next_state["items"]) >= INVENTORY_LIMIT):
+                raise InvalidAction("Stand on the potion with room to carry it (maximum two).")
+            item.update(carrier_id=unit["id"], x=None, y=None)
+        elif item["carrier_id"] != unit["id"]:
+            raise InvalidAction("That soldier is not carrying this potion.")
+        elif operation == "drop_item":
+            item.update(carrier_id=None, x=unit["x"], y=unit["y"])
+        else:
+            target = next((other for other in next_state["units"] if other["id"] == action["target_id"]
+                           and other.get("side", "attackers") == "attackers"), None)
+            if (not target or target["health"] >= target["max_health"] or
+                    (target is not unit and (abs(target["x"] - unit["x"]) + abs(target["y"] - unit["y"]) != 1
+                     or target["z"] != unit["z"]
+                     or not can_step((unit["x"], unit["y"]), (target["x"], target["y"]), map_data)))):
+                raise InvalidAction("Heal a wounded ally on your tile or an adjacent reachable tile at the same height.")
+            healed = min(POTION_HEAL, target["max_health"] - target["health"])
+            target["health"] += healed
+            next_state["items"].remove(item)
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": operation, "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"],
+            "item_id": item["id"],
+            **({"target_id": target["id"], "healed": healed} if operation == "use_item" else {}),
+        }])[-HISTORY_LIMIT:]
+        return next_state
     if action["type"] in ("aim_catapult", "fire_catapult"):
         aiming = action["type"] == "aim_catapult"
         if (set(action) != ({"type", "unit_id", "catapult_id", "x", "y"} if aiming else
@@ -664,7 +775,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             unit["fight_points"] -= 1
             next_state["history"] = (next_state["history"] + [{
                 "turn": state["turn"], "type": "aim_catapult", "actor_id": unit["id"],
-                "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+                "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": x, "y": y,
             }])[-HISTORY_LIMIT:]
         else:
             if catapult["aim"] is None or catapult["reload_turns"]:
@@ -682,7 +793,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                            and house_at(x, y, map_data) is None), None)
             if victim:
                 record_attack(next_state, unit, victim, False, map_data, damage=2, weapon="catapult")
-                if map_data.get("mission") == "capture_king" and victim["type"] == "king" and victim["health"] <= 0:
+                if map_data.get("mission") == "capture_king" and victim.get("is_king") and victim["health"] <= 0:
                     next_state["defeated"] = True
                 if not any(other.get("side", "attackers") == "attackers" for other in next_state["units"]):
                     next_state["defeated"] = True
@@ -697,13 +808,13 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                     next_state["wall_damage"].remove(damaged)
                 next_state["history"] = (next_state["history"] + [{
                     "turn": state["turn"], "type": "catapult_wall", "actor_id": unit["id"],
-                    "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+                    "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": x, "y": y,
                     "breached": damaged["damage"] >= WALL_HEALTH,
                 }])[-HISTORY_LIMIT:]
             else:
                 next_state["history"] = (next_state["history"] + [{
                     "turn": state["turn"], "type": "catapult_miss", "actor_id": unit["id"],
-                    "actor_side": "attackers", "actor_type": unit["type"], "x": x, "y": y,
+                    "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": x, "y": y,
                 }])[-HISTORY_LIMIT:]
         return next_state
     if action["type"] == "capture":
@@ -712,9 +823,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Choose one soldier to capture the king.")
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side") == "attackers"), None)
-        king = next((unit for unit in next_state["units"] if unit.get("type") == "king"), None)
-        if not unit or not king or unit["fight_points"] < 1 or unit["type"] != "vanguard":
-            raise InvalidAction("A vanguard with a fight point must capture the living king.")
+        king = next((unit for unit in next_state["units"] if unit.get("is_king")), None)
+        if not unit or not king or unit["fight_points"] < 1 or unit["weapon"] != "sword":
+            raise InvalidAction("A soldier with a sword and a fight point must capture the living king.")
         if (abs(unit["x"] - king["x"]) + abs(unit["y"] - king["y"]) != 1
                 or unit["z"] != king["z"]):
             raise InvalidAction("Move beside the king on the same level to capture him.")
@@ -725,8 +836,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["capture_progress"] = 1
         next_state["history"] = (next_state["history"] + [{
             "turn": state["turn"], "type": "capture", "actor_id": unit["id"],
-            "actor_side": "attackers", "actor_type": unit["type"],
-            "target_id": king["id"], "target_side": "defenders", "target_type": "king",
+            "actor_side": "attackers", "actor_weapon": unit["weapon"],
+            "target_id": king["id"], "target_side": "defenders", "target_weapon": king["weapon"],
+            "target_is_king": True,
         }])[-HISTORY_LIMIT:]
         return next_state
     if action["type"] == "promote":
@@ -741,7 +853,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         # New point allowances take effect on the next turn, not mid-turn.
         next_state["history"] = (next_state["history"] + [{
             "turn": next_state["turn"], "type": "promote", "actor_id": unit["id"],
-            "actor_side": "attackers", "actor_type": unit["type"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"],
             "morale_change": STARTING_MORALE - MAX_MORALE,
         }])[-HISTORY_LIMIT:]
         return next_state
@@ -758,25 +870,25 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Only your soldiers can attack.")
         if target is None or target.get("side", "attackers") != "defenders":
             raise InvalidAction("Choose a living defender as the target.")
-        if ranged and attacker.get("type") not in RANGED_UNIT_STATS:
-            raise InvalidAction("Only bow and crossbow units can make ranged attacks.")
-        if not ranged and attacker.get("type") in RANGED_UNIT_STATS:
-            raise InvalidAction("Bow and crossbow units must use ranged attacks.")
+        if ranged and attacker["weapon"] not in RANGED_WEAPON_STATS:
+            raise InvalidAction("Only soldiers carrying bows or crossbows can make ranged attacks.")
+        if not ranged and attacker["weapon"] in RANGED_WEAPON_STATS:
+            raise InvalidAction("Soldiers carrying bows or crossbows must use ranged attacks.")
         if attacker["fight_points"] < 1:
             raise InvalidAction("This soldier has no fight points left.")
         if ranged:
             if attacker.get("reload_turns", 0) > 0:
                 raise InvalidAction("This soldier is reloading.")
             distance = max(abs(attacker["x"] - target["x"]), abs(attacker["y"] - target["y"]))
-            if distance == 0 or distance > RANGED_UNIT_STATS[attacker["type"]]["range"]:
+            if distance == 0 or distance > RANGED_WEAPON_STATS[attacker["weapon"]]["range"]:
                 raise InvalidAction("That defender is outside this weapon's range.")
             if not has_line_of_sight((attacker["x"], attacker["y"]),
                                      (target["x"], target["y"]), map_data):
                 raise InvalidAction("An obstacle blocks the line of sight.")
-            attacker["reload_turns"] = RANGED_UNIT_STATS[attacker["type"]]["reload_turns"]
+            attacker["reload_turns"] = RANGED_WEAPON_STATS[attacker["weapon"]]["reload_turns"]
             if combat_events is not None:
                 combat_events.append({
-                    "type": "projectile", "weapon": attacker["type"],
+                    "type": "projectile", "weapon": attacker["weapon"],
                     "from": {"x": attacker["x"], "y": attacker["y"]},
                     "to": {"x": target["x"], "y": target["y"]},
                 })
@@ -786,7 +898,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Move next to a defender to attack.")
         attacker["fight_points"] -= 1
         record_attack(next_state, attacker, target, ranged, map_data)
-        if map_data.get("mission") == "capture_king" and target["type"] == "king" and target["health"] <= 0:
+        if map_data.get("mission") == "capture_king" and target.get("is_king") and target["health"] <= 0:
             next_state["defeated"] = True
         return next_state
 
@@ -796,7 +908,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         for catapult in next_state["catapults"]:
             catapult["reload_turns"] = max(0, catapult["reload_turns"] - 1)
         defenders = {unit["id"]: unit for unit in next_state["units"]
-                     if unit.get("side") == "defenders" and unit.get("type") != "king"}
+                     if unit.get("side") == "defenders" and not unit.get("is_king")}
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
@@ -825,10 +937,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             unit["facing"] = 1 if unit["x"] >= old_x else -1
             unit["move_points"] -= len(path)
         for defender in [unit for unit in next_state["units"]
-                         if unit.get("side") == "defenders" and unit.get("type") != "king"]:
+                         if unit.get("side") == "defenders" and not unit.get("is_king")]:
             if defender["fight_points"] < 1:
                 continue
-            ranged = defender.get("type") in RANGED_UNIT_STATS
+            ranged = defender["weapon"] in RANGED_WEAPON_STATS
             targets = [
                 unit for unit in next_state["units"]
                 if unit.get("side", "attackers") == "attackers"
@@ -846,10 +958,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             ))
             defender["fight_points"] -= 1
             if ranged:
-                defender["reload_turns"] = RANGED_UNIT_STATS[defender["type"]]["reload_turns"]
+                defender["reload_turns"] = RANGED_WEAPON_STATS[defender["weapon"]]["reload_turns"]
                 if combat_events is not None:
                     combat_events.append({
-                        "type": "projectile", "weapon": defender["type"],
+                        "type": "projectile", "weapon": defender["weapon"],
                         "from": {"x": defender["x"], "y": defender["y"]},
                         "to": {"x": target["x"], "y": target["y"]},
                     })

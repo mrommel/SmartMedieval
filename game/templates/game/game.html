@@ -107,7 +107,7 @@
           <div class="objective-copy"><span><i></i> OBJECTIVE</span><b id="objective-status">UNCLAIMED</b></div>
           <div class="progress-track"><div id="capture-progress"></div></div>
         </div>
-        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="pause-game" type="button" aria-pressed="false">Pause</button><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="capture-king" type="button" disabled hidden>Capture king</button><button class="restart-button" id="aim-catapult" type="button" aria-pressed="false" disabled hidden>Aim catapult</button><button class="restart-button" id="fire-catapult" type="button" disabled hidden>Fire catapult</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
+        <div class="turn-controls"><span id="turn-status">Turn 1</span><button class="restart-button" id="pause-game" type="button" aria-pressed="false">Pause</button><button class="restart-button" id="promote" type="button" disabled>Promote</button><button class="restart-button" id="capture-king" type="button" disabled hidden>Capture king</button><button class="restart-button" id="aim-catapult" type="button" aria-pressed="false" disabled hidden>Aim catapult</button><button class="restart-button" id="fire-catapult" type="button" disabled hidden>Fire catapult</button><button class="restart-button" id="pickup-potion" type="button" disabled hidden>Pick up potion</button><button class="restart-button" id="drop-potion" type="button" disabled hidden>Drop potion</button><label class="sr-only" for="heal-target">Healing target</label><select id="heal-target" aria-label="Healing target" disabled hidden></select><button class="restart-button" id="heal-potion" type="button" disabled hidden>Heal</button><button class="restart-button" id="end-turn" type="button">End turn</button></div>
         <div class="order-readout"><span class="order-key">LMB</span><span>SELECT &amp; ORDER</span><span class="order-key">SHIFT</span><span>ADD TO GROUP</span></div>
       </footer>
     </section>
@@ -118,7 +118,8 @@
       <div class="roster">
         <div class="roster-heading">YOUR COMPANY <span id="roster-count">6 SOLDIERS</span></div>
         <div id="roster-list"></div>
-        <p class="selected-stats" id="selected-stats" aria-live="polite"></p>
+        <h2 class="roster-heading" id="selected-unit-title">SELECTED SOLDIER</h2>
+        <p class="selected-stats" id="selected-stats" aria-labelledby="selected-unit-title" aria-live="polite"></p>
         <div class="enemy-roster">GREYWATCH GARRISON <span id="enemy-count">0 DEFENDERS</span></div>
       </div>
       <section class="combat-history" aria-labelledby="combat-history-title">
@@ -133,9 +134,10 @@
         <p id="mission-help">Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
         <p>Walls, trees, and rocks beside a ground-level target can block the first ranged hit each turn when they face the shooter. The shot still spends a fight point and reloads. Attack from another direction or use melee to bypass cover.</p>
         <p>Stand a soldier on a catapult and select them to crew it. Press Aim catapult, then click a target tile (or choose it with arrow keys and press Enter). Aim costs one fight point; Fire costs another, so recruits fire next turn. Each catapult holds three stones and takes two turn transitions to reload. Stones hit anyone on the target tile for two damage, including allies and the king. Two hits on a wall tile breach it, opening a new route.</p>
+        <p>In the Hamlet, red potions lie on the ground, including one beneath the first soldier and one inside a house. Select a soldier standing on a potion to pick it up (one fight point). Soldiers can carry two potions. Choose a wounded self or adjacent ally in the Heal target selector, then press Heal to restore up to two health (one fight point). Drop a carried potion for one fight point; potions carried by fallen soldiers remain on their tile for recovery.</p>
         <p>Defeating an enemy raises the victor's morale; nearby allies lose morale when a soldier falls. At 0–1 morale, units lose one move point next turn; at 5, they gain one. Select one recruit with 5 morale and press Promote to become a veteran: morale returns to 3, with one extra move and fight point each following turn.</p>
         <p>Drag the battlefield to pan. Use the mouse wheel or the zoom buttons to zoom.</p>
-        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, order movement, or confirm an aimed catapult target. Hold Shift while selecting to add or remove a soldier. Tab to End turn, Promote, Capture king, Aim catapult, Fire catapult, or the zoom buttons for other controls.</p>
+        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, order movement, or confirm an aimed catapult target. Hold Shift while selecting to add or remove a soldier. Tab to the turn controls, including potion actions and their target selector, or the zoom buttons.</p>
       </div>
       <div class="playback-settings">
         <label for="animation-speed">Animation speed</label>

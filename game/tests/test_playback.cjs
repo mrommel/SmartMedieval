@@ -47,7 +47,7 @@ function setup(savedSpeed = null, catalogFetch = null) {
     entry: { id: 1, name: "Test battle", description: "Test" },
     map: { cols: 4, rows: 4, keep: { left: 1, right: 2, top: 1, bottom: 2 },
       gate: { x: 1, y: 2 }, objective: { x: 2, y: 2 }, startPositions: [{ x: 0, y: 0 }] },
-    state: { units: [{ id: 0, x: 0, y: 0, side: "attackers", type: "vanguard",
+    state: { units: [{ id: 0, x: 0, y: 0, side: "attackers", weapon: "sword", tools: [],
       rank: "recruit", morale: 3, move_points: 3, fight_points: 1,
       health: 3, max_health: 3 }], captured: false, defeated: false,
     capture_progress: 0, capture_status: "UNCLAIMED", turn: 1 }
@@ -106,9 +106,9 @@ test("throne mission enables capture only for an unguarded adjacent king", async
   game.snapshot.map.objective = { x: 2, y: 2 };
   game.snapshot.state.units[0].x = 2;
   game.snapshot.state.units[0].y = 3;
-  game.snapshot.state.units.push({ id: 1, side: "defenders", type: "king", x: 2, y: 2,
+  game.snapshot.state.units.push({ id: 1, side: "defenders", weapon: null, is_king: true, x: 2, y: 2,
     health: 3, max_health: 3, fight_points: 1 });
-  game.snapshot.state.units.push({ id: 2, side: "defenders", type: "vanguard", x: 2, y: 1,
+  game.snapshot.state.units.push({ id: 2, side: "defenders", weapon: "sword", x: 2, y: 1,
     health: 3, max_health: 3, fight_points: 1 });
   await game.get("continue-game").fire("click");
   assert.equal(game.get("capture-king").hidden, false);
@@ -183,7 +183,7 @@ test("enterable houses render as cutaway floors and pick tiles at ground level",
   assert.equal(renderer.isEnterableHouse(3, 2), true);
   assert.equal(renderer.isHouseDoor(2, 3), true);
   renderer.draw(0, { simulation: { units: [{ id: 1, x: 3, y: 2, health: 3,
-    max_health: 3, type: "vanguard", side: "attackers" }], selected: new Set(), captured: false },
+    max_health: 3, weapon: "sword", side: "attackers" }], selected: new Set(), captured: false },
     camera: { x: 0, y: 0, zoom: 1 }, cursor: { visible: false }, hasAttackOption: () => false });
   assert.equal(game.draws(), 1);
   let ordered;
@@ -225,7 +225,7 @@ test("keyboard can issue orders to a house door and interior", async () => {
 
 test("combat previews allow doorway melee but not shots or melee through house walls", async () => {
   for (const [weapon, y, expected] of [
-    ["vanguard", 2, "attack"], ["vanguard", 3, null], ["longbow", 2, null]
+    ["sword", 2, "attack"], ["sword", 3, null], ["longbow", 2, null]
   ]) {
     const game = setup();
     game.snapshot.map.houses = [{ left: 1, right: 2, top: 2, bottom: 3,
@@ -233,9 +233,9 @@ test("combat previews allow doorway melee but not shots or melee through house w
     game.snapshot.map.startPositions = [{ x: 0, y }];
     game.snapshot.state.units[0].x = 0;
     game.snapshot.state.units[0].y = y;
-    game.snapshot.state.units[0].type = weapon;
+    game.snapshot.state.units[0].weapon = weapon;
     game.snapshot.state.units.push({ ...game.snapshot.state.units[0],
-      id: 1, x: 1, side: "defenders", type: "vanguard" });
+      id: 1, x: 1, side: "defenders", weapon: "sword" });
     await game.get("continue-game").fire("click");
     const canvas = game.get("battlefield-canvas");
     canvas.fire("focus");
@@ -272,9 +272,9 @@ test("clicking a house roof picks its footprint rather than ground behind it", (
 test("keyboard shooting passes fences but not wells or houses; houses block orders", async () => {
   for (const obstacle of ["fence", "well", "house"]) {
     const game = setup();
-    game.snapshot.state.units[0].type = "longbow";
+    game.snapshot.state.units[0].weapon = "longbow";
     game.snapshot.state.units.push({ ...game.snapshot.state.units[0],
-      id: 1, x: obstacle === "house" ? 3 : 2, y: 0, side: "defenders", type: "vanguard" });
+      id: 1, x: obstacle === "house" ? 3 : 2, y: 0, side: "defenders", weapon: "sword" });
     if (obstacle === "house") game.snapshot.map.houses = [{ left: 1, right: 2, top: 0, bottom: 1 }];
     else game.snapshot.map.objects = [{ x: 1, y: 0, type: obstacle }];
     await game.get("continue-game").fire("click");
@@ -427,13 +427,31 @@ test("combat history renders on resume and updates after an action", async () =>
     morale_changes: [{ unit_id: 1, change: 1 }] });
   await game.get("end-turn").fire("click");
   assert.equal(list.children.length, 2);
-  assert.match(list.children[1].textContent, /Turn 2.*shot attacker vanguard #1 for 1 damage \(fallen\).*Morale: #2 \+1/);
+  assert.match(list.children[1].textContent, /Turn 2.*shot attacker #1 for 1 damage \(fallen\).*Morale: #2 \+1/);
   game.snapshot.state.history.push({ turn: 3, type: "ranged_attack", actor_id: 1,
     actor_side: "defenders", actor_type: "longbow", target_id: 0,
     target_side: "attackers", target_type: "vanguard", damage: 0, killed: false,
     cover: "wall", morale_changes: [] });
   await game.get("end-turn").fire("click");
   assert.match(list.children[2].textContent, /0 damage \(wall cover blocked the shot\)/);
+});
+
+test("selected soldier displays remaining stats and carried equipment after actions", async () => {
+  const game = setup();
+  game.snapshot.state.units[0].tools = ["rope"];
+  await game.get("continue-game").fire("click");
+  const panel = game.get("selected-stats");
+  assert.match(panel.textContent, /Health 3\/3 HP · Morale 3\/5/);
+  assert.match(panel.textContent, /Movement 3 MP left · Fight 1 FP left/);
+  assert.match(panel.textContent, /Weapon sword/);
+  assert.match(panel.textContent, /Tools rope/);
+  game.snapshot.state.units[0].health = 1;
+  game.snapshot.state.units[0].morale = 5;
+  game.snapshot.state.units[0].move_points = 0;
+  game.snapshot.state.units[0].fight_points = 0;
+  await game.get("end-turn").fire("click");
+  assert.match(panel.textContent, /Health 1\/3 HP · Morale 5\/5/);
+  assert.match(panel.textContent, /Movement 0 MP left · Fight 0 FP left/);
 });
 
 test("keyboard cursor selects groups, moves, attacks, and cannot order while paused", async () => {
@@ -450,12 +468,12 @@ test("keyboard cursor selects groups, moves, attacks, and cannot order while pau
     assert.ok(prevented, `${name} should not scroll or activate another control`);
   };
   canvas.fire("focus");
-  assert.match(game.get("cursor-status").textContent, /Tile 1, 1: friendly vanguard #1, selected/);
+  assert.match(game.get("cursor-status").textContent, /Tile 1, 1: friendly with sword #1, selected/);
   key("ArrowDown");
   key("Enter", true);
   assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
   key(" ", true);
-  assert.match(game.get("selected-stats").textContent, /#1 recruit/);
+  assert.match(game.get("selected-stats").textContent, /Soldier #1 · recruit/);
   key("ArrowDown");
   assert.match(game.get("cursor-status").textContent, /Tile 1, 3: open ground/);
   key("Enter");
@@ -465,7 +483,7 @@ test("keyboard cursor selects groups, moves, attacks, and cannot order while pau
   key("ArrowUp");
   key("ArrowUp");
   key("ArrowRight");
-  assert.match(game.get("cursor-status").textContent, /defender vanguard/);
+  assert.match(game.get("cursor-status").textContent, /defender with sword/);
   key("Enter");
   assert.equal(game.actions.at(-1).type, "attack");
   assert.equal(game.actions.at(-1).target_id, 2);
@@ -503,7 +521,7 @@ test("catapult crew can aim at walls using the keyboard and fire when ready", as
   assert.equal(game.get("aim-catapult").hidden, false);
   assert.equal(game.get("aim-catapult").disabled, false);
   assert.equal(game.get("fire-catapult").disabled, true);
-  assert.match(game.get("selected-stats").textContent, /catapult 3 stones/);
+  assert.match(game.get("selected-stats").textContent, /Catapult 3 stones/);
   game.get("aim-catapult").fire("click");
   const canvas = game.get("battlefield-canvas");
   for (const key of ["ArrowRight", "ArrowRight", "ArrowDown", "Enter"]) {
@@ -524,4 +542,36 @@ test("catapult crew can aim at walls using the keyboard and fire when ready", as
   game.snapshot.state.breaches = [{ x: 2, y: 1 }];
   await game.get("end-turn").fire("click");
   assert.match(game.get("cursor-status").textContent, /open ground/);
+});
+
+test("potions appear on the map and enable pickup, drop, and allied healing", async () => {
+  const game = setup();
+  game.snapshot.map.items = [{ x: 0, y: 0, type: "healing_potion" }];
+  game.snapshot.state.items = [{ id: 0, x: 0, y: 0, type: "healing_potion", carrier_id: null }];
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, x: 1, health: 1 });
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("pickup-potion").hidden, false);
+  assert.equal(game.get("pickup-potion").disabled, false);
+  assert.equal(game.get("heal-potion").disabled, true);
+  assert.match(game.get("cursor-status").textContent, /healing potion on ground/);
+  await game.get("pickup-potion").fire("click");
+  assert.equal(game.actions.at(-1).type, "pickup_item");
+  await new Promise(setImmediate);
+  game.snapshot.state.items[0].carrier_id = 0;
+  game.snapshot.state.items[0].x = game.snapshot.state.items[0].y = null;
+  game.snapshot.state.history = [{ turn: 1, type: "pickup_item", actor_id: 0,
+    actor_side: "attackers", actor_type: "vanguard", item_id: 0 }];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /Potions 1\/2/);
+  assert.equal(game.get("drop-potion").disabled, false);
+  assert.equal(game.get("heal-potion").disabled, false);
+  assert.equal(game.get("heal-target").children[0].value, "1");
+  assert.match(game.get("combat-history-list").children[0].textContent, /picked up a healing potion/);
+  game.get("heal-target").value = "1";
+  await game.get("heal-potion").fire("click");
+  assert.equal(game.actions.at(-1).type, "use_item");
+  assert.equal(game.actions.at(-1).target_id, 1);
+  await new Promise(setImmediate);
+  await game.get("drop-potion").fire("click");
+  assert.equal(game.actions.at(-1).type, "drop_item");
 });

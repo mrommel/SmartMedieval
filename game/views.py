@@ -8,7 +8,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from .enemy_ai import EnemyAIError, enemy_turn
-from .engine import InvalidAction, apply_action, capture_status, initial_state
+from .engine import InvalidAction, apply_action, capture_status, initial_state, normalize_history_event, normalize_map, normalize_unit
 from .models import GameInstance, Scenario, SingleGame
 
 
@@ -51,9 +51,11 @@ def serialize_instance(instance):
         "kind": "scenarios" if instance.scenario_id else "single-games",
         "game_id": instance.source_game_id or instance.single_game_id,
         "entry": serialize_catalog_entry(entry),
-        "map": instance.map_definition,
+        "map": normalize_map(instance.map_definition),
         "state": {
             **instance.state,
+            "units": [normalize_unit(unit) for unit in instance.state["units"]],
+            "history": [normalize_history_event(event) for event in instance.state.get("history", [])],
             "capture_status": capture_status(instance.state, instance.map_definition),
         },
         "revision": instance.revision,
@@ -96,7 +98,7 @@ def start_game(request, kind, entry_id):
         scenario=entry if kind == "scenarios" else None,
         single_game=entry if kind == "single-games" else None,
         source_game=game,
-        map_definition=game.map_definition,
+        map_definition=normalize_map(game.map_definition),
         state=initial_state(game.map_definition),
     )
     request.session["active_game_id"] = str(instance.pk)

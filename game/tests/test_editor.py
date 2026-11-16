@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from ..engine import default_map
+from ..engine import default_map, normalize_map
 from ..models import Scenario, SingleGame
 
 
@@ -46,7 +46,7 @@ class GameEditorTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         game = SingleGame.objects.get(slug="new-match")
-        self.assertEqual(game.map_definition, custom)
+        self.assertEqual(game.map_definition, normalize_map(custom))
         response = self.client.post(reverse("admin:game_scenario_add"), {
             "name": "New campaign", "slug": "new-campaign", "description": "Campaign.",
             "introduction": "", "sort_order": 2, "is_available": "on",

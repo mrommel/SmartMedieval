@@ -2,8 +2,185 @@ from django.test import TestCase
 
 from ..engine import (
     HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
-    has_line_of_sight, initial_state, is_walkable, resolve_defender_goals, validate_map,
+    has_line_of_sight, initial_state, is_walkable, normalize_map, resolve_defender_goals, validate_map,
 )
+
+
+class UnitEquipmentTests(TestCase):
+    def test_equipment_is_explicit_and_no_unit_has_a_type(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0]["tools"] = ["rope", "spade"]
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        self.assertEqual(state["units"][0]["weapon"], "sword")
+        self.assertEqual(state["units"][0]["tools"], ["rope", "spade"])
+        self.assertTrue(all("type" not in unit for unit in state["units"]))
+        self.assertTrue(all("type" not in point for point in normalize_map(battlefield)["startPositions"]))
+        state = apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)
+        self.assertEqual(state["units"][0]["tools"], ["rope", "spade"])
+
+    def test_rejects_bad_weapon_tools_and_king_marker(self):
+        for changes in ({"weapon": "axe"}, {"weapon": None}, {"weapon": "king"},
+                        {"is_king": True}, {"tools": "rope"}, {"tools": ["rope"] * 3},
+                        {"tools": [7]}, {"type": "vanguard"}):
+            battlefield = default_map()
+            battlefield["startPositions"][0].update(changes)
+            with self.subTest(changes=changes), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+
+    def test_legacy_state_and_map_keep_equipment_and_king_rules(self):
+        battlefield = default_map()
+        battlefield["startPositions"][0] = {"x": 2, "y": 6, "type": "vanguard"}
+        battlefield["enemyStartPositions"][0] = {"x": 12, "y": 5, "type": "longbow"}
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        for unit in state["units"]:
+            unit["type"] = {"sword": "vanguard", "longbow": "longbow", "crossbow": "crossbow"}[unit["weapon"]]
+            del unit["weapon"]
+            del unit["tools"]
+        self.assertEqual(apply_action(state, {"type": "end_turn"}, battlefield)["units"][0]["weapon"], "sword")
+        self.assertTrue(all("type" not in unit for unit in apply_action(state, {"type": "end_turn"}, battlefield)["units"]))
+        throne = default_map()
+        throne["mission"] = "capture_king"
+        throne["enemyStartPositions"] = [{"x": 14, "y": 7, "type": "king"},
+                                         {"x": 13, "y": 7, "type": "vanguard"}]
+        self.assertTrue(initial_state(throne)["units"][6]["is_king"])
+        self.assertEqual(normalize_map(throne)["enemyStartPositions"][0],
+                         {"x": 14, "y": 7, "weapon": None, "is_king": True})
+
+
+class FieldMedicineTests(TestCase):
+    def potion_map(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}]
+        return battlefield
+
+    def test_map_places_potions_only_on_distinct_open_ground(self):
+        battlefield = self.potion_map()
+        validate_map(battlefield)
+        self.assertEqual(initial_state(battlefield)["items"][0], {
+            "id": 0, "type": "healing_potion", "x": 2, "y": 6, "carrier_id": None,
+        })
+        for items in ("invalid", [{"x": 2, "y": 6, "type": "healing_potion"}] * 2,
+                      [{"x": 2, "y": 6, "type": "healing_potion"}] * 33,
+                      [{"x": True, "y": 6, "type": "healing_potion"}],
+                      [{"x": 99, "y": 6, "type": "healing_potion"}],
+                      [{"x": 11, "y": 7, "type": "healing_potion"}],
+                      [{"x": 2, "y": 6, "type": "sword"}],
+                      [{"x": 2, "y": 6, "type": "healing_potion", "amount": 99}]):
+            changed = default_map()
+            changed["items"] = items
+            with self.subTest(items=items), self.assertRaises(InvalidMap):
+                validate_map(changed)
+        battlefield["elevation"] = [{"x": 2, "y": 6, "height": 1, "access": "ramp"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        battlefield = self.potion_map()
+        battlefield["objects"] = [{"x": 2, "y": 6, "type": "tree"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        house = default_map()
+        house["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4,
+                             "door": {"x": 4, "y": 4}}]
+        house["items"] = [{"x": 5, "y": 4, "type": "healing_potion"}]
+        validate_map(house)
+
+    def test_pick_up_drop_and_heal_self_or_adjacent_ally(self):
+        battlefield = self.potion_map()
+        state = initial_state(battlefield)
+        original = initial_state(battlefield)
+        pickup = {"type": "pickup_item", "unit_id": 0, "item_id": 0}
+        carried = apply_action(state, pickup, battlefield)
+        self.assertEqual(state, original)
+        self.assertEqual(carried["items"][0]["carrier_id"], 0)
+        self.assertIsNone(carried["items"][0]["x"])
+        self.assertEqual(carried["units"][0]["fight_points"], 0)
+        with self.assertRaises(InvalidAction):
+            apply_action(carried, pickup, battlefield)
+        carried = apply_action(carried, {"type": "end_turn"}, battlefield)
+        carried["units"][0]["health"] = 1
+        heal = {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 0}
+        healed = apply_action(carried, heal, battlefield)
+        self.assertEqual(healed["units"][0]["health"], 3)
+        self.assertEqual(healed["history"][-1]["healed"], 2)
+        self.assertEqual(healed["items"], [])
+        self.assertEqual(carried["units"][0]["health"], 1)
+        with self.assertRaises(InvalidAction):
+            apply_action(healed, heal, battlefield)
+
+        state = initial_state(battlefield)
+        state["units"][1].update(x=3, y=6, health=2)
+        carried = apply_action(state, pickup, battlefield)
+        carried = apply_action(carried, {"type": "end_turn"}, battlefield)
+        ally = apply_action(carried, {**heal, "target_id": 1}, battlefield)
+        self.assertEqual(ally["units"][1]["health"], 3)
+        self.assertEqual(ally["history"][-1]["healed"], 1)
+
+        carried = apply_action(state, pickup, battlefield)
+        carried = apply_action(carried, {"type": "end_turn"}, battlefield)
+        dropped = apply_action(carried, {"type": "drop_item", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((dropped["items"][0]["x"], dropped["items"][0]["y"],
+                          dropped["items"][0]["carrier_id"]), (2, 6, None))
+        self.assertEqual(dropped["units"][0]["fight_points"], 0)
+
+    def test_invalid_orders_cannot_mutate_items_or_bypass_capacity_and_healing_rules(self):
+        battlefield = self.potion_map()
+        battlefield["items"].extend([{"x": 2, "y": 6, "type": "healing_potion"}] * 2)
+        state = initial_state(battlefield)  # Deliberately stacked for runtime inventory tests.
+        state["units"][0]["fight_points"] = 3
+        for item_id in (0, 1):
+            state = apply_action(state, {"type": "pickup_item", "unit_id": 0, "item_id": item_id}, battlefield)
+        original = initial_state(battlefield)
+        for action in ({"type": "pickup_item", "unit_id": 0, "item_id": 2},
+                       {"type": "drop_item", "unit_id": 1, "item_id": 0},
+                       {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 0},
+                       {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 6},
+                       {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 1},
+                       {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": True},
+                       {"type": "drop_item", "unit_id": True, "item_id": 0},
+                       {"type": "pickup_item", "unit_id": 6, "item_id": 2},
+                       {"type": "drop_item", "unit_id": 0, "item_id": 0, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        self.assertEqual(state["items"][0]["carrier_id"], 0)
+        self.assertEqual(original["items"][0]["carrier_id"], None)
+        wounded = initial_state(battlefield)
+        wounded["units"][0].update(x=4, y=5, health=1)
+        wounded["units"][1].update(x=4, y=4, health=1)
+        wounded["items"][0].update(x=None, y=None, carrier_id=0)
+        house = default_map()
+        house["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4,
+                             "door": {"x": 5, "y": 4}}]
+        heal = {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 1}
+        with self.assertRaises(InvalidAction):
+            apply_action(wounded, heal, house)
+        wounded["units"][1].update(x=5, y=5)
+        house["elevation"] = [{"x": 5, "y": 5, "height": 1, "access": "ramp"}]
+        with self.assertRaises(InvalidAction):
+            apply_action(wounded, heal, house)
+        del house["elevation"]
+        wounded["units"][1].update(x=4, y=4)
+        house["houses"][0]["door"] = {"x": 4, "y": 4}
+        self.assertEqual(apply_action(wounded, heal, house)["units"][1]["health"], 3)
+
+    def test_carried_potions_drop_on_casualty_and_old_states_have_no_items(self):
+        battlefield = self.potion_map()
+        state = initial_state(battlefield)
+        state["items"][0].update(x=None, y=None, carrier_id=0)
+        state["units"] = [state["units"][0], state["units"][1], state["units"][6]]
+        state["units"][0].update(x=12, y=6, health=1)
+        state["units"][2].update(x=12, y=5)
+        ended = apply_action(state, {"type": "end_turn"}, battlefield)
+        self.assertEqual((ended["items"][0]["x"], ended["items"][0]["y"],
+                          ended["items"][0]["carrier_id"]), (12, 6, None))
+        self.assertFalse(ended["defeated"])
+        ended["units"][0].update(x=12, y=6)
+        recovered = apply_action(ended, {"type": "pickup_item", "unit_id": 1, "item_id": 0}, battlefield)
+        self.assertEqual(recovered["items"][0]["carrier_id"], 1)
+        self.assertIsNone(state["items"][0]["x"])
+        legacy = initial_state()
+        del legacy["items"]
+        self.assertEqual(apply_action(legacy, {"type": "end_turn"})["items"], [])
 
 
 class VillageTests(TestCase):
@@ -94,7 +271,7 @@ class VillageTests(TestCase):
         state = initial_state(battlefield)
         state["units"] = [state["units"][0], state["units"][6]]
         state["units"][0].update(x=5, y=5)
-        state["units"][1].update(x=4, y=5, type="vanguard")
+        state["units"][1].update(x=4, y=5, weapon="sword")
         self.assertIn((4, 4), defender_destinations(state["units"][1], battlefield))
         state["units"][1].update(x=5, y=4)
         self.assertNotIn((5, 5), defender_destinations(state["units"][1], battlefield, blocked={(4, 4)}))
@@ -227,7 +404,7 @@ class ThroneRoomTests(TestCase):
             lambda data: data["enemyStartPositions"].append({"x": 12, "y": 5, "type": "king"}),
             lambda data: data["enemyStartPositions"][0].update(x=12, y=5),
             lambda data: data["enemyStartPositions"][1].update(x=14, y=7),
-            lambda data: data["startPositions"][0].update(type="king"),
+            lambda data: data["startPositions"][0].update(weapon=None, is_king=True),
             lambda data: data.update(objective={"x": 7, "y": 7}),
         ):
             changed = self.throne_map()
@@ -239,7 +416,7 @@ class ThroneRoomTests(TestCase):
             with self.subTest(mission=mission), self.assertRaises(InvalidMap):
                 validate_map(battlefield)
         courtyard = default_map()
-        courtyard["enemyStartPositions"][0]["type"] = "king"
+        courtyard["enemyStartPositions"][0].update(weapon=None, is_king=True)
         with self.assertRaises(InvalidMap):
             validate_map(courtyard)
 
@@ -297,7 +474,7 @@ class ThroneRoomTests(TestCase):
         self.assertTrue(dead["defeated"])
         self.assertFalse(dead["captured"])
         self.assertEqual(capture_status(dead, battlefield), "DEFEATED")
-        self.assertEqual(dead["history"][-1]["target_type"], "king")
+        self.assertTrue(dead["history"][-1]["target_is_king"])
         with self.assertRaises(InvalidAction):
             apply_action(dead, {"type": "end_turn"}, battlefield)
         state = initial_state(battlefield)
@@ -444,8 +621,8 @@ class TurnEngineTests(TestCase):
         result = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6})
         self.assertEqual(result["history"], [{
             "turn": 1, "type": "attack", "actor_id": 0, "actor_side": "attackers",
-            "actor_type": "vanguard", "target_id": 6, "target_side": "defenders",
-            "target_type": "vanguard", "damage": 1, "killed": True,
+            "actor_weapon": "sword", "target_id": 6, "target_side": "defenders",
+            "target_weapon": "sword", "target_is_king": False, "damage": 1, "killed": True,
             "morale_changes": [{"unit_id": 0, "change": 1}, {"unit_id": 7, "change": -1}],
         }])
         self.assertEqual(state["history"], [])
@@ -457,8 +634,8 @@ class TurnEngineTests(TestCase):
         state = initial_state()
         state["units"][0].update(x=4, y=6, health=1)
         state["units"][1].update(x=5, y=7)
-        state["units"][6].update(x=6, y=6, type="longbow")
-        state["units"][7].update(x=7, y=7, type="crossbow")
+        state["units"][6].update(x=6, y=6, weapon="longbow")
+        state["units"][7].update(x=7, y=7, weapon="crossbow")
         result = apply_action(state, {"type": "end_turn"})
         self.assertEqual(result["turn"], 2)
         self.assertEqual([(event["turn"], event["type"], event["actor_id"],
@@ -473,7 +650,7 @@ class TurnEngineTests(TestCase):
         promoted = apply_action(state, {"type": "promote", "unit_id": 0})
         self.assertEqual(promoted["history"], [{
             "turn": 1, "type": "promote", "actor_id": 0,
-            "actor_side": "attackers", "actor_type": "vanguard", "morale_change": -2,
+            "actor_side": "attackers", "actor_weapon": "sword", "morale_change": -2,
         }])
         self.assertNotIn("history", state)
 
@@ -512,7 +689,7 @@ class TurnEngineTests(TestCase):
         state = initial_state(battlefield)
         state["units"] = [state["units"][2], state["units"][6]]
         state["units"][0].update(x=3, y=5)
-        state["units"][1].update(x=5, y=5, type="longbow")
+        state["units"][1].update(x=5, y=5, weapon="longbow")
         with self.assertRaises(InvalidAction):
             apply_action(state, {"type": "ranged_attack", "unit_id": 2, "target_id": 6}, battlefield)
         ended = apply_action(state, {"type": "end_turn"}, battlefield)
@@ -844,12 +1021,12 @@ class TurnEngineTests(TestCase):
         state = initial_state(battlefield)
         state["units"] = [state["units"][0], state["units"][6]]
         state["units"][0].update(x=6, y=5)
-        state["units"][1].update(x=3, y=5, type="longbow")
+        state["units"][1].update(x=3, y=5, weapon="longbow")
         blocked = apply_action(state, {"type": "end_turn"}, battlefield)
         self.assertEqual(blocked["units"][0]["health"], 3)
         self.assertEqual(blocked["history"][-1]["cover"], "tree")
 
-        state["units"][1].update(x=6, y=6, type="vanguard")
+        state["units"][1].update(x=6, y=6, weapon="sword")
         struck = apply_action(state, {"type": "end_turn"}, battlefield)
         self.assertEqual(struck["units"][0]["health"], 2)
         self.assertNotIn("cover", struck["history"][-1])
@@ -891,7 +1068,7 @@ class TurnEngineTests(TestCase):
         attacker, defender = state["units"][0], state["units"][6]
         state["units"] = [attacker, defender]
         attacker.update(x=2, y=6)
-        defender.update(x=6, y=6, type="longbow")
+        defender.update(x=6, y=6, weapon="longbow")
         ended = apply_action(state, {"type": "end_turn"})
         self.assertEqual(ended["units"][0]["health"], 2)
         self.assertEqual(ended["units"][1]["reload_turns"], 2)
@@ -986,7 +1163,7 @@ class TurnEngineTests(TestCase):
         battlefield = default_map()
         validate_map(battlefield)
         self.assertEqual(battlefield["enemyStartPositions"][2],
-                         {"x": 14, "y": 9, "type": "crossbow"})
+                         {"x": 14, "y": 9, "weapon": "crossbow"})
         state = initial_state(battlefield)
         guard = state["units"][8]
         self.assertEqual((guard["x"], guard["y"]), (14, 9))
@@ -1140,11 +1317,11 @@ class TurnEngineTests(TestCase):
         ))
 
     def test_defenders_prioritize_capturer_over_wounded_nonoccupier(self):
-        for weapon, position in (("vanguard", (14, 6)), ("longbow", (14, 4))):
+        for weapon, position in (("sword", (14, 6)), ("longbow", (14, 4))):
             with self.subTest(weapon=weapon):
                 state = initial_state()
                 state["units"] = [unit for unit in state["units"] if unit["id"] != 8]
-                state["units"][6].update(x=position[0], y=position[1], type=weapon)
+                state["units"][6].update(x=position[0], y=position[1], weapon=weapon)
                 state["units"][0].update(x=14, y=7)
                 state["units"][1].update(x=13, y=6, health=1)
                 result = apply_action(state, {"type": "end_turn"})

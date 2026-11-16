@@ -120,6 +120,9 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .progress-track div { width: 0; height: 100%; background: #d3b36e; transition: width .18s linear; }
 .turn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #d0bd91; white-space: nowrap; }
 .turn-controls button:disabled { opacity: .5; cursor: not-allowed; }
+.turn-controls select { max-width: 180px; padding: 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--ink); background: var(--panel-deep); font: inherit; }
+.turn-controls select:disabled { opacity: .5; }
+.turn-controls select:focus-visible { outline: 2px solid #e6c374; outline-offset: 2px; }
 .order-readout { display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: #aab0a2; font-size: 8px; letter-spacing: .06em; white-space: nowrap; }
 .order-key { padding: 3px 5px; border: 1px solid #556057; color: #d1d1c1; font-size: 7px; }
 .briefing { align-self: start; margin-top: 119px; padding: 17px 17px 16px; border: 1px solid var(--line); background: linear-gradient(155deg, rgba(39,51,43,.94), rgba(27,37,32,.92)); }
@@ -131,14 +134,15 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .roster-heading span { color: #8e998e; font-size: 7px; }
 .roster-unit { display: flex; align-items: center; gap: 9px; padding: 10px 0 7px; }
 .unit-swatch { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 2px; color: #e9dfc6; font-size: 14px; }
-.unit-swatch.vanguard { background: #775247; }
+.unit-swatch.sword { background: #775247; }
 .unit-swatch.longbow { background: #66794b; }
 .unit-swatch.crossbow { background: #596c6a; }
 .roster-unit b, .roster-unit small { display: block; }
 .roster-unit b { font-size: 10px; font-weight: 600; }
 .roster-unit small { color: #98a195; font-size: 8px; }
 .health-dot { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: #87a777; box-shadow: 0 0 5px #87a77788; }
-.selected-stats { margin: 4px 0 11px; color: #d2bd8c; font-size: 10px; }
+.roster #selected-unit-title { margin: 10px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.selected-stats { margin: 8px 0 11px; padding: 10px; border: 1px solid var(--line); color: #e2d3ac; background: rgba(0,0,0,.12); font-size: 10px; line-height: 1.8; white-space: pre-line; overflow-wrap: anywhere; }
 .enemy-roster { display: flex; justify-content: space-between; padding: 11px 0 7px; border-top: 1px solid var(--line); color: #b5c9e6; font-size: 8px; font-weight: 700; letter-spacing: .08em; }
 .enemy-roster span { color: #b5c9e6; }
 .combat-history { padding: 14px 0; border-bottom: 1px solid var(--line); }

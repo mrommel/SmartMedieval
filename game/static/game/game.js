@@ -21,6 +21,10 @@ import { createLaunchUI } from "./launch.js";
   const captureButton = document.getElementById("capture-king");
   const aimButton = document.getElementById("aim-catapult");
   const fireButton = document.getElementById("fire-catapult");
+  const pickupButton = document.getElementById("pickup-potion");
+  const dropButton = document.getElementById("drop-potion");
+  const healButton = document.getElementById("heal-potion");
+  const healTarget = document.getElementById("heal-target");
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
@@ -31,7 +35,7 @@ import { createLaunchUI } from "./launch.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], catapults: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
+  const simulation = { units: [], catapults: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0 };
   let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
@@ -66,6 +70,15 @@ import { createLaunchUI } from "./launch.js";
   function updateControls() {
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
+    const medic = selectedMedic();
+    const carried = medic && simulation.items.filter(item => item.carrier_id === medic.id);
+    const hasPotions = Boolean(mapData?.items?.length);
+    pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
+    pickupButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points ||
+      carried.length >= 2 || !simulation.items.some(item => item.carrier_id === null && item.x === medic.x && item.y === medic.y);
+    dropButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points || !carried.length;
+    healButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points || !carried.length || !healTarget.children.length;
+    healTarget.disabled = pendingAction || paused || ended || !medic || !carried.length || !healTarget.children.length;
     endTurnButton.disabled = pendingAction || paused || ended;
     promoteButton.disabled = pendingAction || paused || ended ||
       !promotionCandidate();
@@ -89,6 +102,26 @@ import { createLaunchUI } from "./launch.js";
     return catapult ? { unit, catapult } : null;
   }
 
+  function selectedMedic() {
+    if (simulation.selected.size !== 1) return null;
+    return simulation.units.find(unit => simulation.selected.has(unit.id) && unit.side !== "defenders") || null;
+  }
+
+  function updateHealTargets() {
+    const medic = selectedMedic();
+    const previous = healTarget.value;
+    const candidates = medic ? simulation.units.filter(unit => unit.side !== "defenders" &&
+      unit.health < unit.max_health && (unit.id === medic.id ||
+      (unit.z === medic.z && canMeleeAttack(medic, unit)))) : [];
+    healTarget.replaceChildren(...candidates.map(unit => {
+      const option = document.createElement("option");
+      option.value = String(unit.id);
+      option.textContent = `Heal #${unit.id + 1} (${unit.health}/${unit.max_health} HP)`;
+      return option;
+    }));
+    if (candidates.some(unit => String(unit.id) === previous)) healTarget.value = previous;
+  }
+
   function aimCatapultAt(x, y) {
     const crew = selectedCrew();
     if (!aimingCatapult || !crew) return;
@@ -109,12 +142,12 @@ import { createLaunchUI } from "./launch.js";
 
   function captureCandidate() {
     if (mapData?.mission !== "capture_king") return null;
-    const king = simulation.units.find(unit => unit.type === "king" && unit.side === "defenders");
-    if (!king || simulation.units.some(unit => unit.side === "defenders" && unit.type !== "king" &&
+    const king = simulation.units.find(unit => unit.is_king && unit.side === "defenders");
+    if (!king || simulation.units.some(unit => unit.side === "defenders" && !unit.is_king &&
       Math.abs(unit.x - king.x) + Math.abs(unit.y - king.y) === 1 &&
       renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(king.x, king.y))) return null;
     return simulation.units.find(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
-      unit.type === "vanguard" && unit.fight_points > 0 &&
+      unit.weapon === "sword" && unit.fight_points > 0 &&
       Math.abs(unit.x - king.x) + Math.abs(unit.y - king.y) === 1 &&
       renderer.tileHeight(unit.x, unit.y) === renderer.tileHeight(king.x, king.y))?.id ?? null;
   }
@@ -175,22 +208,22 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function attackSelected(target) {
-    if (target.type === "king" && captureCandidate() !== null) {
+    if (target.is_king && captureCandidate() !== null) {
       sendAction({ type: "capture", unit_id: captureCandidate() });
       return;
     }
     const selected = simulation.units.filter(unit => simulation.selected.has(unit.id));
-    const melee = selected.find(unit => unit.type === "vanguard" && unit.fight_points > 0 &&
+    const melee = selected.find(unit => unit.weapon === "sword" && unit.fight_points > 0 &&
       canMeleeAttack(unit, target));
-    const ranged = selected.find(unit => unit.type !== "vanguard" && unit.fight_points > 0 &&
+    const ranged = selected.find(unit => ["longbow", "crossbow"].includes(unit.weapon) && unit.fight_points > 0 &&
       !(unit.reload_turns > 0) && canRangedAttack(unit, target));
     const attacker = melee || ranged;
     if (!attacker) {
-      showToast(target.type === "king" ? "Move a vanguard next to the king and remove adjacent guards to capture him." :
-        "Select a ready soldier with a clear shot or move a vanguard next to the defender.");
+      showToast(target.is_king ? "Move a sword-bearing soldier next to the king and remove adjacent guards to capture him." :
+        "Select a ready soldier with a clear shot or move a sword-bearing soldier next to the defender.");
       return;
     }
-    if (target.type === "king" && !window.confirm("Killing the king loses the mission. Attack him instead of capturing him?")) return;
+    if (target.is_king && !window.confirm("Killing the king loses the mission. Attack him instead of capturing him?")) return;
     sendAction({ type: melee ? "attack" : "ranged_attack", unit_id: attacker.id, target_id: target.id });
   }
 
@@ -221,7 +254,7 @@ import { createLaunchUI } from "./launch.js";
   }
 
   function canRangedAttack(attacker, target) {
-    const range = attacker.type === "longbow" ? 5 : attacker.type === "crossbow" ? 6 : 0;
+    const range = attacker.weapon === "longbow" ? 5 : attacker.weapon === "crossbow" ? 6 : 0;
     const distance = Math.max(Math.abs(attacker.x - target.x), Math.abs(attacker.y - target.y));
     return distance > 0 && distance <= range &&
       hasLineOfSight([attacker.x, attacker.y], [target.x, target.y]);
@@ -229,16 +262,18 @@ import { createLaunchUI } from "./launch.js";
 
   function hasAttackOption(target) {
     return simulation.units.some(unit => unit.side !== "defenders" && simulation.selected.has(unit.id) &&
-      unit.fight_points > 0 && (unit.type === "vanguard"
+      unit.fight_points > 0 && (unit.weapon === "sword"
         ? canMeleeAttack(unit, target)
-        : !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
+        : ["longbow", "crossbow"].includes(unit.weapon) && !(unit.reload_turns > 0) && canRangedAttack(unit, target)));
   }
 
   function describeCursor(cursor) {
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
+    const potion = simulation.items.some(item => item.carrier_id === null && item.x === cursor.x && item.y === cursor.y);
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
-      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.type} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}`
+      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon}`} #${unit.id + 1}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}`
+      : potion ? "healing potion"
       : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
         objects.get(`${cursor.x},${cursor.y}`)?.type || (renderer.isWall(cursor.x, cursor.y) ? "wall" :
         renderer.isHouseDoor(cursor.x, cursor.y) ? "house door" :
@@ -259,10 +294,12 @@ import { createLaunchUI } from "./launch.js";
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     const unit = selected.length === 1 ? selected[0] : null;
     const crew = selectedCrew();
+    const potions = unit ? simulation.items.filter(item => item.carrier_id === unit.id).length : 0;
     selectedStats.textContent = unit
-      ? `#${unit.id + 1} ${unit.rank || "recruit"} · morale ${unit.morale ?? 3}/5 · ${unit.move_points} MP · ${unit.fight_points} FP${crew ?
-        ` · catapult ${crew.catapult.ammo} stones${crew.catapult.aim ? ` · aimed at ${crew.catapult.aim.x + 1}, ${crew.catapult.aim.y + 1}` : ""}${crew.catapult.reload_turns ? ` · reload ${crew.catapult.reload_turns}` : ""}` : ""}`
-      : `${selected.length} soldiers selected · choose one to inspect or promote`;
+      ? `Soldier #${unit.id + 1} · ${unit.rank || "recruit"}\nHealth ${unit.health}/${unit.max_health} HP · Morale ${unit.morale ?? 3}/5\nMovement ${unit.move_points} MP left · Fight ${unit.fight_points} FP left\nWeapon ${unit.weapon || "none"}${unit.reload_turns ? ` · Reload ${unit.reload_turns} turns` : ""}\nTools ${unit.tools?.length ? unit.tools.join(", ") : "none"} · Potions ${potions}/2${crew ?
+        `\nCatapult ${crew.catapult.ammo} stones${crew.catapult.aim ? ` · aimed at ${crew.catapult.aim.x + 1}, ${crew.catapult.aim.y + 1}` : ""}${crew.catapult.reload_turns ? ` · reload ${crew.catapult.reload_turns}` : ""}` : ""}`
+      : selected.length ? `${selected.length} soldiers selected · choose one to inspect` : "Select a soldier to inspect their condition and equipment.";
+    updateHealTargets();
     updateControls();
   }
 
@@ -276,7 +313,7 @@ import { createLaunchUI } from "./launch.js";
     }
     historyList.replaceChildren(...entries.map(event => {
       const item = document.createElement("li");
-      const actor = `${event.actor_side === "defenders" ? "Defender" : "Attacker"} ${event.actor_type} #${event.actor_id + 1}`;
+      const actor = `${event.actor_side === "defenders" ? "Defender" : "Attacker"} #${event.actor_id + 1}${event.actor_weapon ? ` (${event.actor_weapon})` : ""}`;
       if (event.type === "promote") {
         item.textContent = `Turn ${event.turn} · ${actor} promoted to veteran (morale ${event.morale_change}).`;
       } else if (event.type === "capture") {
@@ -285,8 +322,12 @@ import { createLaunchUI } from "./launch.js";
         item.textContent = `Turn ${event.turn} · ${actor} aimed the catapult at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "catapult_wall" || event.type === "catapult_miss") {
         item.textContent = `Turn ${event.turn} · ${actor} fired at ${event.x + 1}, ${event.y + 1}: ${event.type === "catapult_miss" ? "missed" : event.breached ? "breached the wall" : "damaged the wall"}.`;
+      } else if (event.type === "pickup_item" || event.type === "drop_item") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_item" ? "picked up" : "dropped"} a healing potion.`;
+      } else if (event.type === "use_item") {
+        item.textContent = `Turn ${event.turn} · ${actor} healed attacker #${event.target_id + 1} for ${event.healed} HP.`;
       } else {
-        const target = `${event.target_side === "defenders" ? "defender" : "attacker"} ${event.target_type} #${event.target_id + 1}`;
+        const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
         item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
@@ -310,13 +351,14 @@ import { createLaunchUI } from "./launch.js";
     captureButton.hidden = !throneMission;
     document.getElementById("objective-name").textContent = throneMission ? "THRONE ROOM" : "KEEP COURTYARD";
     document.getElementById("mission-help").textContent = throneMission
-      ? "Reach the throne room. Defeat guards beside the king, then select a vanguard on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
+      ? "Reach the throne room. Defeat guards beside the king, then select a soldier with a sword on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
     simulation.catapults = snapshot.state.catapults || [];
+    simulation.items = snapshot.state.items || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;
     simulation.captureProgress = snapshot.state.capture_progress;
@@ -329,30 +371,30 @@ import { createLaunchUI } from "./launch.js";
     input.resetCursor(newGame ? attackers[0]?.x ?? OBJECTIVE.x : cursor.x,
       newGame ? attackers[0]?.y ?? OBJECTIVE.y : cursor.y);
     const roster = [
-      { type: "vanguard", name: "Vanguard", icon: "⚔", role: "close-quarters" },
-      { type: "longbow", name: "Longbow", icon: "⌁", role: "ranged support" },
-      { type: "crossbow", name: "Crossbow", icon: "✣", role: "ranged support" }
+      { weapon: "sword", name: "Swords", icon: "⚔", role: "close-quarters" },
+      { weapon: "longbow", name: "Longbows", icon: "⌁", role: "ranged support" },
+      { weapon: "crossbow", name: "Crossbows", icon: "✣", role: "ranged support" }
     ];
     rosterCount.textContent = `${attackers.length} SOLDIERS`;
     enemyCount.textContent = `${defenders.length} DEFENDERS`;
-    rosterList.replaceChildren(...roster.filter(item => attackers.some(unit => unit.type === item.type)).map(item => {
+    rosterList.replaceChildren(...roster.filter(item => attackers.some(unit => unit.weapon === item.weapon)).map(item => {
       const row = document.createElement("div");
       row.className = "roster-unit";
       const swatch = document.createElement("span");
-      swatch.className = `unit-swatch ${item.type}`;
+      swatch.className = `unit-swatch ${item.weapon}`;
       swatch.textContent = item.icon;
       const copy = document.createElement("span");
       const title = document.createElement("b");
       title.textContent = item.name;
       const detail = document.createElement("small");
-      const typeUnits = attackers.filter(unit => unit.type === item.type);
-      const health = typeUnits.reduce((total, unit) => total + unit.health, 0);
-      const maxHealth = typeUnits.reduce((total, unit) => total + unit.max_health, 0);
-      const fightPoints = typeUnits.reduce((total, unit) => total + unit.fight_points, 0);
-      const reloading = typeUnits.filter(unit => unit.reload_turns > 0).length;
-      const weapon = item.type === "longbow" ? " · range 5" : item.type === "crossbow" ? " · range 6" : "";
+      const equipped = attackers.filter(unit => unit.weapon === item.weapon);
+      const health = equipped.reduce((total, unit) => total + unit.health, 0);
+      const maxHealth = equipped.reduce((total, unit) => total + unit.max_health, 0);
+      const fightPoints = equipped.reduce((total, unit) => total + unit.fight_points, 0);
+      const reloading = equipped.filter(unit => unit.reload_turns > 0).length;
+      const weapon = item.weapon === "longbow" ? " · range 5" : item.weapon === "crossbow" ? " · range 6" : "";
       const reload = reloading ? ` · ${reloading} reloading` : "";
-      detail.textContent = `${typeUnits.length} · ${item.role}${weapon} · ${health}/${maxHealth} HP · ${fightPoints} FP${reload}`;
+      detail.textContent = `${equipped.length} · ${item.role}${weapon} · ${health}/${maxHealth} HP · ${fightPoints} FP${reload}`;
       copy.append(title, detail);
       const dot = document.createElement("i");
       dot.className = "health-dot";
@@ -366,7 +408,7 @@ import { createLaunchUI } from "./launch.js";
     renderHistory(snapshot.state.history);
     victoryNode.hidden = !simulation.captured && !simulation.defeated;
     victoryNode.classList.toggle("defeat", simulation.defeated);
-    const kingAlive = defenders.some(unit => unit.type === "king");
+    const kingAlive = defenders.some(unit => unit.is_king);
     victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated
       ? throneMission && !kingAlive ? "THE KING HAS FALLEN" : "THE COMPANY HAS FALLEN"
       : throneMission ? "THE KING IS CAPTIVE" : "GREYWATCH HAS FALLEN";
@@ -425,8 +467,8 @@ import { createLaunchUI } from "./launch.js";
       applySnapshot(snapshot);
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
       if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
-      else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.type === "king") ? "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : "Order received."));
+      else if (simulation.defeated) showToast(mapData.mission === "capture_king" && !simulation.units.some(unit => unit.is_king) ? "The king was killed. Mission failed." : "Your company has been defeated.");
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -528,6 +570,21 @@ import { createLaunchUI } from "./launch.js";
   fireButton.addEventListener("click", () => {
     const crew = selectedCrew();
     if (crew && !fireButton.disabled) sendAction({ type: "fire_catapult", unit_id: crew.unit.id, catapult_id: crew.catapult.id });
+  });
+  pickupButton.addEventListener("click", () => {
+    const medic = selectedMedic();
+    const item = simulation.items.find(item => medic && item.carrier_id === null && item.x === medic.x && item.y === medic.y);
+    if (item && !pickupButton.disabled) sendAction({ type: "pickup_item", unit_id: medic.id, item_id: item.id });
+  });
+  dropButton.addEventListener("click", () => {
+    const medic = selectedMedic();
+    const item = simulation.items.find(item => medic && item.carrier_id === medic.id);
+    if (item && !dropButton.disabled) sendAction({ type: "drop_item", unit_id: medic.id, item_id: item.id });
+  });
+  healButton.addEventListener("click", () => {
+    const medic = selectedMedic();
+    const item = simulation.items.find(item => medic && item.carrier_id === medic.id);
+    if (item && !healButton.disabled) sendAction({ type: "use_item", unit_id: medic.id, item_id: item.id, target_id: Number(healTarget.value) });
   });
   pauseButton.addEventListener("click", () => {
     if (simulation.captured || simulation.defeated) return;
