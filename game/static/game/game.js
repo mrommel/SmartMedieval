@@ -18,6 +18,7 @@ import { previewMovement } from "./path_preview.js";
   const victoryNode = document.getElementById("victory");
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
+  const offlineEndTurnButton = document.getElementById("offline-end-turn");
   const reactionButton = document.getElementById("reserve-reaction");
   const movementReactionButton = document.getElementById("reserve-movement");
   const crouchButton = document.getElementById("crouch");
@@ -196,6 +197,7 @@ import { previewMovement } from "./path_preview.js";
     healButton.disabled = pendingAction || paused || ended || !medic || !medic.fight_points || !carried.length || !healTarget.children.length;
     healTarget.disabled = pendingAction || paused || ended || !medic || !carried.length || !healTarget.children.length;
     endTurnButton.disabled = pendingAction || paused || ended;
+    offlineEndTurnButton.disabled = offlineEndTurnButton.hidden || pendingAction || paused || ended;
     promoteButton.disabled = pendingAction || paused || ended ||
       !promotionCandidate();
     captureButton.disabled = pendingAction || paused || ended || captureCandidate() === null;
@@ -665,6 +667,7 @@ import { previewMovement } from "./path_preview.js";
 
   function applySnapshot(snapshot) {
     const newGame = instanceId !== snapshot.id;
+    offlineEndTurnButton.hidden = true;
     if (newGame) {
       input.cancelPointer();
       renderer.clearProjectiles();
@@ -821,7 +824,7 @@ import { previewMovement } from "./path_preview.js";
     pendingAction = true;
     updateControls();
     updateMovementPreview();
-    if (action.type === "end_turn") showToast("Defenders are taking their turn...");
+    if (action.type === "end_turn") showToast(action.offline ? "Defenders are holding position..." : "Defenders are taking their turn...");
     try {
       const snapshot = await api("/api/games/actions/", { revision, action });
       const wasCaptured = simulation.captured;
@@ -832,8 +835,14 @@ import { previewMovement } from "./path_preview.js";
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
         (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
         "The king was killed. Mission failed." : "Your company has been defeated.");
+      else if (action.offline) showToast(`Offline turn ${snapshot.state.turn}: defenders held position but could still attack.`);
       else showToast(combat || (action.type === "extinguish_fire" ? "Fire extinguished." : action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
+      if (action.type === "end_turn" && !action.offline && (error.status === 502 || error.status === 503)) {
+        offlineEndTurnButton.hidden = false;
+        showToast(`AI failed: ${error.message} Retry End turn or use End turn without AI (defenders hold).`);
+        return;
+      }
       if (error.status === 409) {
         try {
           applySnapshot(await api("/api/games/current/"));
@@ -929,6 +938,9 @@ import { previewMovement } from "./path_preview.js";
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));
+  offlineEndTurnButton.addEventListener("click", () => {
+    if (!offlineEndTurnButton.hidden && !offlineEndTurnButton.disabled) sendAction({ type: "end_turn", offline: true });
+  });
   reactionButton.addEventListener("click", () => {
     const soldier = selectedMedic();
     if (soldier && !reactionButton.disabled) sendAction({ type: "reserve_reaction", unit_id: soldier.id, reserved: !soldier.reaction_reserved });

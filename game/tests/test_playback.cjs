@@ -32,7 +32,7 @@ function element() {
   };
 }
 
-function setup(savedSpeed = null, catalogFetch = null) {
+function setup(savedSpeed = null, catalogFetch = null, actionFetch = null) {
   const nodes = new Map();
   const get = id => {
     if (!nodes.has(id)) nodes.set(id, element());
@@ -99,6 +99,10 @@ function setup(savedSpeed = null, catalogFetch = null) {
       if (options.method === "POST") {
         postCount++;
         if (options.body) actions.push(JSON.parse(options.body).action);
+        if (url === "/api/games/actions/" && actionFetch) {
+          const response = actionFetch(actions.at(-1));
+          if (response) return response;
+        }
       }
       return { ok: true, headers: { get: () => "application/json" }, json: async () => snapshot };
     }
@@ -807,6 +811,35 @@ test("pause blocks orders and freezes the animation clock until resumed", async 
   assert.ok(game.draws() > pausedDraws);
   await game.get("end-turn").fire("click");
   assert.equal(game.postCount(), 1);
+});
+
+test("an AI failure offers an explicit offline turn without silently advancing", async () => {
+  let aiAvailable = false;
+  const game = setup(null, null, action => !aiAvailable && !action.offline
+    ? { ok: false, status: 503, headers: { get: () => "application/json" },
+        json: async () => ({ error: "Enemy AI is unavailable." }) }
+    : null);
+  await game.get("continue-game").fire("click");
+  const offline = game.get("offline-end-turn");
+  assert.equal(offline.hidden, true);
+  await game.get("end-turn").fire("click");
+  assert.equal(offline.hidden, false);
+  assert.equal(offline.disabled, false);
+  assert.match(game.get("toast").textContent, /Retry End turn or use End turn without AI/);
+  game.get("pause-game").fire("click");
+  assert.equal(offline.disabled, true);
+  await offline.fire("click");
+  assert.equal(game.postCount(), 1);
+  game.get("pause-game").fire("click");
+  await offline.fire("click");
+  await new Promise(setImmediate);
+  assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "end_turn", offline: true }));
+  assert.equal(offline.hidden, true);
+  assert.match(game.get("toast").textContent, /defenders held position/);
+  aiAvailable = true;
+  await game.get("end-turn").fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "end_turn" }));
+  assert.equal(offline.hidden, true);
 });
 
 test("speed persists, restores, and off disables per-frame drawing", async () => {

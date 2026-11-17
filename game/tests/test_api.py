@@ -1146,3 +1146,60 @@ class GameInstanceApiTests(TestCase):
         self.assertIn("SPLASH_API_KEY", response.json()["error"])
         self.assertEqual(GameInstance.objects.get(pk=started["id"]).revision, 0)
         self.ai.assert_not_called()
+
+    @override_settings(ENEMY_AI_API_KEY=None)
+    def test_explicit_offline_turn_after_ai_failure_keeps_defenders_stationary_but_attacking(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        state = instance.state
+        defender = next(unit for unit in state["units"] if unit["side"] == "defenders")
+        attacker = state["units"][0]
+        attacker["x"], attacker["y"] = defender["x"], defender["y"] + 1
+        attacker["z"] = defender["z"]
+        attacker["health"] = 3
+        instance.state = state
+        instance.save(update_fields=["state"])
+        failed = self.action(0, {"type": "end_turn"})
+        self.assertEqual(failed.status_code, 503)
+        instance.refresh_from_db()
+        self.assertEqual(instance.state, state)
+        self.assertEqual(instance.revision, 0)
+
+        result = self.action(0, {"type": "end_turn", "offline": True})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["revision"], 1)
+        self.assertEqual(result.json()["state"]["turn"], 2)
+        units = result.json()["state"]["units"]
+        self.assertEqual((units[defender["id"]]["x"], units[defender["id"]]["y"]),
+                         (defender["x"], defender["y"]))
+        self.assertLess(units[0]["health"], attacker["health"])
+        self.assertTrue(any(event["type"] == "attack" for event in result.json()["state"]["history"]))
+        self.assertEqual(self.action(0, {"type": "end_turn", "offline": True}).status_code, 409)
+        self.ai.assert_not_called()
+
+    def test_offline_end_turn_requires_explicit_true_and_no_extra_fields(self):
+        started = self.start().json()
+        for action in ({"type": "end_turn", "offline": False},
+                       {"type": "end_turn", "offline": 1},
+                       {"type": "end_turn", "offline": True, "orders": []}):
+            self.assertEqual(self.action(0, action).status_code, 400)
+        self.assertEqual(self.client.get(reverse("current-game")).json(), started)
+        self.ai.assert_not_called()
+
+    @override_settings(ENEMY_AI_API_KEY=None)
+    def test_offline_end_turn_preserves_fog_safe_snapshot(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertFalse(any(unit["side"] == "defenders" for unit in started["state"]["units"]))
+        result = self.action(0, {"type": "end_turn", "offline": True})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["state"]["turn"], 2)
+        self.assertFalse(any(unit["side"] == "defenders" for unit in result.json()["state"]["units"]))
+        self.assertNotIn("enemyStartPositions", result.json()["map"])
+        self.assertEqual(result.json()["state"]["units"],
+                         self.client.get(reverse("current-game")).json()["state"]["units"])
+        self.ai.assert_not_called()

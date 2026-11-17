@@ -182,12 +182,17 @@ def game_action(request):
     combat_events = []
     try:
         action = payload.get("action")
+        offline = isinstance(action, dict) and action.get("type") == "end_turn" and action.get("offline") is True
+        if isinstance(action, dict) and action.get("type") == "end_turn" and set(action) != (
+                {"type", "offline"} if offline else {"type"}):
+            raise InvalidAction("Invalid end-turn action.")
         if (isinstance(action, dict) and action.get("type") == "end_turn"
-                and set(action) == {"type"} and not instance.state["captured"]
+                and not offline and not instance.state["captured"]
                 and not instance.state.get("defeated", False)):
             state = enemy_turn(instance.state, instance.map_definition, combat_events=combat_events)
         else:
-            state = apply_action(instance.state, action, instance.map_definition, combat_events=combat_events)
+            state = apply_action(instance.state, {"type": "end_turn"} if offline else action,
+                                 instance.map_definition, combat_events=combat_events)
     except InvalidAction as error:
         return JsonResponse({"error": str(error)}, status=400)
     except EnemyAIError as error:
