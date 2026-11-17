@@ -508,7 +508,9 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
     battlefield = battle_map(map_data, state)
     visible = set()
     night = map_data.get("night", False)
-    fires = [(fire["x"], fire["y"]) for fire in map_data.get("watchfires", ())] if night else []
+    extinguished = {(fire["x"], fire["y"]) for fire in state.get("extinguished_watchfires", ())}
+    fires = [(fire["x"], fire["y"]) for fire in map_data.get("watchfires", ())
+             if (fire["x"], fire["y"]) not in extinguished] if night else []
     # A carried torch lights its bearer to either side, but only its own side gets
     # the longer torch sight radius. A fire lights tiles, not observers behind walls.
     torch_bearers = {(unit["x"], unit["y"]) for unit in state["units"]
@@ -1020,6 +1022,7 @@ def initial_state(map_data=MAP):
         ],
         "wall_damage": [],
         "breaches": [],
+        "extinguished_watchfires": [],
         "items": [
             {"id": index, "type": item["type"], **({"name": item["name"]} if "name" in item else {}),
              "x": item["x"], "y": item["y"], "carrier_id": None}
@@ -1058,7 +1061,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
-            "mount", "dismount", "reserve_reaction", "reserve_movement"):
+            "mount", "dismount", "reserve_reaction", "reserve_movement",
+            "light_watchfire", "extinguish_watchfire"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -1085,7 +1089,37 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         ], "horses": [dict(horse) for horse in state.get("horses", [])],
         "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
+        "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] in ("light_watchfire", "extinguish_watchfire"):
+        if (set(action) != {"type", "unit_id", "x", "y"}
+                or any(type(action[key]) is not int for key in ("unit_id", "x", "y"))):
+            raise InvalidAction("Choose a soldier and a watchfire tile.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        position = (action["x"], action["y"])
+        if (not map_data.get("night") or unit is None or unit["fight_points"] < 1
+                or position not in {(fire["x"], fire["y"]) for fire in map_data.get("watchfires", ())}
+                or abs(unit["x"] - position[0]) + abs(unit["y"] - position[1]) > 1
+                or unit["z"] != tile_height(*position, map_data)
+                or (unit["x"], unit["y"]) != position
+                and not can_step((unit["x"], unit["y"]), position, map_data)):
+            raise InvalidAction("A soldier needs one fight point on or beside a reachable watchfire.")
+        extinguished = next_state["extinguished_watchfires"]
+        is_out = any((fire["x"], fire["y"]) == position for fire in extinguished)
+        if is_out != (action["type"] == "light_watchfire"):
+            raise InvalidAction("That watchfire is already in the requested state.")
+        if is_out:
+            extinguished[:] = [fire for fire in extinguished if (fire["x"], fire["y"]) != position]
+        else:
+            extinguished.append({"x": position[0], "y": position[1]})
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"],
+            "x": position[0], "y": position[1],
+        }])[-HISTORY_LIMIT:]
+        return remember_visibility(next_state, map_data)
     if action["type"] == "reserve_reaction":
         if (set(action) != {"type", "unit_id", "reserved"} or type(action["unit_id"]) is not int
                 or type(action["reserved"]) is not bool):

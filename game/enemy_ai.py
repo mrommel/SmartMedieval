@@ -34,7 +34,9 @@ def enemy_turn(state, map_data, combat_events=None):
                    "houses": map_data.get("houses", []), "lanes": map_data.get("lanes", []),
                    "terrain": map_data.get("terrain", []),
                    "fog_of_war": map_data.get("fog_of_war", False),
-                   "night": map_data.get("night", False), "watchfires": map_data.get("watchfires", []),
+                   "night": map_data.get("night", False),
+                   "watchfires": [fire for fire in map_data.get("watchfires", [])
+                                  if fire not in state.get("extinguished_watchfires", [])],
                    "mission": map_data.get("mission", "courtyard"),
                    "breaches": state.get("breaches", [])},
         "units": [

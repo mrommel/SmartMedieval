@@ -84,7 +84,7 @@
   - [ ] Add night maps, torches, watchfires, lighting-dependent detection and ambush rules.
     - [x] Add opt-in night fog, two-step dark sight, carried torches, static watchfires, lighting-dependent detection for both teams and a seeded night encounter.
     - [x] Add explicit +1 damage ambush bonuses to direct attacks from soldiers unseen by their targets' team on fog maps, including reactions; keep cover, armor and catapult rules intact.
-    - [ ] Add dynamic fire control.
+    - [x] Let soldiers extinguish and relight adjacent watchfires for one fight point, changing sight for both teams immediately.
 - [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
 - [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
 - [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.

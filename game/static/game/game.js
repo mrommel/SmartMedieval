@@ -36,6 +36,8 @@ import { previewMovement } from "./path_preview.js";
   const groundToolTarget = document.getElementById("ground-tool-target");
   const pickupToolButton = document.getElementById("pickup-tool");
   const dropToolButton = document.getElementById("drop-tool");
+  const watchfireTarget = document.getElementById("watchfire-target");
+  const toggleWatchfireButton = document.getElementById("toggle-watchfire");
   const armorButton = document.getElementById("equip-armor");
   const mountButton = document.getElementById("mount-horse");
   const pauseButton = document.getElementById("pause-game");
@@ -88,6 +90,24 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
     const medic = selectedMedic();
+    const nearbyFires = medic && mapData?.night ? (mapData.watchfires || []).filter(fire =>
+      Math.abs(medic.x - fire.x) + Math.abs(medic.y - fire.y) <= 1 &&
+      medic.z === renderer.tileHeight(fire.x, fire.y)) : [];
+    const previousFire = watchfireTarget.value;
+    watchfireTarget.replaceChildren(...nearbyFires.map(fire => {
+      const option = document.createElement("option");
+      option.value = `${fire.x},${fire.y}`;
+      option.textContent = `Watchfire ${fire.x + 1}, ${fire.y + 1}`;
+      return option;
+    }));
+    watchfireTarget.value = nearbyFires.some(fire => `${fire.x},${fire.y}` === previousFire)
+      ? previousFire : nearbyFires.length ? `${nearbyFires[0].x},${nearbyFires[0].y}` : "";
+    const chosenFire = nearbyFires.find(fire => `${fire.x},${fire.y}` === watchfireTarget.value);
+    const out = chosenFire && simulation.extinguishedWatchfires?.some(fire => fire.x === chosenFire.x && fire.y === chosenFire.y);
+    watchfireTarget.hidden = toggleWatchfireButton.hidden = !mapData?.night || !mapData?.watchfires?.length;
+    watchfireTarget.disabled = pendingAction || paused || ended || !nearbyFires.length;
+    toggleWatchfireButton.disabled = watchfireTarget.disabled || !medic?.fight_points;
+    toggleWatchfireButton.textContent = out ? "Light watchfire (1 FP)" : "Extinguish watchfire (1 FP)";
     reactionButton.disabled = pendingAction || paused || ended || !medic ||
       (!medic.reaction_reserved && (!medic.fight_points || !["sword", "longbow", "crossbow"].includes(medic.weapon) || medic.reload_turns > 0));
     reactionButton.textContent = medic?.reaction_reserved ? "Cancel reaction" : "Reserve attack (1 FP)";
@@ -575,6 +595,8 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_equipment" ? "recovered" : "dropped"} ${event.equipment}${event.type === "drop_armor" || event.equipment === "mail" || event.equipment === "leather" ? " armor" : ""}.`;
       } else if (event.type === "pickup_tool" || event.type === "drop_tool") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_tool" ? "picked up" : "dropped"} ${event.tool} tool.`;
+      } else if (event.type === "light_watchfire" || event.type === "extinguish_watchfire") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "light_watchfire" ? "lit" : "extinguished"} watchfire at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "use_item") {
         item.textContent = `Turn ${event.turn} · ${actor} healed attacker #${event.target_id + 1} for ${event.healed} HP.`;
       } else {
@@ -607,10 +629,12 @@ import { previewMovement } from "./path_preview.js";
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     if (mapData.fog_of_war) document.getElementById("mission-help").textContent +=
       (mapData.night
-        ? " Night battle: allies see two steps in the dark. Carrying a torch extends sight to five steps, but also reveals its bearer to enemies up to six steps away. Watchfires light tiles within three steps for both sides. Walls still block sight. Drop or recover a torch as a tool (one fight point)."
+        ? " Night battle: allies see two steps in the dark. Carrying a torch extends sight to five steps, but also reveals its bearer to enemies up to six steps away. Lit watchfires light tiles within three steps for both sides. Walls still block sight. Drop or recover a torch as a tool (one fight point); use watchfire controls beside a fire to extinguish or relight it (one fight point)."
         : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
-    renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
+    renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage,
+      watchfires: (mapData.watchfires || []).map(fire => ({ ...fire, lit: !snapshot.state.extinguished_watchfires?.some(
+        out => out.x === fire.x && out.y === fire.y) })) });
     previewMap = { ...mapData, breaches: snapshot.state.breaches || [] };
     previewKey = null;
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
@@ -620,6 +644,7 @@ import { previewMovement } from "./path_preview.js";
     simulation.catapults = snapshot.state.catapults || [];
     simulation.horses = snapshot.state.horses || [];
     simulation.items = snapshot.state.items || [];
+    simulation.extinguishedWatchfires = snapshot.state.extinguished_watchfires || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;
     simulation.captureProgress = snapshot.state.capture_progress;
@@ -891,6 +916,14 @@ import { previewMovement } from "./path_preview.js";
   dropToolButton.addEventListener("click", () => {
     const soldier = selectedMedic();
     if (soldier && !dropToolButton.disabled) sendAction({ type: "drop_tool", unit_id: soldier.id, tool_index: Number(toolTarget.value) });
+  });
+  watchfireTarget.addEventListener("change", updateControls);
+  toggleWatchfireButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (!soldier || toggleWatchfireButton.disabled) return;
+    const [x, y] = watchfireTarget.value.split(",").map(Number);
+    const out = simulation.extinguishedWatchfires.some(fire => fire.x === x && fire.y === y);
+    sendAction({ type: out ? "light_watchfire" : "extinguish_watchfire", unit_id: soldier.id, x, y });
   });
   mountButton.addEventListener("click", () => {
     const soldier = selectedMedic();

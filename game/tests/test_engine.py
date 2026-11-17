@@ -362,6 +362,54 @@ class NightBattleTests(TestCase):
         state["breaches"] = [{"x": 11, "y": 5}]
         self.assertIn((12, 5), visible_tiles(state, battlefield))
 
+    def test_watchfire_control_changes_both_sides_sight_and_survives_turns(self):
+        battlefield = self.night_map()
+        battlefield["startPositions"][0]["x"] = 3
+        battlefield["watchfires"] = [{"x": 4, "y": 6}]
+        state = initial_state(battlefield)
+        self.assertIn((7, 6), visible_tiles(state, battlefield))
+        self.assertIn((3, 6), visible_tiles(state, battlefield, "defenders"))
+        # Saved matches made before dynamic fires were added still start with all fires lit.
+        del state["extinguished_watchfires"]
+        action = {"type": "extinguish_watchfire", "unit_id": 0, "x": 4, "y": 6}
+        out = apply_action(state, action, battlefield)
+        self.assertNotIn("extinguished_watchfires", state)
+        self.assertEqual(out["extinguished_watchfires"], [{"x": 4, "y": 6}])
+        self.assertEqual(out["units"][0]["fight_points"], 0)
+        self.assertEqual(out["history"][-1]["type"], "extinguish_watchfire")
+        self.assertNotIn((7, 6), visible_tiles(out, battlefield))
+        self.assertNotIn((3, 6), visible_tiles(out, battlefield, "defenders"))
+        self.assertIn({"x": 7, "y": 6}, out["explored"])
+        next_turn = apply_action(out, {"type": "end_turn"}, battlefield)
+        self.assertEqual(next_turn["extinguished_watchfires"], out["extinguished_watchfires"])
+        lit = apply_action(next_turn, {"type": "light_watchfire", "unit_id": 0, "x": 4, "y": 6}, battlefield)
+        self.assertEqual(lit["extinguished_watchfires"], [])
+        self.assertIn((7, 6), visible_tiles(lit, battlefield))
+        self.assertIn((3, 6), visible_tiles(lit, battlefield, "defenders"))
+
+    def test_watchfire_control_rejects_forged_and_unaffordable_orders(self):
+        battlefield = self.night_map()
+        battlefield["startPositions"][0]["x"] = 3
+        battlefield["watchfires"] = [{"x": 4, "y": 6}]
+        state = initial_state(battlefield)
+        base = {"type": "extinguish_watchfire", "unit_id": 0, "x": 4, "y": 6}
+        for action in ({**base, "unit_id": True}, {**base, "x": 4.0},
+                       {**base, "unit_id": 1}, {**base, "x": 9},
+                       {**base, "x": 5}, {**base, "extra": 1},
+                       {**base, "type": "light_watchfire"}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        state["units"][0]["x"] = 2
+        with self.assertRaises(InvalidAction):
+            apply_action(state, base, battlefield)
+        state["units"][0]["x"] = 3
+        state["units"][0]["fight_points"] = 0
+        with self.assertRaises(InvalidAction):
+            apply_action(state, base, battlefield)
+        battlefield["night"] = False
+        with self.assertRaises(InvalidAction):
+            apply_action(initial_state(battlefield), base, battlefield)
+
 
 class HorsebackRidingTests(TestCase):
     def horse_map(self):

@@ -138,6 +138,30 @@ test("reaction control reserves a fight point and shows the selected soldier's r
   assert.equal(game.actions.at(-1).reserved, false);
 });
 
+test("nearby watchfire controls extinguish and relight saved fires", async () => {
+  const game = setup();
+  game.snapshot.map.night = true;
+  game.snapshot.map.fog_of_war = true;
+  game.snapshot.map.watchfires = [{ x: 1, y: 0 }];
+  game.snapshot.state.units[0].z = 0;
+  await game.get("continue-game").fire("click");
+  const button = game.get("toggle-watchfire");
+  assert.equal(button.hidden, false);
+  assert.equal(button.disabled, false);
+  assert.match(button.textContent, /Extinguish/);
+  await button.fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)),
+    JSON.stringify({ type: "extinguish_watchfire", unit_id: 0, x: 1, y: 0 }));
+  game.snapshot.state.extinguished_watchfires = [{ x: 1, y: 0 }];
+  await game.get("continue-game").fire("click");
+  assert.match(button.textContent, /Light/);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).type, "light_watchfire");
+  game.snapshot.state.units[0].fight_points = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(button.disabled, true);
+});
+
 test("movement reservation control shows reserved MP and allows cancellation", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");

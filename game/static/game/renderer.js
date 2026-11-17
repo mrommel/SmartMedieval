@@ -333,10 +333,12 @@ export function createBattlefieldRenderer(canvas) {
   function drawWatchfire(fire) {
     const p = project(fire.x, fire.y);
     ctx.save();
-    ctx.fillStyle = "rgba(255,166,55,.22)";
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y + tileH * .45, tileW * .42, tileH * .44, 0, 0, Math.PI * 2);
-    ctx.fill();
+    if (fire.lit !== false) {
+      ctx.fillStyle = "rgba(255,166,55,.22)";
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y + tileH * .45, tileW * .42, tileH * .44, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.strokeStyle = "#49352a";
     ctx.lineWidth = Math.max(2, tileW * .06);
     ctx.beginPath();
@@ -345,7 +347,7 @@ export function createBattlefieldRenderer(canvas) {
     ctx.moveTo(p.x + tileW * .16, p.y + tileH * .58);
     ctx.lineTo(p.x - tileW * .16, p.y + tileH * .35);
     ctx.stroke();
-    polygon([[p.x, p.y + tileH * .42], [p.x - tileW * .11, p.y + tileH * .14],
+    if (fire.lit !== false) polygon([[p.x, p.y + tileH * .42], [p.x - tileW * .11, p.y + tileH * .14],
       [p.x, p.y - tileH * .3], [p.x + tileW * .12, p.y + tileH * .14]], "#ffb44d", "#ffe2a1", 1);
     ctx.restore();
   }

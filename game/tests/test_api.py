@@ -35,6 +35,37 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_watchfire_control_persists_and_updates_fog_and_ai(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, night=True,
+                           startPositions=[{"x": 3, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}],
+                           watchfires=[{"x": 4, "y": 6}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 2)
+        out = self.action(0, {"type": "extinguish_watchfire", "unit_id": 0, "x": 4, "y": 6})
+        self.assertEqual(out.status_code, 200)
+        self.assertEqual(out.json()["state"]["extinguished_watchfires"], [{"x": 4, "y": 6}])
+        self.assertEqual([unit["id"] for unit in out.json()["state"]["units"]], [0])
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "light_watchfire", "unit_id": 0,
+                                         "x": 4, "y": 6}).status_code, 400)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], out.json()["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["extinguished_watchfires"],
+                         [{"x": 4, "y": 6}])
+        ended = self.action(1, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        ai_map = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertEqual(ai_map["watchfires"], [])
+        lit = self.action(2, {"type": "light_watchfire", "unit_id": 0, "x": 4, "y": 6})
+        self.assertEqual(lit.status_code, 200)
+        self.assertEqual(lit.json()["state"]["extinguished_watchfires"], [])
+        self.assertEqual(len(lit.json()["state"]["units"]), 2)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], lit.json()["state"])
+
     def test_night_torch_visibility_updates_on_action_and_resume(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True, night=True,
