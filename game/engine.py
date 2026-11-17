@@ -291,7 +291,8 @@ def validate_map(map_data):
                 if position.get("is_king", False) != (tile == (objective["x"], objective["y"])) and mission == "capture_king":
                     raise InvalidMap("The king must start on the throne and guards must start elsewhere.")
             if find_path((position["x"], position["y"]), (objective["x"], objective["y"]), map_data,
-                         max_step_cost=move_allowance(position)) is None:
+                         max_step_cost=move_allowance(position),
+                         rope="rope" in position.get("tools", ())) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
             if name == "enemyStartPositions" and mission != "capture_king" and tile == (
                     objective["x"], objective["y"]):
@@ -411,7 +412,7 @@ def tile_height(x, y, map_data=MAP, elevations=None):
                  if tile["x"] == x and tile["y"] == y), 0)
 
 
-def can_step(start, end, map_data=MAP, elevations=None, mounted=False):
+def can_step(start, end, map_data=MAP, elevations=None, mounted=False, rope=False):
     if not is_walkable(*end, map_data):
         return False
     if mounted and any(tile["x"] == end[0] and tile["y"] == end[1] and tile["type"] == "swamp"
@@ -434,6 +435,8 @@ def can_step(start, end, map_data=MAP, elevations=None, mounted=False):
     if abs(before - after) != 1:
         return False
     high = end if after > before else start
+    if rope and not mounted:
+        return True
     if elevations is not None:
         return elevations[high].get("access") in (("ramp",) if mounted else ("ladder", "ramp"))
     return any(tile["x"] == high[0] and tile["y"] == high[1]
@@ -601,7 +604,7 @@ def affordable_steps(path, budget, terrain_costs):
     return steps, spent
 
 
-def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None, mounted=False):
+def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None, mounted=False, rope=False):
     if (not is_walkable(*goal, map_data) or goal in blocked
             or mounted and house_at(*goal, map_data) is not None):
         return None
@@ -619,7 +622,7 @@ def find_path(start, goal, map_data=MAP, blocked=(), max_step_cost=None, mounted
             break
         x, y = current
         for neighbor in neighbors(x, y):
-            if (neighbor in blocked or not can_step(current, neighbor, map_data, elevations, mounted)
+            if (neighbor in blocked or not can_step(current, neighbor, map_data, elevations, mounted, rope)
                     or terrain_costs.get(neighbor, 1) is None):
                 continue
             cost = terrain_costs.get(neighbor, 1)
@@ -834,7 +837,8 @@ def defender_destinations(unit, map_data=MAP, blocked=(), items=()):
             destinations.append((x, y))
         for neighbor in neighbors(x, y):
             if (neighbor in blocked or neighbor == objective
-                    or not can_step((x, y), neighbor, map_data, elevations, mounted)
+                    or not can_step((x, y), neighbor, map_data, elevations, mounted,
+                                    "rope" in unit.get("tools", ()))
                     or terrain_costs.get(neighbor, 1) is None):
                 continue
             new_distance = distance + terrain_costs.get(neighbor, 1)
@@ -884,7 +888,8 @@ def resolve_defender_goals(state, goals, map_data=MAP):
                 continue
         route = find_path(start, (x, y), map_data, blocked=blocked | {objective},
                           max_step_cost=move_allowance(unit, state.get("items", ())),
-                          mounted=unit.get("mount_id") is not None)
+                          mounted=unit.get("mount_id") is not None,
+                          rope="rope" in unit.get("tools", ()))
         affordable, _ = affordable_steps(route or [], move_allowance(unit, state.get("items", ())),
                                           terrain_cost_index(map_data, unit.get("mount_id") is not None))
         along_route = [tile for tile in affordable if tile in destinations]
@@ -1535,7 +1540,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         path = find_path((unit["x"], unit["y"]), target, map_data, blocked=blocked,
                          max_step_cost=max(unit.get("move_capacity", move_allowance(unit, next_state["items"])),
                                            move_allowance(unit, next_state["items"])),
-                         mounted=unit["mount_id"] is not None)
+                         mounted=unit["mount_id"] is not None, rope="rope" in unit["tools"])
         if path:
             steps, spent = affordable_steps(path, unit["move_points"],
                                             terrain_cost_index(map_data, unit["mount_id"] is not None))

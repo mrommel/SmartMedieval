@@ -11,6 +11,7 @@ export function previewMovement(map, units, unit, destination) {
   });
   const elevations = new Map((map.elevation || []).map(tile => [key(tile.x, tile.y), tile]));
   const mounted = unit.mount_id != null;
+  const rope = !mounted && (unit.tools || []).includes("rope");
   const costs = mounted ? { road: 1, grass: 2, mud: 4, swamp: Infinity } :
     { road: 1, grass: 2, mud: 3, swamp: 4 };
   const terrain = new Map((map.terrain || []).map(tile => [key(tile.x, tile.y), costs[tile.type]]));
@@ -45,6 +46,7 @@ export function previewMovement(map, units, unit, destination) {
     const fromHeight = fromTile?.height || 0, toHeight = toTile?.height || 0;
     if (fromHeight === toHeight) return true;
     if (Math.abs(fromHeight - toHeight) !== 1) return false;
+    if (rope) return true;
     return (mounted ? ["ramp"] : ["ladder", "ramp"]).includes((toHeight > fromHeight ? toTile : fromTile)?.access);
   };
 

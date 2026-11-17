@@ -588,6 +588,51 @@ class CarriedWeightTests(TestCase):
 
 
 class ToolRecoveryTests(TestCase):
+    def test_rope_allows_one_level_climbs_only_while_carried_on_foot(self):
+        battlefield = default_map()
+        battlefield["elevation"] = [{"x": 3, "y": 6, "height": 1},
+                                    {"x": 4, "y": 6, "height": 3}]
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": "rope"}]
+        state = initial_state(battlefield)
+        self.assertIsNone(find_path((2, 6), (3, 6), battlefield))
+        self.assertFalse(can_step((2, 6), (3, 6), battlefield))
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)
+        picked = apply_action(state, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(find_path((2, 6), (3, 6), battlefield, rope=True), [(3, 6)])
+        self.assertFalse(can_step((3, 6), (4, 6), battlefield, rope=True))
+        self.assertFalse(can_step((2, 6), (3, 6), battlefield, mounted=True, rope=True))
+        moved = apply_action(picked, {"type": "move", "units": [0], "x": 3, "y": 6}, battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["z"]), (3, 1))
+        self.assertTrue(can_step((3, 6), (2, 6), battlefield, rope=True))
+        descended = apply_action(moved, {"type": "move", "units": [0], "x": 2, "y": 6}, battlefield)
+        self.assertEqual((descended["units"][0]["x"], descended["units"][0]["z"]), (2, 0))
+        moved["units"][0]["fight_points"] = 1
+        dropped = apply_action(moved,
+                               {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(dropped, {"type": "move", "units": [0], "x": 2, "y": 6}, battlefield)
+
+    def test_rope_can_make_an_authored_elevated_objective_reachable(self):
+        battlefield = default_map()
+        battlefield["elevation"] = [{"x": 14, "y": 7, "height": 1}]
+        with self.assertRaises(InvalidMap):
+            validate_map(battlefield)
+        for side in ("startPositions", "enemyStartPositions"):
+            for position in battlefield[side]:
+                position["tools"] = ["rope"]
+        validate_map(battlefield)
+        self.assertIn((14, 7), find_path((2, 6), (14, 7), battlefield, rope=True))
+
+    def test_defender_with_rope_can_route_to_unaccessed_ledge(self):
+        battlefield = default_map()
+        battlefield["elevation"] = [{"x": 13, "y": 5, "height": 1}]
+        state = initial_state(battlefield)
+        guard = state["units"][6]
+        self.assertNotIn((13, 5), defender_destinations(guard, battlefield))
+        guard["tools"] = ["rope"]
+        self.assertIn((13, 5), defender_destinations(guard, battlefield))
+
     def test_authored_tool_validation_and_isolated_pickup_drop(self):
         battlefield = default_map()
         for name in ("", "x" * 41, 5, None):

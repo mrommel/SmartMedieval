@@ -62,6 +62,7 @@
   - [x] Support authoring starting ground weapons and armor, with existing recovery rules.
   - [x] Support authored ground tools, pickup/drop with inventory costs, and recovery after casualties.
   - [ ] Define and implement special uses for carried tools.
+    - [x] Let a soldier carrying rope climb or descend one-level ledges without built-in access while on foot; keep route previews and defender paths consistent.
 - [x] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
 - [x] Replace unit classes with a weapon, a carried-tools list, and a separate king mission marker. Migrate saved rosters, active matches, and history, while still accepting imported legacy labels.
 - [x] Show the selected soldier's current HP, morale, remaining movement/fight points, weapon, tools, potions, and reload/catapult status in a dedicated sidebar readout; refresh on selection and after each action.

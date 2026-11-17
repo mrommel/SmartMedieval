@@ -256,6 +256,21 @@ test("route preview uses server neighbor order, occupancy, breaches, and turn co
     { x: 2, y: 0 }).status, "exhausted");
 });
 
+test("rope preview opens one-level ledges only while carried on foot", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, elevation: [{ x: 1, y: 0, height: 1 },
+      { x: 2, y: 0, height: 3 }] };
+  const unit = { id: 0, x: 0, y: 0, tools: [], move_points: 3,
+    move_capacity: 4, next_move_capacity: 4 };
+  const goal = { x: 1, y: 0 };
+  assert.equal(previewMovement(map, [unit], unit, goal).status, "unreachable");
+  const withRope = { ...unit, tools: ["rope"] };
+  assert.equal(previewMovement(map, [withRope], withRope, goal).status, "reachable");
+  assert.equal(previewMovement(map, [withRope], withRope, { x: 2, y: 0 }).status, "unreachable");
+  const mounted = { ...withRope, mount_id: 0 };
+  assert.equal(previewMovement(map, [mounted], mounted, goal).status, "unreachable");
+});
+
 test("route preview follows weight-adjusted current and future allowances", () => {
   const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
     gate: { x: 6, y: 7 } };
