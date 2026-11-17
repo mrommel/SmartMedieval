@@ -83,7 +83,8 @@
   - [x] Add opt-in daylight fog of war with shared six-tile line of sight, persistent explored ground, hidden enemies and supplies, AI sight limits, and a seeded reconnaissance encounter. Existing matches without fog stay unchanged.
   - [ ] Add night maps, torches, watchfires, lighting-dependent detection and ambush rules.
     - [x] Add opt-in night fog, two-step dark sight, carried torches, static watchfires, lighting-dependent detection for both teams and a seeded night encounter.
-    - [ ] Add explicit ambush bonuses and dynamic fire control.
+    - [x] Add explicit +1 damage ambush bonuses to direct attacks from soldiers unseen by their targets' team on fog maps, including reactions; keep cover, armor and catapult rules intact.
+    - [ ] Add dynamic fire control.
 - [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
 - [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
 - [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.

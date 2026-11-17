@@ -581,7 +581,7 @@ import { previewMovement } from "./path_preview.js";
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.ambush ? " (ambush +1)" : ""}${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));

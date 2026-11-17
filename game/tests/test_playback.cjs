@@ -691,6 +691,12 @@ test("combat history renders on resume and updates after an action", async () =>
     cover: "wall", morale_changes: [] });
   await game.get("end-turn").fire("click");
   assert.match(list.children[2].textContent, /0 damage \(wall cover blocked the shot\)/);
+  game.snapshot.state.history.push({ turn: 4, type: "ranged_attack", actor_id: 0,
+    actor_side: "attackers", actor_weapon: "crossbow", target_id: 1,
+    target_side: "defenders", target_weapon: "sword", damage: 2, ambush: true,
+    killed: false, morale_changes: [] });
+  await game.get("end-turn").fire("click");
+  assert.match(list.children[3].textContent, /2 damage \(ambush \+1\)/);
 });
 
 test("selected soldier displays remaining stats and carried equipment after actions", async () => {

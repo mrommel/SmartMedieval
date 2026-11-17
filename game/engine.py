@@ -33,6 +33,7 @@ HORSE_HEALTH = 2
 MAX_HEALTH = 3
 FIGHT_POINTS = 1
 ATTACK_DAMAGE = 1
+AMBUSH_BONUS = 1
 STARTING_MORALE = 3
 MAX_MORALE = 5
 HISTORY_LIMIT = 100
@@ -818,6 +819,13 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
     fog = map_data.get("fog_of_war", False)
     enemy = attacker if attacker.get("side", "attackers") == "defenders" else target
     witnessed = not fog or (enemy["x"], enemy["y"]) in visible_tiles(state, map_data)
+    # Determine surprise before casualties change team sight. Catapult impacts are
+    # indirect fire, not attacks made from a hidden soldier's position.
+    ambush = (fog and weapon != "catapult" and
+              (attacker["x"], attacker["y"]) not in visible_tiles(
+                  state, map_data, target.get("side", "attackers")))
+    if ambush:
+        damage += AMBUSH_BONUS
     cover = (ranged_cover(attacker, target, map_data)
              if ranged and target.get("cover_turn") != state["turn"] else None)
     if cover:
@@ -847,6 +855,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"ambush": True} if ambush else {}),
         **({"witnessed": witnessed} if fog else {}),
         **({"horse_hit": True, "horse_killed": horse["health"] <= 0} if horse else {}),
         **({"weapon": weapon} if weapon else {}),
@@ -1490,9 +1499,11 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             if defender["fight_points"] < 1:
                 continue
             ranged = defender["weapon"] in RANGED_WEAPON_STATS
+            sight = visible_tiles(next_state, map_data, "defenders") if map_data.get("fog_of_war", False) else None
             targets = [
                 unit for unit in next_state["units"]
                 if unit.get("side", "attackers") == "attackers"
+                and (sight is None or (unit["x"], unit["y"]) in sight)
                 and (can_ranged_attack(defender, unit, map_data) if ranged else
                      (abs(unit["x"] - defender["x"]) + abs(unit["y"] - defender["y"]) == 1
                       and unit["z"] == defender["z"]

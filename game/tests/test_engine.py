@@ -250,6 +250,74 @@ class NightBattleTests(TestCase):
                            enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}])
         return battlefield
 
+    def ambush_map(self):
+        battlefield = self.night_map()
+        battlefield["startPositions"].append({"x": 4, "y": 6, "weapon": "sword", "tools": ["torch"]})
+        return battlefield
+
+    def test_unseen_shooter_gets_bonus_but_torch_and_daylight_remove_surprise(self):
+        battlefield = self.ambush_map()
+        state = initial_state(battlefield)
+        self.assertIn((7, 6), visible_tiles(state, battlefield))
+        self.assertNotIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        action = {"type": "ranged_attack", "unit_id": 0, "target_id": 2}
+        result = apply_action(state, action, battlefield)
+        self.assertEqual(result["history"][-1]["damage"], 2)
+        self.assertTrue(result["history"][-1]["ambush"])
+        self.assertEqual(result["units"][2]["health"], 1)
+        self.assertEqual(state["units"][2]["health"], 3)
+
+        battlefield["startPositions"][0]["tools"] = ["torch"]
+        spotted = apply_action(initial_state(battlefield), action, battlefield)
+        self.assertEqual(spotted["history"][-1]["damage"], 1)
+        self.assertNotIn("ambush", spotted["history"][-1])
+        battlefield["night"] = False
+        daylight = apply_action(initial_state(battlefield), action, battlefield)
+        self.assertNotIn("ambush", daylight["history"][-1])
+        battlefield["fog_of_war"] = False
+        battlefield.pop("night")
+        legacy = apply_action(initial_state(battlefield), action, battlefield)
+        self.assertNotIn("ambush", legacy["history"][-1])
+
+    def test_ambush_still_respects_cover_armor_and_indirect_fire(self):
+        battlefield = self.ambush_map()
+        battlefield["objects"] = [{"x": 6, "y": 5, "type": "fence"}]
+        state = initial_state(battlefield)
+        blocked = apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 2}, battlefield)
+        self.assertEqual(blocked["history"][-1]["damage"], 0)
+        self.assertEqual(blocked["history"][-1]["cover"], "fence")
+        self.assertTrue(blocked["history"][-1]["ambush"])
+        state["units"][2].update(armor="mail", armor_equipped=True, cover_turn=state["turn"])
+        armored = apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 2}, battlefield)
+        self.assertEqual(armored["history"][-1]["armor_blocked"], 2)
+        self.assertEqual(armored["history"][-1]["damage"], 0)
+        record_attack(state, state["units"][0], state["units"][2], False, battlefield,
+                      damage=2, weapon="catapult")
+        self.assertNotIn("ambush", state["history"][-1])
+
+    def test_reaction_ambush_and_defender_attacks_need_sight(self):
+        battlefield = self.ambush_map()
+        battlefield["startPositions"][0]["weapon"] = "longbow"
+        battlefield["enemyStartPositions"][0]["x"] = 9
+        state = apply_action(initial_state(battlefield),
+                             {"type": "reserve_reaction", "unit_id": 0, "reserved": True}, battlefield)
+        result = apply_action(state, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 2, "x": 7, "y": 6}])
+        self.assertTrue(result["history"][0]["reaction"])
+        self.assertTrue(result["history"][0]["ambush"])
+        self.assertEqual(result["history"][0]["damage"], 2)
+
+        battlefield = self.night_map()
+        battlefield["enemyStartPositions"][0]["weapon"] = "crossbow"
+        hidden = apply_action(initial_state(battlefield), {"type": "end_turn"}, battlefield)
+        self.assertEqual(hidden["history"], [])
+        battlefield["enemyStartPositions"].append(
+            {"x": 5, "y": 6, "weapon": "sword", "tools": ["torch"]})
+        spotted = apply_action(initial_state(battlefield), {"type": "end_turn"}, battlefield)
+        self.assertEqual(spotted["history"][0]["actor_id"], 1)
+        self.assertTrue(spotted["history"][0]["ambush"])
+        self.assertEqual(spotted["history"][0]["damage"], 2)
+
     def test_night_and_watchfires_require_valid_map_fields(self):
         battlefield = self.night_map()
         validate_map(battlefield)

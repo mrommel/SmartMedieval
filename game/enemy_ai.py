@@ -33,6 +33,8 @@ def enemy_turn(state, map_data, combat_events=None):
                    "strongpoints": map_data.get("strongpoints", []),
                    "houses": map_data.get("houses", []), "lanes": map_data.get("lanes", []),
                    "terrain": map_data.get("terrain", []),
+                   "fog_of_war": map_data.get("fog_of_war", False),
+                   "night": map_data.get("night", False), "watchfires": map_data.get("watchfires", []),
                    "mission": map_data.get("mission", "courtyard"),
                    "breaches": state.get("breaches", [])},
         "units": [
@@ -80,6 +82,11 @@ def enemy_turn(state, map_data, combat_events=None):
                 "soldiers with swords before they can capture him. "
                 "On fog_of_war maps the units list contains only attackers currently in sight; "
                 "do not infer the locations of hidden attackers from their absence. "
+                "Defenders can only attack attackers currently visible to their team. At night, unlit "
+                "sight is two steps; a torch extends its carrier's sight to five but exposes that "
+                "carrier within six clear steps, and watchfires illuminate tiles within three steps. "
+                "On fog maps, melee and ranged attacks from a soldier unseen by the target's team "
+                "deal one extra damage; cover and armor still apply, but catapults do not ambush. "
                 "Equipped leather absorbs one damage per turn and mail absorbs two; cover blocks the first "
                 "ranged hit before armor. Armor also protects against melee and catapult hits. "
                 "A mounted attacker has six base movement points, cannot enter houses or swamps, "

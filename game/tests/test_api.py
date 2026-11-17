@@ -53,6 +53,24 @@ class GameInstanceApiTests(TestCase):
         self.assertIn({"x": 7, "y": 6}, dropped["state"]["explored"])
         self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dropped["state"])
 
+    def test_night_ambush_is_persisted_without_exposing_hidden_roster(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, night=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "crossbow"},
+                                           {"x": 4, "y": 6, "weapon": "sword", "tools": ["torch"]}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        attacked = self.action(started["revision"],
+                               {"type": "ranged_attack", "unit_id": 0, "target_id": 2}).json()
+        self.assertNotIn("enemyStartPositions", attacked["map"])
+        self.assertEqual(attacked["state"]["history"][-1]["damage"], 2)
+        self.assertTrue(attacked["state"]["history"][-1]["ambush"])
+        self.assertNotIn("witnessed", json.dumps(attacked))
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], attacked["state"])
+
     def test_reserved_reaction_survives_resume_and_triggers_during_ai_turn(self):
         battlefield = default_map()
         battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]
