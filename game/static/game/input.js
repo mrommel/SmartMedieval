@@ -3,6 +3,8 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   const camera = { x: 0, y: 0, zoom: 1 };
   const cursor = { x: 0, y: 0, visible: false };
   let activePointer = null;
+  const touches = new Map();
+  let pinch = null;
   let hoveredTile = null;
   let keyboardPreview = false;
 
@@ -49,6 +51,29 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     camera.zoom = nextZoom;
     camera.x = screenX - worldX * nextZoom;
     camera.y = screenY - worldY * nextZoom;
+    clampCamera();
+    onDraw();
+  }
+
+  function startPinch() {
+    const [first, second] = [...touches.values()];
+    const rect = canvas.getBoundingClientRect();
+    const x = (first.x + second.x) / 2 - rect.left;
+    const y = (first.y + second.y) / 2 - rect.top;
+    pinch = { distance: Math.hypot(first.x - second.x, first.y - second.y),
+      zoom: camera.zoom, worldX: (x - camera.x) / camera.zoom,
+      worldY: (y - camera.y) / camera.zoom };
+    activePointer = null;
+    setHover(null);
+  }
+
+  function movePinch() {
+    const [first, second] = [...touches.values()];
+    const rect = canvas.getBoundingClientRect();
+    const distance = Math.hypot(first.x - second.x, first.y - second.y);
+    camera.zoom = Math.max(.7, Math.min(1.8, pinch.zoom * distance / (pinch.distance || 1)));
+    camera.x = (first.x + second.x) / 2 - rect.left - pinch.worldX * camera.zoom;
+    camera.y = (first.y + second.y) / 2 - rect.top - pinch.worldY * camera.zoom;
     clampCamera();
     onDraw();
   }
@@ -167,12 +192,28 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     if (event.button !== 0 || !canOrder()) return;
     keyboardPreview = false;
     onPreviewChange();
-    if (event.pointerType === "touch") setHover(null);
+    if (event.pointerType === "touch") {
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      setHover(null);
+      canvas.setPointerCapture(event.pointerId);
+      if (touches.size === 2) startPinch();
+      else if (touches.size === 1 && !pinch) activePointer = {
+        id: event.pointerId, x: event.clientX, y: event.clientY,
+        cameraX: camera.x, cameraY: camera.y, dragging: false
+      };
+      return;
+    }
+    if (activePointer) return;
     activePointer = { id: event.pointerId, x: event.clientX, y: event.clientY,
       cameraX: camera.x, cameraY: camera.y, dragging: false };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
+    if (event.pointerType === "touch" && touches.has(event.pointerId)) {
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touches.size >= 2) movePinch();
+      if (pinch) return;
+    }
     if (!activePointer) {
       if (event.pointerType === "touch" || !canOrder()) return;
       const rect = canvas.getBoundingClientRect();
@@ -194,11 +235,24 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     }
   });
   canvas.addEventListener("pointerup", event => {
+    if (touches.has(event.pointerId)) {
+      touches.delete(event.pointerId);
+      if (pinch) {
+        if (touches.size >= 2) startPinch();
+        else if (!touches.size) pinch = null;
+        return;
+      }
+    }
     if (!activePointer || event.pointerId !== activePointer.id) return;
     if (!activePointer.dragging) handlePointer(event);
     activePointer = null;
   });
-  canvas.addEventListener("pointercancel", () => { activePointer = null; });
+  canvas.addEventListener("pointercancel", event => {
+    touches.delete(event.pointerId);
+    if (pinch && touches.size >= 2) startPinch();
+    else if (!touches.size) pinch = null;
+    if (activePointer?.id === event.pointerId) activePointer = null;
+  });
   canvas.addEventListener("pointerleave", () => setHover(null));
   canvas.addEventListener("focus", () => {
     cursor.visible = true;
@@ -250,5 +304,5 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   });
 
   return { camera, cursor, clampCamera, resetCamera, resetCursor, describeCursor, previewDestination,
-    cancelPointer() { activePointer = null; setHover(null); } };
+    cancelPointer() { activePointer = null; touches.clear(); pinch = null; setHover(null); } };
 }

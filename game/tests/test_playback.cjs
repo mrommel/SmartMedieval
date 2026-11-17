@@ -762,6 +762,78 @@ test("dragging pans without ordering; clicking after a drag still orders", async
   assert.equal(game.actions[0].type, "move");
 });
 
+test("mobile tap orders, drag pans, and two-finger pinch zooms without accidental orders", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const touch = (type, pointerId, clientX, clientY) => canvas.fire(type,
+    { button: 0, pointerType: "touch", pointerId, clientX, clientY });
+
+  touch("pointerdown", 1, 268, 219.2);
+  touch("pointerup", 1, 268, 219.2);
+  assert.equal(game.actions.at(-1)?.type, "move");
+  await new Promise(setImmediate);
+  const orders = game.actions.length;
+
+  touch("pointerdown", 1, 250, 200);
+  touch("pointermove", 1, 270, 200);
+  touch("pointerup", 1, 270, 200);
+  assert.equal(game.actions.length, orders, "a drag must not order movement");
+
+  touch("pointerdown", 1, 250, 200);
+  touch("pointerdown", 2, 350, 200);
+  touch("pointermove", 2, 390, 200);
+  assert.equal(game.actions.length, orders);
+  touch("pointerup", 2, 390, 200);
+  touch("pointermove", 1, 275, 200);
+  touch("pointerup", 1, 275, 200);
+  assert.equal(game.actions.length, orders, "lifting either finger must not place an order");
+  touch("pointerdown", 3, 275, 227);
+  touch("pointerup", 3, 275, 227);
+  assert.equal(game.actions.length, orders + 1, "a new tap after the gesture must order normally");
+});
+
+test("mobile pinch scales around its midpoint, pans with both fingers, and ignores canceled taps", () => {
+  const game = setup();
+  const canvas = game.get("battlefield-canvas");
+  const renderer = game.createRenderer(canvas);
+  const layout = { width: 600, height: 400, tileW: 56, tileH: 28,
+    originX: 300, originY: 100, ratio: 1 };
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 } };
+  renderer.setMap(map);
+  renderer.setLayout(layout);
+  const orders = [];
+  const input = game.createInput({ canvas, renderer, simulation: { units: [], selected: new Set() },
+    getMap: () => map, getLayout: () => layout, canOrder: () => true,
+    isWalkable: () => true, isAiming: () => false, onAim() {},
+    onMove: (x, y) => orders.push({ x, y }), onAttack() {}, onSelection() {},
+    onBlocked() {}, onDraw() {}, onCursor() {} });
+  const touch = (type, pointerId, clientX, clientY) => canvas.fire(type,
+    { button: 0, pointerType: "touch", pointerId, clientX, clientY });
+  touch("pointerdown", 1, 250, 200);
+  touch("pointerdown", 2, 350, 200);
+  touch("pointermove", 2, 390, 200);
+  assert.equal(input.camera.zoom, 1.4);
+  assert.equal(input.camera.x, -100);
+  assert.equal(input.camera.y, -80);
+  touch("pointermove", 1, 260, 210);
+  touch("pointermove", 2, 400, 210);
+  assert.equal(input.camera.zoom, 1.4);
+  assert.equal(input.camera.x, -90);
+  assert.equal(input.camera.y, -70);
+  touch("pointercancel", 2, 400, 210);
+  touch("pointerup", 1, 260, 210);
+  assert.equal(orders.length, 0);
+  touch("pointerdown", 3, 300, 200);
+  input.cancelPointer();
+  touch("pointerup", 3, 300, 200);
+  assert.equal(orders.length, 0);
+  touch("pointerdown", 4, 300, 200);
+  touch("pointerup", 4, 300, 200);
+  assert.equal(orders.length, 1);
+});
+
 test("catalog navigation renders linked games and starts a selected scenario", async () => {
   const game = setup(null, () => [{ id: 8, name: "Siege", description: "Hold fast",
     games: [{ id: 3, name: "Gate", description: "Break through" }] }]);
