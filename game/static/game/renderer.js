@@ -719,6 +719,9 @@ export function createBattlefieldRenderer(canvas) {
     if (!objectiveDrawn) drawObjective(time);
     (simulation.catapults || []).forEach(drawAimMarker);
     drawMovementPreview(scene.movementPreview);
+    for (const tile of scene.reactionTiles || []) {
+      polygon(diamond(tile.x, tile.y), "rgba(240,185,69,.17)", "rgba(255,215,123,.68)", 1);
+    }
     drawProjectiles(time);
     drawFog(simulation.visible, simulation.explored);
     if (cursor.visible) {

@@ -7,6 +7,92 @@ from ..engine import (
 )
 
 
+class ReactionTests(TestCase):
+    def battlefield(self, weapon="sword", defender_x=5, fog=False):
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": weapon}]
+        battlefield["enemyStartPositions"] = [{"x": defender_x, "y": 6, "weapon": "sword"}]
+        if fog:
+            battlefield["fog_of_war"] = True
+        return battlefield
+
+    def reserve(self, state, battlefield, reserved=True):
+        return apply_action(state, {"type": "reserve_reaction", "unit_id": 0, "reserved": reserved}, battlefield)
+
+    def test_reservation_cost_cancellation_and_validation(self):
+        battlefield = self.battlefield()
+        original = initial_state(battlefield)
+        for action in ({"type": "reserve_reaction", "unit_id": 0, "reserved": 1},
+                       {"type": "reserve_reaction", "unit_id": True, "reserved": True},
+                       {"type": "reserve_reaction", "unit_id": 1, "reserved": True},
+                       {"type": "reserve_reaction", "unit_id": 0, "reserved": True, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(original, action, battlefield)
+        armed = self.reserve(original, battlefield)
+        self.assertEqual((armed["units"][0]["fight_points"], armed["units"][0]["reaction_reserved"]), (0, True))
+        self.assertEqual(original["units"][0]["fight_points"], 1)
+        with self.assertRaises(InvalidAction):
+            self.reserve(armed, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(armed, {"type": "attack", "unit_id": 0, "target_id": 1}, battlefield)
+        cancelled = self.reserve(armed, battlefield, False)
+        self.assertEqual((cancelled["units"][0]["fight_points"], cancelled["units"][0]["reaction_reserved"]), (1, False))
+        with self.assertRaises(InvalidAction):
+            self.reserve(cancelled, battlefield, False)
+        spent = initial_state(battlefield)
+        spent["units"][0]["fight_points"] = 0
+        with self.assertRaises(InvalidAction):
+            self.reserve(spent, battlefield)
+        unarmed = initial_state(battlefield)
+        unarmed["units"][0]["weapon"] = None
+        with self.assertRaises(InvalidAction):
+            self.reserve(unarmed, battlefield)
+        reloading_map = self.battlefield("crossbow")
+        reloading = initial_state(reloading_map)
+        reloading["units"][0]["reload_turns"] = 1
+        with self.assertRaises(InvalidAction):
+            self.reserve(reloading, reloading_map)
+
+    def test_melee_reacts_on_entry_before_defender_can_attack(self):
+        battlefield = self.battlefield()
+        state = self.reserve(initial_state(battlefield), battlefield)
+        state["units"][1]["health"] = 1
+        result = apply_action(state, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 3, "y": 6}])
+        self.assertEqual(len(result["units"]), 1)
+        self.assertEqual(result["units"][0]["health"], 3)
+        self.assertTrue(result["history"][-1]["reaction"])
+        self.assertEqual(result["history"][-1]["target_id"], 1)
+        self.assertFalse(result["units"][0]["reaction_reserved"])
+        self.assertEqual(result["units"][0]["fight_points"], 1)
+
+    def test_ranged_reaction_fires_at_first_in_range_step_and_reloads(self):
+        battlefield = self.battlefield("longbow", 9, fog=True)
+        state = self.reserve(initial_state(battlefield), battlefield)
+        events = []
+        result = apply_action(state, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 6, "y": 6}], combat_events=events)
+        self.assertEqual((events[0]["to"]["x"], events[0]["to"]["y"]), (7, 6))
+        self.assertEqual(result["units"][1]["x"], 6)
+        self.assertEqual(result["units"][1]["health"], 2)
+        self.assertEqual(result["units"][0]["reload_turns"], 1)
+        self.assertTrue(result["history"][-1]["reaction"])
+
+    def test_out_of_range_or_unseen_reservations_expire(self):
+        battlefield = self.battlefield("crossbow", 9, fog=True)
+        state = self.reserve(initial_state(battlefield), battlefield)
+        result = apply_action(state, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        self.assertFalse(result["units"][0]["reaction_reserved"])
+        self.assertEqual(result["units"][0]["fight_points"], 1)
+        self.assertEqual(result["history"], [])
+        blocked = self.battlefield("longbow", 9, fog=True)
+        blocked["objects"] = [{"x": 5, "y": 6, "type": "tree"}]
+        state = self.reserve(initial_state(blocked), blocked)
+        result = apply_action(state, {"type": "end_turn"}, blocked,
+                              enemy_orders=[{"unit_id": 1, "x": 7, "y": 6}])
+        self.assertFalse(any(event.get("reaction") for event in result["history"]))
+
+
 class FogOfWarTests(TestCase):
     def fog_map(self):
         battlefield = default_map()

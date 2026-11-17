@@ -18,6 +18,7 @@ import { previewMovement } from "./path_preview.js";
   const victoryNode = document.getElementById("victory");
   const turnNode = document.getElementById("turn-status");
   const endTurnButton = document.getElementById("end-turn");
+  const reactionButton = document.getElementById("reserve-reaction");
   const promoteButton = document.getElementById("promote");
   const captureButton = document.getElementById("capture-king");
   const aimButton = document.getElementById("aim-catapult");
@@ -82,6 +83,10 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
     const medic = selectedMedic();
+    reactionButton.disabled = pendingAction || paused || ended || !medic ||
+      (!medic.reaction_reserved && (!medic.fight_points || !["sword", "longbow", "crossbow"].includes(medic.weapon) || medic.reload_turns > 0));
+    reactionButton.textContent = medic?.reaction_reserved ? "Cancel reaction" : "Reserve attack (1 FP)";
+    reactionButton.setAttribute("aria-pressed", String(Boolean(medic?.reaction_reserved)));
     const availableHorse = simulation.horses.find(horse => medic && horse.rider_id === null &&
       horse.x === medic.x && horse.y === medic.y);
     mountButton.hidden = !simulation.horses.length;
@@ -256,7 +261,16 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function draw() {
-    renderer.draw(animationTime, { simulation, camera: input.camera, cursor: input.cursor, hasAttackOption, movementPreview });
+    const soldier = selectedMedic();
+    const reactionTiles = [];
+    if (soldier?.reaction_reserved) {
+      for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+        if (!isWalkable(x, y) || simulation.visible && !simulation.visible.has(`${x},${y}`)) continue;
+        const target = { x, y };
+        if (soldier.weapon === "sword" ? canMeleeAttack(soldier, target) : canRangedAttack(soldier, target)) reactionTiles.push(target);
+      }
+    }
+    renderer.draw(animationTime, { simulation, camera: input.camera, cursor: input.cursor, hasAttackOption, movementPreview, reactionTiles });
   }
 
   function updateMovementPreview() {
@@ -450,6 +464,7 @@ import { previewMovement } from "./path_preview.js";
         statRow("Morale", unit.morale ?? 3, 5, "", "morale"),
         statRow("Movement", unit.move_points, moveCapacity, "MP", "movement"),
         statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
+        ...(unit.reaction_reserved ? [detailRow("Reaction", "1 FP reserved  attacks the first visible defender moving into range")] : []),
         nextTurn,
         detailRow("Weapon", unit.weapon || "none"),
         detailRow("Horse", horse ? `${horse.health}/${horse.max_health} HP · mounted; sword melee deals 2 damage` :
@@ -509,7 +524,7 @@ import { previewMovement } from "./path_preview.js";
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
@@ -660,7 +675,7 @@ import { previewMovement } from "./path_preview.js";
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
         (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
         "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
+      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -757,6 +772,10 @@ import { previewMovement } from "./path_preview.js";
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));
+  reactionButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (soldier && !reactionButton.disabled) sendAction({ type: "reserve_reaction", unit_id: soldier.id, reserved: !soldier.reaction_reserved });
+  });
   aimButton.addEventListener("click", () => {
     aimingCatapult = !aimingCatapult;
     updateControls();

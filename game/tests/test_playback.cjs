@@ -119,6 +119,25 @@ function setup(savedSpeed = null, catalogFetch = null) {
   };
 }
 
+test("reaction control reserves a fight point and shows the selected soldier's reservation", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const button = game.get("reserve-reaction");
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-pressed"], "false");
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).type, "reserve_reaction");
+  assert.equal(game.actions.at(-1).unit_id, 0);
+  assert.equal(game.actions.at(-1).reserved, true);
+  game.snapshot.state.units[0].reaction_reserved = true;
+  game.snapshot.state.units[0].fight_points = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(button["aria-pressed"], "true");
+  assert.match(game.get("selected-stats").textContent, /1 FP reserved/);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).reserved, false);
+});
+
 test("fog shrouds unseen tiles and does not report lost contact as a casualty", async () => {
   const game = setup();
   game.snapshot.map.fog_of_war = true;

@@ -513,6 +513,38 @@ def can_ranged_attack(attacker, target, map_data=MAP):
                                   (target["x"], target["y"]), map_data))
 
 
+def trigger_reactions(state, target, map_data, combat_events=None):
+    """Spend reserved attacks when a moving defender first enters a legal firing tile."""
+    for attacker in state["units"][:]:
+        if target not in state["units"]:
+            break
+        if attacker.get("side", "attackers") != "attackers" or not attacker.get("reaction_reserved"):
+            continue
+        ranged = attacker["weapon"] in RANGED_WEAPON_STATS
+        eligible = (can_ranged_attack(attacker, target, map_data) if ranged else
+                    attacker["weapon"] == "sword" and
+                    abs(attacker["x"] - target["x"]) + abs(attacker["y"] - target["y"]) == 1 and
+                    attacker["z"] == target["z"] and
+                    can_step((attacker["x"], attacker["y"]), (target["x"], target["y"]), map_data,
+                             mounted=attacker.get("mount_id") is not None))
+        if not eligible or (map_data.get("fog_of_war", False) and
+                            (target["x"], target["y"]) not in visible_tiles(state, map_data)):
+            continue
+        attacker["reaction_reserved"] = False
+        if ranged:
+            attacker["reload_turns"] = RANGED_WEAPON_STATS[attacker["weapon"]]["reload_turns"]
+            if combat_events is not None:
+                combat_events.append({
+                    "type": "projectile", "weapon": attacker["weapon"],
+                    "from": {"x": attacker["x"], "y": attacker["y"]},
+                    "to": {"x": target["x"], "y": target["y"]},
+                    **({"witnessed": True} if map_data.get("fog_of_war", False) else {}),
+                })
+        record_attack(state, attacker, target, ranged, map_data,
+                      damage=2 if not ranged and attacker.get("mount_id") is not None else ATTACK_DAMAGE)
+        state["history"][-1]["reaction"] = True
+
+
 def terrain_cost_index(map_data, mounted=False):
     costs = MOUNTED_TERRAIN_COSTS if mounted else TERRAIN_COSTS
     return {(tile["x"], tile["y"]): costs.get(tile["type"])
@@ -871,6 +903,7 @@ def initial_state(map_data=MAP):
                 "fight_points": FIGHT_POINTS,
                 "fight_capacity": FIGHT_POINTS,
                 "reload_turns": 0,
+                "reaction_reserved": False,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
             }
@@ -929,7 +962,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
-            "pickup_equipment", "drop_weapon", "drop_armor", "mount", "dismount"):
+            "pickup_equipment", "drop_weapon", "drop_armor", "mount", "dismount", "reserve_reaction"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -956,6 +989,20 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "reserve_reaction":
+        if (set(action) != {"type", "unit_id", "reserved"} or type(action["unit_id"]) is not int
+                or type(action["reserved"]) is not bool):
+            raise InvalidAction("Choose a soldier and whether to reserve a reaction.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (unit is None or unit.get("reaction_reserved", False) == action["reserved"]
+                or action["reserved"] and (unit["fight_points"] < 1 or
+                                            unit["weapon"] not in ("sword", *RANGED_WEAPON_STATS) or
+                                            unit.get("reload_turns", 0) > 0)):
+            raise InvalidAction("This soldier cannot change their reaction reservation.")
+        unit["reaction_reserved"] = action["reserved"]
+        unit["fight_points"] += -1 if action["reserved"] else 1
+        return next_state
     if action["type"] in ("mount", "dismount"):
         mounting = action["type"] == "mount"
         required = {"type", "unit_id", "horse_id"} if mounting else {"type", "unit_id"}
@@ -1271,6 +1318,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("Invalid defender destination.")
             ordered.add(unit_id)
             unit = defenders[unit_id]
+            if unit not in next_state["units"]:
+                continue
             start = (unit["x"], unit["y"])
             blocked = {(other["x"], other["y"]) for other in next_state["units"] if other is not unit}
             if (x, y) not in defender_destinations(unit, map_data, blocked, next_state["items"]):
@@ -1280,15 +1329,19 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                              max_step_cost=unit["move_points"], mounted=unit["mount_id"] is not None)
             if path is None:
                 raise InvalidAction("Invalid defender destination.")
-            old_x = unit["x"]
-            unit["x"], unit["y"] = path[-1]
-            unit["z"] = tile_height(unit["x"], unit["y"], map_data)
-            unit["facing"] = 1 if unit["x"] >= old_x else -1
             terrain_costs = terrain_cost_index(map_data, unit["mount_id"] is not None)
-            unit["move_points"] -= sum(terrain_costs.get(tile, 1) for tile in path)
-            for horse in next_state["horses"]:
-                if horse["rider_id"] == unit["id"]:
-                    horse["x"], horse["y"] = unit["x"], unit["y"]
+            for tile in path:
+                old_x = unit["x"]
+                unit["x"], unit["y"] = tile
+                unit["z"] = tile_height(*tile, map_data)
+                unit["facing"] = 1 if unit["x"] >= old_x else -1
+                unit["move_points"] -= terrain_costs.get(tile, 1)
+                for horse in next_state["horses"]:
+                    if horse["rider_id"] == unit["id"]:
+                        horse["x"], horse["y"] = tile
+                trigger_reactions(next_state, unit, map_data, combat_events)
+                if unit not in next_state["units"]:
+                    break
         for defender in [unit for unit in next_state["units"]
                          if unit.get("side") == "defenders" and not unit.get("is_king")]:
             if defender["fight_points"] < 1:
@@ -1340,6 +1393,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["turn"] += 1
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
+                unit["reaction_reserved"] = False
                 unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
