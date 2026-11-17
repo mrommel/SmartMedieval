@@ -242,6 +242,59 @@ class FogOfWarTests(TestCase):
         self.assertNotIn((4, 2), visible_tiles(state, battlefield))
 
 
+class NightBattleTests(TestCase):
+    def night_map(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, night=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "crossbow"}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}])
+        return battlefield
+
+    def test_night_and_watchfires_require_valid_map_fields(self):
+        battlefield = self.night_map()
+        validate_map(battlefield)
+        for change in ({"night": 1}, {"fog_of_war": False}, {"watchfires": "invalid"},
+                       {"watchfires": [{"x": 2, "y": 6}, {"x": 2, "y": 6}]},
+                       {"watchfires": [{"x": True, "y": 6}]},
+                       {"watchfires": [{"x": 11, "y": 5}]},
+                       {"watchfires": [{"x": 1, "y": 6, "type": "fire"}]}):
+            with self.subTest(change=change), self.assertRaises(InvalidMap):
+                validate_map({**battlefield, **change})
+        with self.assertRaises(InvalidMap):
+            validate_map({**default_map(), "watchfires": []})
+
+    def test_torches_extend_sight_but_expose_bearers_and_can_be_dropped(self):
+        battlefield = self.night_map()
+        state = initial_state(battlefield)
+        self.assertNotIn((7, 6), visible_tiles(state, battlefield))
+        self.assertNotIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        with self.assertRaisesMessage(InvalidAction, "visible defender"):
+            apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, battlefield)
+        battlefield["startPositions"][0]["tools"] = ["torch"]
+        state = initial_state(battlefield)
+        self.assertIn((7, 6), visible_tiles(state, battlefield))
+        self.assertIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        dropped = apply_action(state, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, battlefield)
+        self.assertNotIn((7, 6), visible_tiles(dropped, battlefield))
+        self.assertNotIn((2, 6), visible_tiles(dropped, battlefield, "defenders"))
+        self.assertIn({"x": 7, "y": 6}, dropped["explored"])
+
+    def test_watchfires_light_tiles_for_both_sides_without_seeing_through_walls(self):
+        battlefield = self.night_map()
+        battlefield["watchfires"] = [{"x": 6, "y": 6}]
+        state = initial_state(battlefield)
+        self.assertIn((7, 6), visible_tiles(state, battlefield))
+        self.assertNotIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        battlefield["watchfires"] = [{"x": 3, "y": 6}]
+        self.assertIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        battlefield["watchfires"] = [{"x": 10, "y": 5}]
+        state["units"][0].update(x=10, y=5)
+        state["units"][1].update(x=12, y=5)
+        self.assertNotIn((12, 5), visible_tiles(state, battlefield))
+        state["breaches"] = [{"x": 11, "y": 5}]
+        self.assertIn((12, 5), visible_tiles(state, battlefield))
+
+
 class HorsebackRidingTests(TestCase):
     def horse_map(self):
         battlefield = default_map()

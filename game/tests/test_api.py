@@ -35,6 +35,24 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_night_torch_visibility_updates_on_action_and_resume(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, night=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "crossbow", "tools": ["torch"]}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertTrue(started["map"]["night"])
+        self.assertNotIn("enemyStartPositions", started["map"])
+        self.assertEqual(len(started["state"]["units"]), 2)
+        dropped = self.action(started["revision"], {"type": "drop_tool", "unit_id": 0, "tool_index": 0}).json()
+        self.assertEqual(len(dropped["state"]["units"]), 1)
+        self.assertNotIn({"x": 7, "y": 6}, dropped["state"]["visible"])
+        self.assertIn({"x": 7, "y": 6}, dropped["state"]["explored"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dropped["state"])
+
     def test_reserved_reaction_survives_resume_and_triggers_during_ai_turn(self):
         battlefield = default_map()
         battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]

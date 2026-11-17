@@ -606,7 +606,9 @@ import { previewMovement } from "./path_preview.js";
       ? "Reach the throne room. Defeat guards beside the king, then select a soldier with a sword on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     if (mapData.fog_of_war) document.getElementById("mission-help").textContent +=
-      " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.";
+      (mapData.night
+        ? " Night battle: allies see two steps in the dark. Carrying a torch extends sight to five steps, but also reveals its bearer to enemies up to six steps away. Watchfires light tiles within three steps for both sides. Walls still block sight. Drop or recover a torch as a tool (one fight point)."
+        : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage });
     previewMap = { ...mapData, breaches: snapshot.state.breaches || [] };

@@ -60,6 +60,10 @@ class SingleGameAdmin(admin.ModelAdmin):
             "soldiers can pick up or drop them for one fight point (up to two carried). "
             "Optional fog_of_war: true shares daylight sight within six tiles and remembers "
             "explored ground; hidden units and supplies are not sent to the browser. "
+            "Optional night: true requires fog_of_war: true and limits unlit sight to two steps. "
+            "A carried torch tool gives its side five-step sight, but exposes its bearer to both sides. "
+            "Optional watchfires: [{\"x\": 6, \"y\": 6}] light tiles within three steps; "
+            "place up to 16 on distinct open outdoor tiles away from objects. "
             "Older maps without enemyStartPositions spawn one defender near the objective."
         )}),
     )

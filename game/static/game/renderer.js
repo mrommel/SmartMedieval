@@ -5,6 +5,7 @@ export function createBattlefieldRenderer(canvas) {
   let elevation = new Map();
   let raisedTiles = [];
   let objects = new Map();
+  let watchfires = [];
   let houses = new Set();
   let interiors = new Map();
   let doors = new Set();
@@ -22,6 +23,7 @@ export function createBattlefieldRenderer(canvas) {
     raisedTiles = map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
     objects = new Map((map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
+    watchfires = map.watchfires || [];
     houses = new Set();
     interiors = new Map();
     doors = new Set();
@@ -325,6 +327,26 @@ export function createBattlefieldRenderer(canvas) {
         [p.x + tileW * .3, ground - tileH * .05], [p.x, ground - tileH * .13]
       ], "#555f57", "#49564e", 1);
     }
+    ctx.restore();
+  }
+
+  function drawWatchfire(fire) {
+    const p = project(fire.x, fire.y);
+    ctx.save();
+    ctx.fillStyle = "rgba(255,166,55,.22)";
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + tileH * .45, tileW * .42, tileH * .44, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#49352a";
+    ctx.lineWidth = Math.max(2, tileW * .06);
+    ctx.beginPath();
+    ctx.moveTo(p.x - tileW * .16, p.y + tileH * .58);
+    ctx.lineTo(p.x + tileW * .16, p.y + tileH * .35);
+    ctx.moveTo(p.x + tileW * .16, p.y + tileH * .58);
+    ctx.lineTo(p.x - tileW * .16, p.y + tileH * .35);
+    ctx.stroke();
+    polygon([[p.x, p.y + tileH * .42], [p.x - tileW * .11, p.y + tileH * .14],
+      [p.x, p.y - tileH * .3], [p.x + tileW * .12, p.y + tileH * .14]], "#ffb44d", "#ffe2a1", 1);
     ctx.restore();
   }
 
@@ -679,6 +701,7 @@ export function createBattlefieldRenderer(canvas) {
       layers.push({ depth: x + y + .25, kind: "house", x, y });
     });
     objects.forEach(obj => layers.push({ depth: obj.x + obj.y + .3, kind: "object", obj }));
+    watchfires.forEach(fire => layers.push({ depth: fire.x + fire.y + .32, kind: "watchfire", fire }));
     breaches.forEach(key => {
       const [x, y] = key.split(",").map(Number);
       layers.push({ depth: x + y, kind: "breach", point: { x, y } });
@@ -707,6 +730,7 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
       else if (layer.kind === "house") drawHouse(layer.x, layer.y);
       else if (layer.kind === "object") drawObject(layer.obj);
+      else if (layer.kind === "watchfire") drawWatchfire(layer.fire);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
       else if (layer.kind === "horse") drawHorse(layer.horse);

@@ -58,6 +58,9 @@ RANGED_WEAPON_STATS = {
     "crossbow": {"range": 6, "reload_turns": 3},
 }
 VISION_RANGE = 6
+NIGHT_VISION_RANGE = 2
+TORCH_VISION_RANGE = 5
+WATCHFIRE_LIGHT_RANGE = 3
 LEGACY_WEAPONS = {"vanguard": "sword", "longbow": "longbow", "crossbow": "crossbow", "king": None}
 
 
@@ -115,10 +118,16 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war", "night", "watchfires"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     if "fog_of_war" in map_data and type(map_data["fog_of_war"]) is not bool:
         raise InvalidMap("fog_of_war must be true or false.")
+    if "night" in map_data and type(map_data["night"]) is not bool:
+        raise InvalidMap("night must be true or false.")
+    if map_data.get("night") and not map_data.get("fog_of_war", False):
+        raise InvalidMap("Night maps require fog_of_war: true.")
+    if "watchfires" in map_data and not map_data.get("night", False):
+        raise InvalidMap("Watchfires require a night map.")
     mission = map_data.get("mission", "courtyard")
     if mission not in ("courtyard", "capture_king"):
         raise InvalidMap("Mission must be courtyard or capture_king.")
@@ -199,6 +208,19 @@ def validate_map(map_data):
                 or (obj["x"], obj["y"]) in object_tiles):
             raise InvalidMap("Objects must be unique open tiles with type tree, rock, fence or well, away from the gate.")
         object_tiles.add((obj["x"], obj["y"]))
+    watchfires = map_data.get("watchfires", [])
+    if not isinstance(watchfires, list) or len(watchfires) > 16:
+        raise InvalidMap("Watchfires must be a list of at most 16 open outdoor tiles.")
+    seen_fires = set()
+    for point in watchfires:
+        if (not isinstance(point, dict) or set(point) != {"x", "y"}
+                or type(point["x"]) is not int or type(point["y"]) is not int
+                or not is_walkable(point["x"], point["y"], map_data)
+                or is_house(point["x"], point["y"], map_data)
+                or (point["x"], point["y"]) in object_tiles
+                or (point["x"], point["y"]) in seen_fires):
+            raise InvalidMap("Watchfires need distinct open outdoor tiles away from objects.")
+        seen_fires.add((point["x"], point["y"]))
     for house in houses:
         if "door" in house and not any(
                 is_walkable(x, y, map_data) for x, y in neighbors(house["door"]["x"], house["door"]["y"])
@@ -481,9 +503,15 @@ def has_line_of_sight(start, end, map_data=MAP):
 
 
 def visible_tiles(state, map_data=MAP, side="attackers"):
-    """Share daylight sight within six tiles, through clear rays or an adjacent doorway."""
+    """Share line-of-sight visibility; at night only nearby or illuminated tiles are seen."""
     battlefield = battle_map(map_data, state)
     visible = set()
+    night = map_data.get("night", False)
+    fires = [(fire["x"], fire["y"]) for fire in map_data.get("watchfires", ())] if night else []
+    # A carried torch lights its bearer to either side, but only its own side gets
+    # the longer torch sight radius. A fire lights tiles, not observers behind walls.
+    torch_bearers = {(unit["x"], unit["y"]) for unit in state["units"]
+                     if "torch" in unit.get("tools", ())} if night else set()
     for unit in state["units"]:
         if unit.get("side", "attackers") != side:
             continue
@@ -494,8 +522,16 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
                 tile = (x, y)
                 if tile in visible:
                     continue
-                if (abs(x - unit["x"]) + abs(y - unit["y"]) == 1
-                        and can_step(start, tile, battlefield)) or has_line_of_sight(start, tile, battlefield):
+                distance = abs(x - unit["x"]) + abs(y - unit["y"])
+                if night and distance > VISION_RANGE:
+                    continue
+                if night and not (distance <= NIGHT_VISION_RANGE
+                                  or "torch" in unit.get("tools", ()) and distance <= TORCH_VISION_RANGE
+                                  or tile in torch_bearers
+                                  or any(abs(x - fx) + abs(y - fy) <= WATCHFIRE_LIGHT_RANGE
+                                         and has_line_of_sight((fx, fy), tile, battlefield) for fx, fy in fires)):
+                    continue
+                if (distance == 1 and can_step(start, tile, battlefield)) or has_line_of_sight(start, tile, battlefield):
                     visible.add(tile)
     return visible
 
