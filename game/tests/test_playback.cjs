@@ -664,6 +664,27 @@ test("keyboard shooting passes fences but not wells or houses; houses block orde
   }
 });
 
+test("catapult smoke is described and blocks browser shooting previews until it clears", async () => {
+  const game = setup();
+  game.snapshot.state.units[0].weapon = "longbow";
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0],
+    id: 1, x: 0, y: 2, side: "defenders", weapon: "sword" });
+  game.snapshot.state.smoke = [{ x: 0, y: 1, turns: 2 }];
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const key = name => canvas.fire("keydown", { key: name, preventDefault() {} });
+  canvas.fire("focus");
+  key("ArrowDown");
+  assert.match(game.get("cursor-status").textContent, /smoke \(2 turns left\)/);
+  key("ArrowDown");
+  key("Enter");
+  assert.equal(game.actions.length, 0);
+  game.snapshot.state.smoke = [];
+  await game.get("continue-game").fire("click");
+  key("Enter");
+  assert.equal(game.actions.at(-1)?.type, "ranged_attack");
+});
+
 test("renderer draws additional strongpoints and respects each gate after map changes", () => {
   const game = setup();
   const renderer = game.createRenderer(game.get("battlefield-canvas"));

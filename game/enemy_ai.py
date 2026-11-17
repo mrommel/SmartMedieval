@@ -38,7 +38,8 @@ def enemy_turn(state, map_data, combat_events=None):
                    "watchfires": [fire for fire in map_data.get("watchfires", [])
                                   if fire not in state.get("extinguished_watchfires", [])],
                    "mission": map_data.get("mission", "courtyard"),
-                   "breaches": state.get("breaches", [])},
+                    "breaches": state.get("breaches", []),
+                    "smoke": state.get("smoke", [])},
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "weapon", "tools", "armor", "armor_equipped", "is_king", "x", "y", "health", "fight_points", "reload_turns",
@@ -67,6 +68,8 @@ def enemy_turn(state, map_data, combat_events=None):
                 "movement, defenders automatically attack when possible: soldiers with swords make melee "
                 "attacks against adjacent attackers; longbows have range 5 and crossbows range 6, "
                 "with walls, houses, trees, rocks, and wells blocking line of sight and movement. "
+                "Catapult impacts leave smoke for two turn transitions; smoke blocks sight and "
+                "ranged attacks, including shots from within it, but not movement. "
                 "Houses without doors are solid; houses with a door have walkable ground-floor tiles, "
                 "but entering and leaving is possible only through the perimeter door tile. "
                 "Shots cannot cross house walls even at doors; units in the same room can shoot each other. "

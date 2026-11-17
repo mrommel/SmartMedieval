@@ -2,9 +2,61 @@ from django.test import TestCase
 
 from ..engine import (
     HISTORY_LIMIT, MAP, InvalidAction, InvalidMap, apply_action, can_step, capture_status, default_map, defender_destinations, find_path,
-    carried_weight, has_line_of_sight, initial_state, is_walkable, move_allowance, normalize_map,
+    battle_map, can_ranged_attack, carried_weight, has_line_of_sight, initial_state, is_walkable, move_allowance, normalize_map,
     record_attack, resolve_defender_goals, validate_map, visible_tiles,
 )
+
+
+class CatapultSmokeTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield["fog_of_war"] = True
+        self.state = initial_state(self.battlefield)
+        self.state["units"][4].update(x=2, y=6)  # Crossbow, six tiles from the guard.
+        self.state["units"][6].update(x=8, y=6)
+        self.state["units"][1]["fight_points"] = 2
+
+    def fire(self, state):
+        state = apply_action(state, {"type": "aim_catapult", "unit_id": 1,
+                                     "catapult_id": 0, "x": 5, "y": 6}, self.battlefield)
+        return apply_action(state, {"type": "fire_catapult", "unit_id": 1,
+                                    "catapult_id": 0}, self.battlefield)
+
+    def test_smoke_blocks_sight_and_shots_but_not_movement(self):
+        self.assertTrue(can_ranged_attack(self.state["units"][4], self.state["units"][6], self.battlefield))
+        smoked = self.fire(self.state)
+        self.assertEqual(smoked["smoke"], [{"x": 5, "y": 6, "turns": 2}])
+        self.assertEqual(self.state["smoke"], [])
+        self.assertFalse(has_line_of_sight((2, 6), (8, 6), battle_map(self.battlefield, smoked)))
+        self.assertFalse(can_ranged_attack(smoked["units"][4], smoked["units"][6],
+                                            battle_map(self.battlefield, smoked)))
+        self.assertTrue(can_step((4, 6), (5, 6), battle_map(self.battlefield, smoked)))
+        isolated = {**smoked, "units": [smoked["units"][4], smoked["units"][6]]}
+        self.assertNotIn((8, 6), visible_tiles(isolated, self.battlefield))
+        with self.assertRaisesMessage(InvalidAction, "line of sight"):
+            apply_action(smoked, {"type": "ranged_attack", "unit_id": 4, "target_id": 6},
+                         self.battlefield)
+        self.assertFalse(has_line_of_sight((5, 6), (6, 6), battle_map(self.battlefield, smoked)))
+
+    def test_smoke_expires_after_two_turn_transitions_and_legacy_matches_work(self):
+        smoked = self.fire(self.state)
+        after_one = apply_action(smoked, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after_one["smoke"][0]["turns"], 1)
+        self.assertEqual(smoked["smoke"][0]["turns"], 2)
+        after_two = apply_action(after_one, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after_two["smoke"], [])
+        self.assertTrue(has_line_of_sight((2, 6), (8, 6), battle_map(self.battlefield, after_two)))
+        legacy = initial_state(self.battlefield)
+        del legacy["smoke"]
+        self.assertEqual(apply_action(legacy, {"type": "end_turn"}, self.battlefield)["smoke"], [])
+
+    def test_second_impact_refreshes_existing_cloud_without_duplicates(self):
+        smoked = self.fire(self.state)
+        after_one = apply_action(smoked, {"type": "end_turn"}, self.battlefield)
+        after_one["units"][1]["fight_points"] = 2
+        after_one["catapults"][0]["reload_turns"] = 0
+        refreshed = self.fire(after_one)
+        self.assertEqual(refreshed["smoke"], [{"x": 5, "y": 6, "turns": 2}])
 
 
 class WithdrawalTests(TestCase):

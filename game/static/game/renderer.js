@@ -353,6 +353,23 @@ export function createBattlefieldRenderer(canvas) {
     ctx.restore();
   }
 
+  function drawSmoke(cloud) {
+    const p = project(cloud.x, cloud.y);
+    ctx.save();
+    ctx.fillStyle = "rgba(46,52,54,.75)";
+    ctx.strokeStyle = "rgba(220,224,208,.8)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + tileH * .25, tileW * .34, tileH * .5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff4d8";
+    ctx.font = `bold ${Math.max(10, tileW * .19)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(`S${cloud.turns}`, p.x, p.y + tileH * .42);
+    ctx.restore();
+  }
+
   function drawHouse(x, y) {
     const base = diamond(x, y, 0);
     const roof = base.map(([px, py]) => [px, py - tileH * 1.35]);
@@ -732,6 +749,8 @@ export function createBattlefieldRenderer(canvas) {
       layers.push({ depth: item.x + item.y + .4, kind: "item", item, stack });
     });
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
+    (simulation.smoke || []).forEach(cloud =>
+      layers.push({ depth: cloud.x + cloud.y + .8, kind: "smoke", cloud }));
     layers.sort((a, b) => a.depth - b.depth);
 
     let objectiveDrawn = false;
@@ -746,6 +765,7 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "house") drawHouse(layer.x, layer.y);
       else if (layer.kind === "object") drawObject(layer.obj);
       else if (layer.kind === "watchfire") drawWatchfire(layer.fire);
+      else if (layer.kind === "smoke") drawSmoke(layer.cloud);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
       else if (layer.kind === "horse") drawHorse(layer.horse);

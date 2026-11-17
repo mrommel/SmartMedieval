@@ -40,6 +40,7 @@ HISTORY_LIMIT = 100
 CATAPULT_AMMO = 3
 CATAPULT_RANGE = 10
 CATAPULT_RELOAD = 2
+SMOKE_TURNS = 2
 WALL_HEALTH = 2
 INVENTORY_LIMIT = 2
 POTION_HEAL = 2
@@ -410,7 +411,9 @@ def is_wall(x, y, map_data=MAP):
 
 def battle_map(map_data, state):
     """Use breached walls for all movement, cover and line-of-sight decisions."""
-    return {**map_data, "breaches": {(point["x"], point["y"]) for point in state.get("breaches", [])}}
+    return {**map_data,
+            "breaches": {(point["x"], point["y"]) for point in state.get("breaches", [])},
+            "smoke_tiles": {(point["x"], point["y"]) for point in state.get("smoke", [])}}
 
 
 def is_object(x, y, map_data=MAP):
@@ -429,7 +432,7 @@ def house_at(x, y, map_data=MAP):
 
 
 def blocks_sight(x, y, map_data=MAP, interior=None):
-    return (is_wall(x, y, map_data) or (is_house(x, y, map_data)
+    return ((x, y) in map_data.get("smoke_tiles", ()) or is_wall(x, y, map_data) or (is_house(x, y, map_data)
             and (interior is None or house_at(x, y, map_data) != interior))
             or any(obj["x"] == x and obj["y"] == y and obj["type"] != "fence"
                    for obj in map_data.get("objects", ())))
@@ -486,6 +489,8 @@ def can_step(start, end, map_data=MAP, elevations=None, mounted=False, rope=Fals
 
 def has_line_of_sight(start, end, map_data=MAP):
     """Return whether a tile-center ray reaches its target without crossing cover."""
+    if start in map_data.get("smoke_tiles", ()) or end in map_data.get("smoke_tiles", ()):
+        return False
     interior = house_at(*start, map_data)
     if interior != house_at(*end, map_data):
         return False
@@ -1065,6 +1070,7 @@ def initial_state(map_data=MAP):
         ],
         "wall_damage": [],
         "breaches": [],
+        "smoke": [],
         "extinguished_watchfires": [],
         "items": [
             {"id": index, "type": item["type"], **({"name": item["name"]} if "name" in item else {}),
@@ -1137,6 +1143,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         ], "horses": [dict(horse) for horse in state.get("horses", [])],
         "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
+        "smoke": [dict(point) for point in state.get("smoke", [])],
         "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
     if action["type"] == "withdraw":
@@ -1512,6 +1519,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                     "turn": state["turn"], "type": "catapult_miss", "actor_id": unit["id"],
                     "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": x, "y": y,
                 }])[-HISTORY_LIMIT:]
+            smoke = next((point for point in next_state["smoke"]
+                          if (point["x"], point["y"]) == (x, y)), None)
+            if smoke is None:
+                next_state["smoke"].append({"x": x, "y": y, "turns": SMOKE_TURNS})
+            else:
+                smoke["turns"] = SMOKE_TURNS
         return remember_visibility(next_state, map_data)
     if action["type"] == "capture":
         if (map_data.get("mission") != "capture_king" or set(action) != {"type", "unit_id"}
@@ -1607,6 +1620,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     if action["type"] == "end_turn":
         if set(action) != {"type"}:
             raise InvalidAction("Invalid end-turn action.")
+        for cloud in next_state["smoke"]:
+            cloud["turns"] -= 1
+        next_state["smoke"] = [cloud for cloud in next_state["smoke"] if cloud["turns"] > 0]
+        map_data = battle_map(map_data, next_state)
         for catapult in next_state["catapults"]:
             catapult["reload_turns"] = max(0, catapult["reload_turns"] - 1)
         defenders = {unit["id"]: unit for unit in next_state["units"]

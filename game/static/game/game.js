@@ -55,7 +55,7 @@ import { previewMovement } from "./path_preview.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], catapults: [], horses: [], items: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0, visible: null, explored: null };
+  const simulation = { units: [], catapults: [], horses: [], items: [], smoke: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0, visible: null, explored: null };
   let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
@@ -337,7 +337,7 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function blocksSight(x, y, interior = -1) {
-    return renderer.isWall(x, y) || (renderer.isHouse(x, y) &&
+    return simulation.smoke.some(cloud => cloud.x === x && cloud.y === y) || renderer.isWall(x, y) || (renderer.isHouse(x, y) &&
       (interior < 0 || houseAt(x, y) !== interior)) ||
       (objects.has(`${x},${y}`) && objects.get(`${x},${y}`).type !== "fence");
   }
@@ -421,6 +421,8 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function hasLineOfSight(start, end) {
+    if (simulation.smoke.some(cloud => (cloud.x === start[0] && cloud.y === start[1]) ||
+      (cloud.x === end[0] && cloud.y === end[1]))) return false;
     const interior = houseAt(...start);
     if (interior !== houseAt(...end)) return false;
     let [x, y] = start;
@@ -468,12 +470,13 @@ import { previewMovement } from "./path_preview.js";
     const unit = simulation.units.find(item => item.x === cursor.x && item.y === cursor.y);
     const horse = simulation.horses.find(item => item.x === cursor.x && item.y === cursor.y);
     const groundItems = simulation.items.filter(item => item.carrier_id === null && item.x === cursor.x && item.y === cursor.y);
+    const smoke = simulation.smoke.find(cloud => cloud.x === cursor.x && cloud.y === cursor.y);
     const potion = groundItems.some(item => item.type === "healing_potion");
     const gear = groundItems.filter(item => item.type === "weapon" || item.type === "armor")
       .map(equipmentName).join(", ");
     const tools = groundItems.filter(item => item.type === "tool").map(item => item.name).join(", ");
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
-    cursorStatus.textContent = `${location}: ${unit
+    cursorStatus.textContent = `${location}: ${smoke ? `smoke (${smoke.turns} turn${smoke.turns === 1 ? "" : "s"} left); ` : ""}${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon || "no weapon"}`} #${unit.id + 1}${unit.mount_id != null ? `, mounted (horse ${horse?.health ?? "?"} HP)` : horse ? ", horse available" : ""}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}${gear ? `, ${gear} on ground` : ""}${tools ? `, ${tools} tool on ground` : ""}`
       : gear || tools ? `${[gear && `${gear} on ground`, tools && `${tools} tool on ground`].filter(Boolean).join(", ")}${potion ? ", healing potion" : ""}`
       : potion ? "healing potion"
@@ -661,6 +664,8 @@ import { previewMovement } from "./path_preview.js";
         : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     if (mapData.exit) document.getElementById("mission-help").textContent +=
       " At the marked exit, select a soldier and choose Withdraw (one fight point). Escaped soldiers keep their equipment. The battle ends once no soldiers remain in the field; at least one escape secures a retreat.";
+    if (mapData.catapults?.length) document.getElementById("mission-help").textContent +=
+      " Catapult impacts leave smoke for two turn transitions. Smoke blocks sight and ranged shots but not movement; S2/S1 marks its remaining duration.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage,
       watchfires: (mapData.watchfires || []).map(fire => ({ ...fire, lit: !snapshot.state.extinguished_watchfires?.some(
@@ -674,6 +679,7 @@ import { previewMovement } from "./path_preview.js";
     simulation.catapults = snapshot.state.catapults || [];
     simulation.horses = snapshot.state.horses || [];
     simulation.items = snapshot.state.items || [];
+    simulation.smoke = snapshot.state.smoke || [];
     simulation.extinguishedWatchfires = snapshot.state.extinguished_watchfires || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;

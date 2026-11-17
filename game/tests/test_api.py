@@ -35,6 +35,38 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_catapult_smoke_persists_with_fog_without_revealing_hidden_clouds(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        state = instance.state
+        state["units"][1]["fight_points"] = 2
+        instance.state = state
+        instance.save(update_fields=["state"])
+        aimed = self.action(0, {"type": "aim_catapult", "unit_id": 1,
+                                "catapult_id": 0, "x": 5, "y": 6})
+        self.assertEqual(aimed.status_code, 200)
+        fired = self.action(1, {"type": "fire_catapult", "unit_id": 1, "catapult_id": 0})
+        self.assertEqual(fired.status_code, 200)
+        cloud = {"x": 5, "y": 6, "turns": 2}
+        self.assertEqual(fired.json()["state"]["smoke"], [cloud])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["smoke"], [cloud])
+        instance.refresh_from_db()
+        state = instance.state
+        state["smoke"].append({"x": 0, "y": 0, "turns": 2})
+        instance.state = state
+        instance.save(update_fields=["state"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["smoke"], [cloud])
+        ended = self.action(2, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        ai_map = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertEqual(ai_map["smoke"], [cloud, {"x": 0, "y": 0, "turns": 2}])
+        self.assertEqual(ended.json()["state"]["smoke"], [{**cloud, "turns": 1}])
+
     def test_shield_stance_persists_and_hides_distant_defenders(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True,

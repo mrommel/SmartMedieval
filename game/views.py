@@ -93,6 +93,8 @@ def serialize_instance(instance):
             "history": history,
             **({"items": [item for item in state.get("items", []) if item["carrier_id"] in friendly_ids
                            or (item["x"], item["y"]) in visible],
+                "smoke": [cloud for cloud in state.get("smoke", [])
+                          if (cloud["x"], cloud["y"]) in visible],
                 "horses": [horse for horse in state.get("horses", [])
                            if (horse["x"], horse["y"]) in visible],
                 "visible": [{"x": x, "y": y} for x, y in sorted(visible)],
