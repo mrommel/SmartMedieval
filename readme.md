@@ -44,7 +44,7 @@ make run
 
 Open <http://127.0.0.1:8098/>. The project uses Django and SQLite; dependencies are listed in `requirements.txt`.
 
-To edit game definitions and link single games to scenarios, create a staff account with `make createsuperuser` and visit <http://127.0.0.1:8098/admin/>. A single game needs a reachable objective before it can be linked to a scenario.
+To edit game definitions and link single games to scenarios, create a staff account with `make createsuperuser` and visit <http://127.0.0.1:8098/admin/>. A single game needs a reachable objective before it can be linked to a scenario. Save an available single game, then use **Playtest saved game** on its change page to start a fresh match and open the battlefield directly. The button uses the last saved map, not unsaved form edits, and replaces the active match in your browser session; earlier matches retain their snapshotted definitions. Draft/unavailable games cannot be playtested until made available.
 
 Starting soldiers have no unit class. In `startPositions` and `enemyStartPositions`, use `{"x": 2, "y": 6, "weapon": "sword", "tools": ["rope"], "armor": "leather"}`. Supported weapons are `sword`, `longbow`, and `crossbow`; `tools` is an optional list of up to two carried labels. Optional `armor` is `"leather"` or `"mail"`; omit it for no armor. Armor starts equipped, and existing active matches remain unarmored until restarted with an updated definition. The server tracks potions separately as items. `make migrate` converts older saved maps and matches from `"type": "vanguard"`, `"longbow"`, or `"crossbow"`; imported legacy definitions are still accepted and converted on edit or match launch.
 

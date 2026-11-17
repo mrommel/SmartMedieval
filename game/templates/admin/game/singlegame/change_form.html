@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and original.is_available and has_change_permission %}
+    <li>
+      <form method="post" action="{% url 'admin:game_singlegame_playtest' original.pk %}">
+        {% csrf_token %}
+        <button type="submit" title="Starts a new match using the last saved map; save changes first">Playtest saved game</button>
+      </form>
+    </li>
+  {% endif %}
+{% endblock %}

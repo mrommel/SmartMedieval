@@ -1,5 +1,12 @@
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import path, reverse
+from django.utils.decorators import method_decorator
+from django.views.decorators.http import require_POST
 
+from .engine import initial_state, normalize_map
+from .models import GameInstance
 from .models import Scenario, SingleGame
 
 
@@ -14,6 +21,29 @@ class ScenarioAdmin(admin.ModelAdmin):
 
 @admin.register(SingleGame)
 class SingleGameAdmin(admin.ModelAdmin):
+    change_form_template = "admin/game/singlegame/change_form.html"
+
+    def get_urls(self):
+        return [
+            path("<int:object_id>/playtest/", self.admin_site.admin_view(self.playtest),
+                 name="game_singlegame_playtest"),
+        ] + super().get_urls()
+
+    @method_decorator(require_POST)
+    def playtest(self, request, object_id):
+        game = get_object_or_404(SingleGame, pk=object_id)
+        if not self.has_change_permission(request, game):
+            raise PermissionDenied
+        if not game.is_available:
+            raise PermissionDenied
+        instance = GameInstance.objects.create(
+            single_game=game, source_game=game,
+            map_definition=normalize_map(game.map_definition),
+            state=initial_state(game.map_definition),
+        )
+        request.session["active_game_id"] = str(instance.pk)
+        return redirect(reverse("home") + "?playtest=1")
+
     list_display = ("name", "slug", "is_available", "sort_order")
     list_filter = ("is_available",)
     prepopulated_fields = {"slug": ("name",)}

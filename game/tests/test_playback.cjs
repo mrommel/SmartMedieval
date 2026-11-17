@@ -78,6 +78,7 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
   let nextFrame;
   const window = {
     devicePixelRatio: 1, localStorage: store,
+    location: { search: preferences.playtest ? "?playtest=1" : "" },
     confirm: () => true,
     matchMedia: () => ({ matches: Boolean(preferences.deviceReducedMotion), addEventListener() {} }),
     addEventListener() {}
@@ -92,7 +93,7 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
     })
   };
   const context = {
-    document, window, performance: { now: () => 0 },
+    document, window, URLSearchParams, performance: { now: () => 0 },
     requestAnimationFrame: callback => { nextFrame = callback; },
     setTimeout: () => 1, clearTimeout() {},
     fetch: async (url, options = {}) => {
@@ -126,6 +127,16 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
     createInput: context.createBattlefieldInput
   };
 }
+
+test("admin playtest opens the saved session match directly", async () => {
+  const game = setup(null, null, null, { playtest: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(game.get("game-screen").hidden, false);
+  assert.equal(game.get("game-title").textContent, "Test battle");
+  const ordinary = setup();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ordinary.get("game-title").textContent, "");
+});
 
 test("exit withdrawal sends the selected soldier and debriefs evacuated gear", async () => {
   const game = setup();

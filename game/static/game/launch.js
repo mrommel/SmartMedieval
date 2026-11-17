@@ -133,11 +133,13 @@ export function createLaunchUI({ api, onStart, onResume, onLeaveGame }) {
       return loadCatalog(button.dataset.catalog);
     });
   });
-  api("/api/games/current/").then(() => {
+  const playtest = new URLSearchParams(window.location.search).has("playtest");
+  api("/api/games/current/").then(snapshot => {
     continueButton.hidden = false;
+    if (playtest) return onResume(snapshot);
   }).catch(error => {
-    if (error.status === 404) return;
-    launchError.textContent = `Could not check saved game: ${error.message}`;
+    if (error.status === 404 && !playtest) return;
+    launchError.textContent = `${playtest ? "Could not open playtest" : "Could not check saved game"}: ${error.message}`;
     launchError.hidden = false;
   });
 

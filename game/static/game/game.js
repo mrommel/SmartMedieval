@@ -926,7 +926,7 @@ import { previewMovement } from "./path_preview.js";
     onBlocked: () => showToast("An obstacle bars the way. Choose an open tile."),
     onDraw: draw, onCursor: describeCursor, onPreviewChange: updateMovementPreview });
   const launchUI = createLaunchUI({ api, onStart: launchGame,
-    onResume: async () => enterGame(await api("/api/games/current/")),
+    onResume: async snapshot => enterGame(snapshot || await api("/api/games/current/")),
     onLeaveGame: () => {
       gameIsVisible = false;
       input.cancelPointer();

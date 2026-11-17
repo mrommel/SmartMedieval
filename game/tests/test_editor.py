@@ -2,14 +2,67 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from ..engine import default_map, normalize_map
-from ..models import Scenario, SingleGame
+from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameEditorTests(TestCase):
+    def test_staff_playtest_starts_saved_match_and_resumes_it(self):
+        editor = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
+        self.client.force_login(editor)
+        saved = default_map()
+        game = SingleGame.objects.create(name="Test map", slug="test-map", description="Playtest",
+                                         map_definition=saved)
+        url = reverse("admin:game_singlegame_playtest", args=[game.pk])
+        change = self.client.get(reverse("admin:game_singlegame_change", args=[game.pk]))
+        self.assertContains(change, url)
+        self.assertContains(change, "Playtest saved game")
+        self.assertEqual(self.client.get(url).status_code, 405)
+
+        response = self.client.post(url)
+        self.assertRedirects(response, reverse("home") + "?playtest=1", fetch_redirect_response=False)
+        instance = GameInstance.objects.get(pk=self.client.session["active_game_id"])
+        self.assertEqual(instance.map_definition, normalize_map(saved))
+        self.assertEqual(instance.single_game, game)
+        self.assertEqual(instance.source_game, game)
+        self.assertEqual(instance.revision, 0)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["id"], str(instance.pk))
+
+        # A saved edit only affects the next playtest, not the current snapshot.
+        changed = default_map()
+        changed["startPositions"][0]["weapon"] = "crossbow"
+        game.map_definition = changed
+        game.save()
+        self.assertEqual(self.client.post(url).status_code, 302)
+        fresh = GameInstance.objects.get(pk=self.client.session["active_game_id"])
+        self.assertNotEqual(fresh.pk, instance.pk)
+        self.assertEqual(fresh.map_definition, normalize_map(changed))
+        instance.refresh_from_db()
+        self.assertEqual(instance.map_definition, normalize_map(saved))
+
+    def test_playtest_requires_change_permission_csrf_and_available_saved_game(self):
+        game = SingleGame.objects.create(name="Draft", slug="draft", description="Draft")
+        url = reverse("admin:game_singlegame_playtest", args=[game.pk])
+        self.assertEqual(self.client.post(url).status_code, 302)
+        editor = get_user_model().objects.create_user("staff", "staff@example.test", "password", is_staff=True)
+        self.client.force_login(editor)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertFalse(GameInstance.objects.exists())
+        editor.is_superuser = True
+        editor.save()
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(editor)
+        self.assertEqual(csrf_client.post(url).status_code, 403)
+        game.is_available = False
+        game.save()
+        self.assertNotContains(self.client.get(reverse("admin:game_singlegame_change", args=[game.pk])),
+                               "Playtest saved game")
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertFalse(GameInstance.objects.exists())
+
     def test_rejects_invalid_map_in_editor(self):
         game = SingleGame(name="Bad map", slug="bad-map", description="Invalid.")
         for change in (
