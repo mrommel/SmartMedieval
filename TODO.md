@@ -56,6 +56,8 @@
   - [x] Add optional perimeter doors and walkable ground-floor house interiors with doorway-only movement, wall-aware combat and cutaway rendering; retain solid legacy houses.
 - [ ] Make multi-level interiors readable and selectable in the isometric view with roof/floor cutaways and floor controls; allow routes from outside to rooms, upper floors, and underground spaces.
 - [ ] Add discoverable hidden doors and passages, plus traps that can be spotted, disarmed, avoided, or triggered; include their effects in server-validated movement and enemy behavior.
+  - [x] Support hidden ground-floor house doors that become visible and enterable when an attacker reaches an adjacent exterior tile; keep unrevealed doors out of snapshots, routes and AI orders.
+  - [ ] Add hidden passages and discoverable/disarmable traps.
 - [ ] Let units pick up, drop, carry, and equip items from ground tiles, with inventory limits and turn-based action costs; make dropped gear recoverable after a casualty.
   - [x] Add server-owned ground potions, two-potion carrying limits, fight-point-costed pickup/drop and casualty drops.
   - [x] Drop weapons and armor on casualties; let attackers spend fight points to drop or recover ground gear in empty slots, within the carried-weight limit. Persist unique item IDs and respect fog of war.

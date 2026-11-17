@@ -199,8 +199,9 @@ def validate_map(map_data):
             raise InvalidMap("Houses must be distinct 2-4 tile rectangles outside keeps and strongpoints.")
         if "door" in house:
             door = house["door"]
-            if (not isinstance(door, dict) or set(door) != {"x", "y"}
+            if (not isinstance(door, dict) or not {"x", "y"} <= set(door) <= {"x", "y", "hidden"}
                     or type(door["x"]) is not int or type(door["y"]) is not int
+                    or ("hidden" in door and type(door["hidden"]) is not bool)
                     or not is_rectangle_edge(door["x"], door["y"], house)):
                 raise InvalidMap("A house door needs a perimeter tile.")
         rectangles.append(house)
@@ -413,7 +414,13 @@ def is_wall(x, y, map_data=MAP):
 
 def battle_map(map_data, state):
     """Use breached walls for all movement, cover and line-of-sight decisions."""
+    discovered = set(state.get("discovered_doors", ()))
+    authored_houses = map_data.get("authored_houses", map_data.get("houses", ()))
     return {**map_data,
+            "authored_houses": authored_houses,
+            "houses": [house if "door" not in house or not house["door"].get("hidden") or index in discovered
+                       else {key: value for key, value in house.items() if key != "door"}
+                       for index, house in enumerate(authored_houses)],
             "breaches": {(point["x"], point["y"]) for point in state.get("breaches", [])},
             "smoke_tiles": {(point["x"], point["y"]) for point in state.get("smoke", [])} |
                            {(point["x"], point["y"]) for point in state.get("fire", [])},
@@ -569,6 +576,17 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
 
 def remember_visibility(state, map_data=MAP):
     """Remember discovered ground in the server-owned snapshot, not enemy positions."""
+    discovered = set(state.get("discovered_doors", ()))
+    for index, house in enumerate(map_data.get("authored_houses", map_data.get("houses", ()))):
+        if "door" not in house or not house["door"].get("hidden") or index in discovered:
+            continue
+        door = house["door"]
+        if any(unit.get("side", "attackers") == "attackers"
+               and abs(unit["x"] - door["x"]) + abs(unit["y"] - door["y"]) == 1
+               and not is_house(unit["x"], unit["y"], map_data)
+               and unit.get("z", 0) == 0 for unit in state["units"]):
+            discovered.add(index)
+    state["discovered_doors"] = sorted(discovered)
     if map_data.get("fog_of_war", False):
         explored = {(tile["x"], tile["y"]) for tile in state.get("explored", ())}
         explored.update(visible_tiles(state, map_data))

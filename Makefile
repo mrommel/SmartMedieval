@@ -21,7 +21,7 @@ run: venv
 
 make_migrations: venv
 	./$(VENV)/bin/python manage.py makemigrations
-	./$(VENV)/bin/python manage.py sqlmigrate game 0015  # change this
+	./$(VENV)/bin/python manage.py sqlmigrate game 0016  # change this
 	./$(VENV)/bin/python manage.py migrate
 
 migrate: venv

@@ -1697,6 +1697,39 @@ class VillageTests(TestCase):
                                    "door": {"x": 4, "y": 4}}]
         return battlefield
 
+    def test_hidden_door_is_discovered_from_outside_and_unlocks_routes(self):
+        battlefield = self.enterable_map()
+        battlefield["houses"][0]["door"]["hidden"] = True
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        self.assertEqual(state["discovered_doors"], [])
+        self.assertFalse(is_walkable(5, 4, battle_map(battlefield, state)))
+        self.assertIsNone(find_path((4, 5), (5, 4), battle_map(battlefield, state)))
+        defender = {**state["units"][6], "x": 4, "y": 5}
+        self.assertNotIn((4, 4), defender_destinations(defender, battle_map(battlefield, state)))
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 5, "y": 4}, battlefield)
+        state["units"][0].update(x=4, y=6)
+        found = apply_action(state, {"type": "move", "units": [0], "x": 4, "y": 5}, battlefield)
+        self.assertEqual(found["discovered_doors"], [0])
+        self.assertEqual(state["discovered_doors"], [])
+        self.assertEqual(find_path((4, 5), (5, 4), battle_map(battlefield, found)), [(4, 4), (5, 4)])
+        self.assertIn((4, 4), defender_destinations(defender, battle_map(battlefield, found)))
+        entered = apply_action(found, {"type": "move", "units": [0], "x": 5, "y": 4}, battlefield)
+        self.assertEqual((entered["units"][0]["x"], entered["units"][0]["y"]), (5, 4))
+        self.assertEqual(entered["discovered_doors"], [0])
+        legacy = initial_state(self.enterable_map())
+        legacy.pop("discovered_doors")
+        self.assertEqual(apply_action(legacy, {"type": "move", "units": [0], "x": 2, "y": 5},
+                                      self.enterable_map())["discovered_doors"], [])
+
+    def test_hidden_door_requires_boolean(self):
+        for hidden in (1, "true", None):
+            battlefield = self.enterable_map()
+            battlefield["houses"][0]["door"]["hidden"] = hidden
+            with self.subTest(hidden=hidden), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+
     def test_enterable_houses_require_valid_access_and_keep_legacy_houses_solid(self):
         battlefield = self.enterable_map()
         validate_map(battlefield)

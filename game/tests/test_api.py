@@ -35,6 +35,35 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_hidden_house_door_is_not_exposed_until_discovered(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["houses"] = [{"left": 4, "right": 5, "top": 3, "bottom": 4,
+                                   "door": {"x": 4, "y": 4, "hidden": True}}]
+        battlefield["startPositions"] = [{"x": 4, "y": 6, "weapon": "sword"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertNotIn("door", started["map"]["houses"][0])
+        self.assertNotIn("door", self.client.get(reverse("current-game")).json()["map"]["houses"][0])
+        blocked = self.action(0, {"type": "move", "units": [0], "x": 4, "y": 4})
+        self.assertEqual(blocked.status_code, 400)
+        held = self.action(0, {"type": "end_turn"})
+        self.assertEqual(held.status_code, 200)
+        ai_map = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertNotIn("door", ai_map["houses"][0])
+        found = self.action(1, {"type": "move", "units": [0], "x": 4, "y": 5})
+        self.assertEqual(found.status_code, 200)
+        self.assertEqual(found.json()["map"]["houses"][0]["door"], battlefield["houses"][0]["door"])
+        self.assertEqual(found.json()["state"]["discovered_doors"], [0])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["map"]["houses"][0]["door"],
+                         battlefield["houses"][0]["door"])
+        ended = self.action(2, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        ai_map = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"]
+        self.assertEqual(ai_map["houses"][0]["door"], battlefield["houses"][0]["door"])
+
     def test_catapult_smoke_persists_with_fog_without_revealing_hidden_clouds(self):
         battlefield = default_map()
         battlefield["fog_of_war"] = True

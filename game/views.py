@@ -8,7 +8,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from .enemy_ai import EnemyAIError, enemy_turn
-from .engine import (MAX_CARRY_WEIGHT, InvalidAction, apply_action, armor_remaining, capture_status,
+from .engine import (MAX_CARRY_WEIGHT, InvalidAction, apply_action, armor_remaining, battle_map, capture_status,
                      carried_weight, fight_allowance, initial_state, move_allowance,
                      normalize_history_event, normalize_map, normalize_unit, visible_tiles, weight_penalty)
 from .models import GameInstance, Scenario, SingleGame
@@ -50,6 +50,8 @@ def serialize_instance(instance):
     entry = instance.scenario if instance.scenario_id else instance.single_game
     map_data = normalize_map(instance.map_definition)
     state = instance.state
+    if any(house.get("door", {}).get("hidden") for house in map_data.get("houses", ())):
+        map_data = {**map_data, "houses": battle_map(map_data, state)["houses"]}
     fog = map_data.get("fog_of_war", False)
     visible = visible_tiles(state, map_data) if fog else set()
     friendly_ids = {unit["id"] for unit in state["units"] if unit.get("side", "attackers") == "attackers"}

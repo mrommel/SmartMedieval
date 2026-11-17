@@ -31,7 +31,7 @@ def enemy_turn(state, map_data, combat_events=None):
         "map": {key: map_data[key] for key in ("cols", "rows", "keep", "gate", "objective")}
                | {"elevation": map_data.get("elevation", []), "objects": map_data.get("objects", []),
                    "strongpoints": map_data.get("strongpoints", []),
-                   "houses": map_data.get("houses", []), "lanes": map_data.get("lanes", []),
+                   "houses": battle_map(map_data, state)["houses"], "lanes": map_data.get("lanes", []),
                    "terrain": map_data.get("terrain", []),
                    "fog_of_war": map_data.get("fog_of_war", False),
                    "night": map_data.get("night", False),

@@ -687,6 +687,8 @@ import { previewMovement } from "./path_preview.js";
         : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     if (mapData.exit) document.getElementById("mission-help").textContent +=
       " At the marked exit, select a soldier and choose Withdraw (one fight point). Escaped soldiers keep their equipment. The battle ends once no soldiers remain in the field; at least one escape secures a retreat.";
+    document.getElementById("mission-help").textContent +=
+      " A concealed house door is revealed when a soldier stands next to it outside; once found, the house can be entered through that door.";
     if (mapData.catapults?.length) document.getElementById("mission-help").textContent +=
       " Catapult impacts leave smoke for two turn transitions. Smoke blocks sight and ranged shots but not movement; S2/S1 marks its remaining duration. Impacts on grass or enterable wooden house floors also ignite fire. Fire spreads to neighboring combustible tiles, blocks sight, costs +2 MP to enter and burns occupants for 1 damage. A soldier on or beside a burning tile can extinguish it for one fight point.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
