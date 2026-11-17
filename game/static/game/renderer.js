@@ -406,7 +406,7 @@ export function createBattlefieldRenderer(canvas) {
     const size = Math.max(9, tileW * .21);
     const x = p.x + (stack % 3 - 1) * size * .85;
     const y = p.y + tileH * .45 - Math.floor(stack / 3) * size * .55;
-    ctx.fillStyle = item.type === "weapon" ? "#9baeb3" : "#d2ac70";
+    ctx.fillStyle = item.type === "weapon" ? "#9baeb3" : item.type === "tool" ? "#a4c499" : "#d2ac70";
     ctx.strokeStyle = "#26312c";
     ctx.lineWidth = 1.5;
     ctx.fillRect(x - size / 2, y - size / 2, size, size);
@@ -414,7 +414,7 @@ export function createBattlefieldRenderer(canvas) {
     ctx.fillStyle = "#202c29";
     ctx.textAlign = "center";
     ctx.font = `bold ${Math.max(8, size * .7)}px sans-serif`;
-    ctx.fillText(item.type === "weapon" ? "W" : "A", x, y + size * .25);
+    ctx.fillText(item.type === "weapon" ? "W" : item.type === "tool" ? "T" : "A", x, y + size * .25);
   }
 
   function drawAimMarker(catapult) {

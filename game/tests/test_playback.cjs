@@ -48,7 +48,7 @@ function setup(savedSpeed = null, catalogFetch = null) {
   }, set(_, name, value) {
     if (name === "fillStyle" && typeof value === "string") {
       if (value.startsWith("rgba(12,21,30,")) fogFills.push(value);
-      if (["#9baeb3", "#d2ac70"].includes(value)) gearPaints.push(value);
+      if (["#9baeb3", "#d2ac70", "#a4c499"].includes(value)) gearPaints.push(value);
     }
     return true;
   } });
@@ -981,4 +981,39 @@ test("fallen gear renders and can be dropped, selected and recovered without ste
   assert.equal(game.get("pickup-equipment").disabled, false);
   await game.get("pickup-equipment").fire("click");
   assert.equal(game.actions.at(-1).item_id, 2);
+});
+
+test("tools render separately from equipment and can be picked up or dropped", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.carried_weight = 1;
+  soldier.max_carry_weight = 8;
+  game.snapshot.state.items = [{ id: 0, type: "tool", name: "rope", x: 0, y: 0, carrier_id: null },
+    { id: 1, type: "tool", name: "spade", x: 0, y: 0, carrier_id: null }];
+  await game.get("continue-game").fire("click");
+  assert.ok(game.gearPaints.includes("#a4c499"));
+  assert.equal(game.get("gear-target").children.length, 0);
+  assert.match(game.get("selected-stats").textContent, /Tools here.*rope/);
+  assert.match(game.get("cursor-status").textContent, /rope, spade tool on ground/);
+  assert.equal(game.get("pickup-tool").disabled, false);
+  assert.equal(game.get("ground-tool-target").children.length, 2);
+  game.get("ground-tool-target").value = "1";
+  game.get("ground-tool-target").fire("change");
+  await game.get("pickup-tool").fire("click");
+  assert.equal(game.actions.at(-1).type, "pickup_tool");
+  assert.equal(game.actions.at(-1).item_id, 1);
+  await new Promise(setImmediate);
+  soldier.tools = ["rope", "spade"];
+  soldier.fight_points = 1;
+  game.snapshot.state.items = [];
+  game.snapshot.state.history = [{ turn: 1, type: "pickup_tool", actor_id: 0,
+    actor_side: "attackers", actor_weapon: "sword", tool: "rope" }];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("combat-history-list").textContent, /picked up rope tool/);
+  assert.equal(game.get("pickup-tool").disabled, true);
+  assert.equal(game.get("tool-target").children.length, 2);
+  game.get("tool-target").value = "1";
+  await game.get("drop-tool").fire("click");
+  assert.equal(game.actions.at(-1).type, "drop_tool");
+  assert.equal(game.actions.at(-1).tool_index, 1);
 });

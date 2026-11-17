@@ -487,6 +487,80 @@ class CarriedWeightTests(TestCase):
         self.assertNotIn((8, 5), destinations)  # Four tiles from the armored guard.
 
 
+class ToolRecoveryTests(TestCase):
+    def test_authored_tool_validation_and_isolated_pickup_drop(self):
+        battlefield = default_map()
+        for name in ("", "x" * 41, 5, None):
+            battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": name}]
+            with self.subTest(name=name), self.assertRaises(InvalidMap):
+                validate_map(battlefield)
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": "rope"}]
+        validate_map(battlefield)
+        state = initial_state(battlefield)
+        unit = state["units"][0]
+        unit.update(armor="leather", armor_equipped=True, move_capacity=4, move_points=2)
+        picked = apply_action(state, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(picked["units"][0]["tools"], ["rope"])
+        self.assertEqual((picked["units"][0]["move_capacity"], picked["units"][0]["move_points"]), (3, 1))
+        self.assertEqual(picked["units"][0]["fight_points"], 0)
+        self.assertEqual(picked["items"], [])
+        self.assertEqual((unit["tools"], state["items"][0]["name"]), ([], "rope"))
+        self.assertEqual(picked["history"][-1]["tool"], "rope")
+        picked["units"][0]["fight_points"] = 1
+        dropped = apply_action(picked, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, battlefield)
+        self.assertEqual(dropped["items"][-1], {"id": 1, "type": "tool", "name": "rope",
+                                                "x": 2, "y": 6, "carrier_id": None})
+        self.assertEqual(dropped["units"][0]["tools"], [])
+        self.assertEqual((dropped["units"][0]["move_capacity"], dropped["units"][0]["move_points"]), (4, 2))
+        self.assertEqual(picked["units"][0]["tools"], ["rope"])
+
+    def test_tool_limits_wrong_item_and_forged_actions(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": "spade"},
+                                {"x": 3, "y": 7, "type": "healing_potion"}]
+        state = initial_state(battlefield)
+        unit = state["units"][0]
+        unit["tools"] = ["rope", "rope"]
+        unit["fight_points"] = 3
+        for action in ({"type": "pickup_tool", "unit_id": 0, "item_id": 0},
+                       {"type": "pickup_tool", "unit_id": 0, "item_id": 1},
+                       {"type": "pickup_equipment", "unit_id": 0, "item_id": 0},
+                       {"type": "pickup_item", "unit_id": 0, "item_id": 0},
+                       {"type": "pickup_tool", "unit_id": 6, "item_id": 0},
+                       {"type": "drop_tool", "unit_id": 6, "tool_index": 0},
+                       {"type": "drop_tool", "unit_id": 0, "tool_index": True},
+                       {"type": "drop_tool", "unit_id": 0, "tool_index": 2},
+                       {"type": "drop_tool", "unit_id": 0, "tool_index": -1},
+                       {"type": "drop_tool", "unit_id": 0, "tool_index": 0, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        dropped = apply_action(state, {"type": "drop_tool", "unit_id": 0, "tool_index": 1}, battlefield)
+        self.assertEqual(dropped["units"][0]["tools"], ["rope"])
+        dropped["units"][0]["fight_points"] = 1
+        picked = apply_action(dropped, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(picked["units"][0]["tools"], ["rope", "spade"])
+        unit.update(weapon="crossbow", armor="mail", tools=["rope"], fight_points=1)
+        state["items"][1].update(carrier_id=0, x=None, y=None)
+        with self.assertRaisesMessage(InvalidAction, "eight weight"):
+            apply_action(state, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual(state["items"][0]["name"], "spade")
+
+    def test_casualty_drops_tools_with_stable_legacy_ids(self):
+        battlefield = default_map()
+        battlefield["enemyStartPositions"][0]["tools"] = ["rope", "spade"]
+        state = initial_state(battlefield)
+        state.pop("next_item_id")
+        state["history"] = [{"type": "use_item", "item_id": 9, "turn": 1}]
+        state["units"] = [state["units"][0], state["units"][6]]
+        state["units"][0].update(x=12, y=4)
+        state["units"][1]["health"] = 1
+        fallen = apply_action(state, {"type": "attack", "unit_id": 0, "target_id": 6}, battlefield)
+        self.assertEqual([(item["id"], item["type"], item.get("name")) for item in fallen["items"]],
+                         [(10, "tool", "rope"), (11, "tool", "spade"), (12, "weapon", "sword")])
+        self.assertEqual(fallen["next_item_id"], 13)
+        self.assertEqual(state["units"][1]["tools"], ["rope", "spade"])
+
+
 class EquipmentRecoveryTests(TestCase):
     def test_authored_ground_equipment_can_be_recovered_with_existing_rules(self):
         battlefield = default_map()

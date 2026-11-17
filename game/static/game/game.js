@@ -31,6 +31,10 @@ import { previewMovement } from "./path_preview.js";
   const pickupEquipmentButton = document.getElementById("pickup-equipment");
   const dropWeaponButton = document.getElementById("drop-weapon");
   const dropArmorButton = document.getElementById("drop-armor");
+  const toolTarget = document.getElementById("tool-target");
+  const groundToolTarget = document.getElementById("ground-tool-target");
+  const pickupToolButton = document.getElementById("pickup-tool");
+  const dropToolButton = document.getElementById("drop-tool");
   const armorButton = document.getElementById("equip-armor");
   const mountButton = document.getElementById("mount-horse");
   const pauseButton = document.getElementById("pause-game");
@@ -100,7 +104,7 @@ import { previewMovement } from "./path_preview.js";
     dropArmorButton.hidden = !medic?.armor;
     dropWeaponButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
     dropArmorButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
-    const gear = medic && simulation.items.filter(item => item.type !== "healing_potion" &&
+    const gear = medic && simulation.items.filter(item => ["weapon", "armor"].includes(item.type) &&
       item.carrier_id === null && item.x === medic.x && item.y === medic.y);
     const selectedGear = gear?.find(item => String(item.id) === gearTarget.value);
     const hasGear = simulation.items.some(item => item.type === "weapon" || item.type === "armor");
@@ -111,6 +115,14 @@ import { previewMovement } from "./path_preview.js";
       (medic.carried_weight != null && medic.carried_weight +
         (selectedGear.type === "weapon" ? { sword: 1, longbow: 2, crossbow: 3 }[selectedGear.name] :
           { leather: 1, mail: 3 }[selectedGear.name]) > (medic.max_carry_weight ?? 8));
+    const groundTool = simulation.items.find(item => String(item.id) === groundToolTarget.value && item.type === "tool" &&
+      item.carrier_id === null && medic && item.x === medic.x && item.y === medic.y);
+    groundToolTarget.hidden = pickupToolButton.hidden = !simulation.items.some(item => item.type === "tool");
+    groundToolTarget.disabled = pendingAction || paused || ended || !medic || !groundToolTarget.children.length;
+    pickupToolButton.disabled = groundToolTarget.disabled || !medic?.fight_points || !groundTool ||
+      medic.tools?.length >= 2 || (medic.carried_weight != null && medic.carried_weight >= (medic.max_carry_weight ?? 8));
+    toolTarget.hidden = dropToolButton.hidden = !medic?.tools?.length;
+    toolTarget.disabled = dropToolButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
     const carried = medic && simulation.items.filter(item => item.type === "healing_potion" && item.carrier_id === medic.id);
     const hasPotions = Boolean(mapData?.has_items ?? mapData?.items?.some(item => item.type === "healing_potion"));
     pickupButton.hidden = dropButton.hidden = healButton.hidden = healTarget.hidden = !hasPotions;
@@ -170,7 +182,7 @@ import { previewMovement } from "./path_preview.js";
   function updateGearTargets() {
     const soldier = selectedMedic();
     const previous = gearTarget.value;
-    const gear = soldier ? simulation.items.filter(item => item.type !== "healing_potion" &&
+    const gear = soldier ? simulation.items.filter(item => ["weapon", "armor"].includes(item.type) &&
       item.carrier_id === null && item.x === soldier.x && item.y === soldier.y) : [];
     gearTarget.replaceChildren(...gear.map(item => {
       const option = document.createElement("option");
@@ -180,6 +192,29 @@ import { previewMovement } from "./path_preview.js";
     }));
     if (gear.some(item => String(item.id) === previous)) gearTarget.value = previous;
     else if (gear.length) gearTarget.value = String(gear[0].id);
+  }
+
+  function updateToolTargets() {
+    const previous = toolTarget.value;
+    const tools = selectedMedic()?.tools || [];
+    toolTarget.replaceChildren(...tools.map((name, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = name;
+      return option;
+    }));
+    toolTarget.value = tools[Number(previous)] != null ? previous : "0";
+    const soldier = selectedMedic();
+    const priorGround = groundToolTarget.value;
+    const ground = soldier ? simulation.items.filter(item => item.type === "tool" && item.carrier_id === null &&
+      item.x === soldier.x && item.y === soldier.y) : [];
+    groundToolTarget.replaceChildren(...ground.map(item => {
+      const option = document.createElement("option");
+      option.value = String(item.id);
+      option.textContent = item.name;
+      return option;
+    }));
+    groundToolTarget.value = ground.some(item => String(item.id) === priorGround) ? priorGround : String(ground[0]?.id ?? "");
   }
 
   function aimCatapultAt(x, y) {
@@ -381,10 +416,11 @@ import { previewMovement } from "./path_preview.js";
     const potion = groundItems.some(item => item.type === "healing_potion");
     const gear = groundItems.filter(item => item.type === "weapon" || item.type === "armor")
       .map(equipmentName).join(", ");
+    const tools = groundItems.filter(item => item.type === "tool").map(item => item.name).join(", ");
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
     cursorStatus.textContent = `${location}: ${unit
-      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon || "no weapon"}`} #${unit.id + 1}${unit.mount_id != null ? `, mounted (horse ${horse?.health ?? "?"} HP)` : horse ? ", horse available" : ""}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}${gear ? `, ${gear} on ground` : ""}`
-      : gear ? `${gear} on ground${potion ? ", healing potion" : ""}`
+      ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon || "no weapon"}`} #${unit.id + 1}${unit.mount_id != null ? `, mounted (horse ${horse?.health ?? "?"} HP)` : horse ? ", horse available" : ""}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}${gear ? `, ${gear} on ground` : ""}${tools ? `, ${tools} tool on ground` : ""}`
+      : gear || tools ? `${[gear && `${gear} on ground`, tools && `${tools} tool on ground`].filter(Boolean).join(", ")}${potion ? ", healing potion" : ""}`
       : potion ? "healing potion"
       : horse ? `horse (${horse.health}/${horse.max_health} HP); move a soldier here to mount`
       : simulation.catapults.find(item => item.x === cursor.x && item.y === cursor.y) ? "catapult" :
@@ -445,7 +481,9 @@ import { previewMovement } from "./path_preview.js";
     const unit = selected.length === 1 ? selected[0] : null;
     const crew = selectedCrew();
     const potions = unit ? simulation.items.filter(item => item.type === "healing_potion" && item.carrier_id === unit.id).length : 0;
-    const gear = unit ? simulation.items.filter(item => item.type !== "healing_potion" &&
+    const gear = unit ? simulation.items.filter(item => ["weapon", "armor"].includes(item.type) &&
+      item.carrier_id === null && item.x === unit.x && item.y === unit.y) : [];
+    const groundTools = unit ? simulation.items.filter(item => item.type === "tool" &&
       item.carrier_id === null && item.x === unit.x && item.y === unit.y) : [];
     const horse = unit ? simulation.horses.find(item => item.id === unit.mount_id) : null;
     if (unit) {
@@ -474,6 +512,7 @@ import { previewMovement } from "./path_preview.js";
         detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(gear.length ? [detailRow("Equipment here", gear.map(equipmentName).join(", "))] : []),
+        ...(groundTools.length ? [detailRow("Tools here", groundTools.map(item => item.name).join(", "))] : []),
         ...(unit.carried_weight == null ? [] : [detailRow("Load", `${unit.carried_weight}/${unit.max_carry_weight} weight · ${horse ? "no mounted penalty" : `−${unit.weight_penalty} MP/turn (1 per 3 weight; minimum 1 MP)`}`)]),
         ...(["longbow", "crossbow"].includes(unit.weapon)
           ? [detailRow("Reload", unit.reload_turns ? `${unit.reload_turns} turn(s) left` : "Ready")]
@@ -488,6 +527,7 @@ import { previewMovement } from "./path_preview.js";
     }
     updateHealTargets();
     updateGearTargets();
+    updateToolTargets();
     updateControls();
   }
 
@@ -518,6 +558,8 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_item" ? "picked up" : "dropped"} a healing potion.`;
       } else if (["pickup_equipment", "drop_weapon", "drop_armor"].includes(event.type)) {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_equipment" ? "recovered" : "dropped"} ${event.equipment}${event.type === "drop_armor" || event.equipment === "mail" || event.equipment === "leather" ? " armor" : ""}.`;
+      } else if (event.type === "pickup_tool" || event.type === "drop_tool") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_tool" ? "picked up" : "dropped"} ${event.tool} tool.`;
       } else if (event.type === "use_item") {
         item.textContent = `Turn ${event.turn} · ${actor} healed attacker #${event.target_id + 1} for ${event.healed} HP.`;
       } else {
@@ -817,6 +859,17 @@ import { previewMovement } from "./path_preview.js";
   dropArmorButton.addEventListener("click", () => {
     const soldier = selectedMedic();
     if (soldier?.armor && !dropArmorButton.disabled) sendAction({ type: "drop_armor", unit_id: soldier.id });
+  });
+  pickupToolButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    const tool = simulation.items.find(item => soldier && item.type === "tool" && String(item.id) === groundToolTarget.value &&
+      item.carrier_id === null && item.x === soldier.x && item.y === soldier.y);
+    if (tool && !pickupToolButton.disabled) sendAction({ type: "pickup_tool", unit_id: soldier.id, item_id: tool.id });
+  });
+  groundToolTarget.addEventListener("change", updateControls);
+  dropToolButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (soldier && !dropToolButton.disabled) sendAction({ type: "drop_tool", unit_id: soldier.id, tool_index: Number(toolTarget.value) });
   });
   mountButton.addEventListener("click", () => {
     const soldier = selectedMedic();

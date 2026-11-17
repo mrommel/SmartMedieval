@@ -70,6 +70,46 @@ class GameInstanceApiTests(TestCase):
         self.assertEqual(armored["state"]["units"][1]["armor"], "mail")
         self.assertEqual(self.client.get(reverse("current-game")).json()["state"], armored["state"])
 
+    def test_authored_tool_pickup_drop_and_resume(self):
+        battlefield = default_map()
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": "rope"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["state"]["items"][0]["name"], "rope")
+        self.assertEqual(self.action(0, {"type": "pickup_item", "unit_id": 0, "item_id": 0}).status_code, 400)
+        picked = self.action(0, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}).json()
+        self.assertEqual(picked["state"]["units"][0]["tools"], ["rope"])
+        self.assertEqual(picked["state"]["units"][0]["carried_weight"], 2)
+        self.assertEqual(self.action(0, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}).status_code, 400)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], picked["state"])
+        instance = GameInstance.objects.get(pk=picked["id"])
+        instance.state["units"][0]["fight_points"] = 1
+        instance.save(update_fields=["state"])
+        dropped = self.action(1, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}).json()
+        self.assertEqual(dropped["state"]["items"], [{"id": 1, "type": "tool", "name": "rope",
+                                                      "x": 2, "y": 6, "carrier_id": None}])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dropped["state"])
+
+    def test_fog_hides_ground_tools_until_spotted(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]
+        battlefield["enemyStartPositions"] = [{"x": 9, "y": 6, "weapon": "sword"}]
+        battlefield["items"] = [{"x": 9, "y": 6, "type": "tool", "name": "rope"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertNotIn("items", started["map"])
+        self.assertEqual(started["state"]["items"], [])
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0]["x"] = 5
+        instance.save(update_fields=["state"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["items"][0]["name"], "rope")
+
     def test_fog_hides_authored_equipment_until_spotted(self):
         battlefield = default_map()
         battlefield["fog_of_war"] = True

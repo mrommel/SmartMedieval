@@ -329,7 +329,7 @@ def validate_map(map_data):
         seen_horses.add((point["x"], point["y"]))
     items = map_data.get("items", [])
     if not isinstance(items, list) or len(items) > 32:
-        raise InvalidMap("Items must be a list of at most 32 potions or pieces of equipment.")
+        raise InvalidMap("Items must be a list of at most 32 potions, tools or pieces of equipment.")
     seen_items = set()
     for item in items:
         if (not isinstance(item, dict) or set(item) not in ({"x", "y", "type"}, {"x", "y", "type", "name"})
@@ -337,7 +337,9 @@ def validate_map(map_data):
                 or not ((item["type"] == "healing_potion" and "name" not in item)
                         or (item["type"] == "weapon" and item.get("name") in ("sword", "longbow", "crossbow"))
                         or (item["type"] == "armor" and isinstance(item.get("name"), str)
-                            and item["name"] in ARMOR_STATS))
+                            and item["name"] in ARMOR_STATS)
+                        or (item["type"] == "tool" and isinstance(item.get("name"), str)
+                            and 0 < len(item["name"]) <= 40))
                 or not is_walkable(item["x"], item["y"], map_data)
                 or tile_height(item["x"], item["y"], map_data) != 0
                 or (item["x"], item["y"]) in seen_items):
@@ -710,6 +712,8 @@ def record_casualty(state, killer, casualty):
     for item in state.get("items", []):
         if item["carrier_id"] == casualty["id"]:
             item.update(carrier_id=None, x=casualty["x"], y=casualty["y"])
+    for tool in casualty.get("tools", []):
+        drop_equipment(state, casualty, "tool", tool)
     drop_equipment(state, casualty, "weapon", normalize_unit(casualty)["weapon"])
     drop_equipment(state, casualty, "armor", casualty.get("armor"))
     for horse in state.get("horses", []):
@@ -962,7 +966,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     if not isinstance(action, dict) or action.get("type") not in (
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
-            "pickup_equipment", "drop_weapon", "drop_armor", "mount", "dismount", "reserve_reaction"):
+            "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
+            "mount", "dismount", "reserve_reaction"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -971,6 +976,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     next_state = {**state, "units": [
         {
             **normalize_unit(unit),
+            "tools": list(unit.get("tools", [])),
             "z": tile_height(unit["x"], unit["y"], map_data),
             "health": unit.get("health", MAX_HEALTH),
             "max_health": unit.get("max_health", MAX_HEALTH),
@@ -1092,6 +1098,42 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["history"] = (next_state["history"] + [{
             "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
             "actor_side": "attackers", "actor_weapon": actor_weapon, "equipment": name,
+        }])[-HISTORY_LIMIT:]
+        return remember_visibility(next_state, map_data)
+    if action["type"] in ("pickup_tool", "drop_tool"):
+        picking_up = action["type"] == "pickup_tool"
+        required = {"type", "unit_id", "item_id" if picking_up else "tool_index"}
+        if set(action) != required or any(type(action[key]) is not int for key in required - {"type"}):
+            raise InvalidAction("Choose a soldier and a valid tool.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if unit is None or unit["fight_points"] < 1:
+            raise InvalidAction("A living soldier needs one fight point to handle a tool.")
+        if picking_up:
+            item = next((item for item in next_state["items"] if item["id"] == action["item_id"]), None)
+            if (item is None or item["type"] != "tool" or item["carrier_id"] is not None
+                    or (item["x"], item["y"]) != (unit["x"], unit["y"])):
+                raise InvalidAction("Stand on a tool to pick it up.")
+            if len(unit["tools"]) >= INVENTORY_LIMIT or carried_weight(unit, next_state["items"]) + TOOL_WEIGHT > MAX_CARRY_WEIGHT:
+                raise InvalidAction("A soldier can carry at most two tools and eight weight.")
+            name = item["name"]
+        else:
+            index = action["tool_index"]
+            if not 0 <= index < len(unit["tools"]):
+                raise InvalidAction("Choose a carried tool to drop.")
+            name = unit["tools"][index]
+        old_penalty = weight_penalty(unit, next_state["items"])
+        if picking_up:
+            next_state["items"].remove(item)
+            unit["tools"].append(name)
+        else:
+            drop_equipment(next_state, unit, "tool", name)
+            unit["tools"].pop(index)
+        refresh_inventory_movement(unit, old_penalty, next_state["items"])
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": action["type"], "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"], "tool": name,
         }])[-HISTORY_LIMIT:]
         return remember_visibility(next_state, map_data)
     if action["type"] in ("pickup_item", "drop_item", "use_item"):
