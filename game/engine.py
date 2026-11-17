@@ -41,6 +41,8 @@ CATAPULT_AMMO = 3
 CATAPULT_RANGE = 10
 CATAPULT_RELOAD = 2
 SMOKE_TURNS = 2
+FIRE_TURNS = 3
+FIRE_MOVE_COST = 2
 WALL_HEALTH = 2
 INVENTORY_LIMIT = 2
 POTION_HEAL = 2
@@ -413,7 +415,9 @@ def battle_map(map_data, state):
     """Use breached walls for all movement, cover and line-of-sight decisions."""
     return {**map_data,
             "breaches": {(point["x"], point["y"]) for point in state.get("breaches", [])},
-            "smoke_tiles": {(point["x"], point["y"]) for point in state.get("smoke", [])}}
+            "smoke_tiles": {(point["x"], point["y"]) for point in state.get("smoke", [])} |
+                           {(point["x"], point["y"]) for point in state.get("fire", [])},
+            "fire_tiles": {(point["x"], point["y"]) for point in state.get("fire", [])}}
 
 
 def is_object(x, y, map_data=MAP):
@@ -646,12 +650,95 @@ def trigger_movement_reactions(state, target, map_data):
         for horse in state["horses"]:
             if horse["rider_id"] == soldier["id"]:
                 horse["x"], horse["y"] = tile
+        fire_damage(state, soldier, map_data)
 
 
 def terrain_cost_index(map_data, mounted=False):
     costs = MOUNTED_TERRAIN_COSTS if mounted else TERRAIN_COSTS
-    return {(tile["x"], tile["y"]): costs.get(tile["type"])
-            for tile in map_data.get("terrain", ())}
+    result = {(tile["x"], tile["y"]): costs.get(tile["type"])
+              for tile in map_data.get("terrain", ())}
+    for tile in map_data.get("fire_tiles", ()):
+        if result.get(tile, 1) is not None:
+            result[tile] = result.get(tile, 1) + FIRE_MOVE_COST
+    return result
+
+
+def combustible(x, y, map_data):
+    """Only grass and accessible wooden floors can carry a spreading blaze."""
+    return (house_at(x, y, map_data) is not None or
+            any(tile["x"] == x and tile["y"] == y and tile["type"] == "grass"
+                for tile in map_data.get("terrain", ()))) and is_walkable(x, y, map_data)
+
+
+def ignite(state, x, y, map_data):
+    if not combustible(x, y, map_data):
+        return
+    fire = next((point for point in state["fire"] if (point["x"], point["y"]) == (x, y)), None)
+    if fire:
+        fire["turns"] = FIRE_TURNS
+    else:
+        state["fire"].append({"x": x, "y": y, "turns": FIRE_TURNS})
+    if not any((point["x"], point["y"]) == (x, y) for point in state["burned"]):
+        state["burned"].append({"x": x, "y": y})
+
+
+def advance_fire(state, map_data):
+    """Spread from existing flames, never reigniting exhausted fuel on later turns."""
+    old = list(state["fire"])
+    burned = {(point["x"], point["y"]) for point in state["burned"]}
+    for fire in old:
+        tile = (fire["x"], fire["y"])
+        if tile not in burned:
+            state["burned"].append({"x": fire["x"], "y": fire["y"]})
+            burned.add(tile)
+    for fire in old:
+        fire["turns"] -= 1
+    state["fire"] = [fire for fire in old if fire["turns"] > 0]
+    for fire in old:
+        source = (fire["x"], fire["y"])
+        for tile in neighbors(*source):
+            if (tile not in burned and combustible(*tile, map_data) and
+                    (house_at(*source, map_data) == house_at(*tile, map_data))):
+                ignite(state, *tile, map_data)
+                burned.add(tile)
+
+
+def fire_damage(state, unit, map_data):
+    """A blaze burns armor before health, and a mounted horse before its rider."""
+    if unit not in state["units"] or (unit["x"], unit["y"]) not in map_data.get("fire_tiles", ()):
+        return
+    horse = next((horse for horse in state["horses"] if horse["id"] == unit.get("mount_id")), None)
+    absorbed = 0 if horse else min(1, armor_remaining(unit, state["turn"]))
+    if absorbed:
+        unit["armor_absorbed"] = (unit.get("armor_absorbed", 0) if unit.get("armor_turn") == state["turn"] else 0) + absorbed
+        unit["armor_turn"] = state["turn"]
+    damage = 1 - absorbed
+    if horse:
+        horse["health"] -= damage
+        if horse["health"] <= 0:
+            state["horses"].remove(horse)
+            old_capacity = move_allowance(unit, state["items"])
+            unit["mount_id"] = None
+            change_mount_movement(unit, old_capacity, state["items"])
+    else:
+        old_capacity = move_allowance(unit, state["items"])
+        unit["health"] -= damage
+        if damage and unit["health"] == 1:
+            unit["wound_turns"] = WOUND_TURNS
+            change_mount_movement(unit, old_capacity, state["items"])
+    killed = unit["health"] <= 0
+    witnessed = (not map_data.get("fog_of_war") or unit.get("side", "attackers") == "attackers" or
+                 (unit["x"], unit["y"]) in visible_tiles(state, map_data))
+    morale_changes = record_casualty(state, None, unit) if killed else []
+    state["history"] = (state["history"] + [{
+        "turn": state["turn"], "type": "fire_damage", "target_id": unit["id"],
+        "target_side": unit.get("side", "attackers"), "damage": damage,
+        "armor_blocked": absorbed, "horse_hit": bool(horse), "killed": killed,
+        "morale_changes": morale_changes,
+        **({"witnessed": witnessed} if map_data.get("fog_of_war") else {}),
+    }])[-HISTORY_LIMIT:]
+    if killed and unit.get("is_king"):
+        state["defeated"] = True
 
 
 def affordable_steps(path, budget, terrain_costs):
@@ -809,10 +896,11 @@ def drop_equipment(state, unit, kind, name):
 def record_casualty(state, killer, casualty):
     """A kill rallies its victor; nearby surviving comrades lose heart."""
     morale_changes = []
-    before = killer["morale"]
-    killer["morale"] = min(MAX_MORALE, killer["morale"] + 1)
-    if killer["morale"] != before:
-        morale_changes.append({"unit_id": killer["id"], "change": killer["morale"] - before})
+    if killer is not None:
+        before = killer["morale"]
+        killer["morale"] = min(MAX_MORALE, killer["morale"] + 1)
+        if killer["morale"] != before:
+            morale_changes.append({"unit_id": killer["id"], "change": killer["morale"] - before})
     for unit in state["units"]:
         if unit is not casualty and unit.get("side", "attackers") == casualty.get("side", "attackers"):
             if max(abs(unit["x"] - casualty["x"]), abs(unit["y"] - casualty["y"])) <= 3:
@@ -1071,6 +1159,8 @@ def initial_state(map_data=MAP):
         "wall_damage": [],
         "breaches": [],
         "smoke": [],
+        "fire": [],
+        "burned": [],
         "extinguished_watchfires": [],
         "items": [
             {"id": index, "type": item["type"], **({"name": item["name"]} if "name" in item else {}),
@@ -1115,7 +1205,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
             "mount", "dismount", "reserve_reaction", "reserve_movement",
             "crouch", "raise_shield", "withdraw",
-            "light_watchfire", "extinguish_watchfire", "toggle_torch"):
+            "light_watchfire", "extinguish_watchfire", "toggle_torch", "extinguish_fire"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -1144,8 +1234,31 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "wall_damage": [dict(point) for point in state.get("wall_damage", [])],
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "smoke": [dict(point) for point in state.get("smoke", [])],
+        "fire": [dict(point) for point in state.get("fire", [])],
+        "burned": [dict(point) for point in state.get("burned", [])],
         "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "extinguish_fire":
+        if (set(action) != {"type", "unit_id", "x", "y"} or
+                any(type(action[key]) is not int for key in ("unit_id", "x", "y"))):
+            raise InvalidAction("Choose a soldier and a burning tile.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        tile = (action["x"], action["y"])
+        if (unit is None or unit["fight_points"] < 1 or
+                not any((fire["x"], fire["y"]) == tile for fire in next_state["fire"]) or
+                abs(unit["x"] - tile[0]) + abs(unit["y"] - tile[1]) > 1 or
+                unit["z"] != tile_height(*tile, map_data) or
+                ((unit["x"], unit["y"]) != tile and
+                 not can_step((unit["x"], unit["y"]), tile, map_data))):
+            raise InvalidAction("Extinguishing a fire requires one fight point on or beside a reachable burning tile.")
+        next_state["fire"] = [fire for fire in next_state["fire"] if (fire["x"], fire["y"]) != tile]
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": "extinguish_fire", "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"], "x": tile[0], "y": tile[1],
+        }])[-HISTORY_LIMIT:]
+        return remember_visibility(next_state, battle_map(map_data, next_state))
     if action["type"] == "withdraw":
         if ("exit" not in map_data or set(action) != {"type", "unit_id"}
                 or type(action["unit_id"]) is not int):
@@ -1525,7 +1638,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 next_state["smoke"].append({"x": x, "y": y, "turns": SMOKE_TURNS})
             else:
                 smoke["turns"] = SMOKE_TURNS
-        return remember_visibility(next_state, map_data)
+            ignite(next_state, x, y, map_data)
+        return remember_visibility(next_state, battle_map(map_data, next_state))
     if action["type"] == "capture":
         if (map_data.get("mission") != "capture_king" or set(action) != {"type", "unit_id"}
                 or type(action["unit_id"]) is not int):
@@ -1668,6 +1782,9 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 for horse in next_state["horses"]:
                     if horse["rider_id"] == unit["id"]:
                         horse["x"], horse["y"] = tile
+                fire_damage(next_state, unit, map_data)
+                if unit not in next_state["units"]:
+                    break
                 trigger_reactions(next_state, unit, map_data, combat_events)
                 if unit not in next_state["units"]:
                     break
@@ -1706,8 +1823,12 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                            if map_data.get("fog_of_war", False) else {}),
                     })
             record_attack(next_state, defender, target, ranged, map_data)
+        advance_fire(next_state, map_data)
+        map_data = battle_map(map_data, next_state)
+        for unit in next_state["units"][:]:
+            fire_damage(next_state, unit, map_data)
         remaining = any(unit.get("side", "attackers") == "attackers" for unit in next_state["units"])
-        next_state["defeated"] = not remaining and not next_state["withdrawn"]
+        next_state["defeated"] = next_state["defeated"] or (not remaining and not next_state["withdrawn"])
         if not remaining and next_state["withdrawn"]:
             next_state["captured"] = True
         objective = map_data["objective"]
@@ -1777,15 +1898,22 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                                             terrain_cost_index(map_data, unit["mount_id"] is not None))
             if not steps:
                 continue
-            old_x = unit["x"]
-            unit["x"], unit["y"] = steps[-1]
-            for horse in next_state["horses"]:
-                if horse["rider_id"] == unit["id"]:
-                    horse["x"], horse["y"] = unit["x"], unit["y"]
-            unit["z"] = tile_height(unit["x"], unit["y"], map_data)
-            unit["facing"] = 1 if unit["x"] >= old_x else -1
-            unit["move_points"] -= spent
+            for tile in steps:
+                old_x = unit["x"]
+                unit["x"], unit["y"] = tile
+                for horse in next_state["horses"]:
+                    if horse["rider_id"] == unit["id"]:
+                        horse["x"], horse["y"] = tile
+                unit["z"] = tile_height(*tile, map_data)
+                unit["facing"] = 1 if unit["x"] >= old_x else -1
+                unit["move_points"] -= terrain_cost_index(map_data, unit["mount_id"] is not None).get(tile, 1)
+                fire_damage(next_state, unit, map_data)
+                if unit not in next_state["units"]:
+                    break
             moved = True
     if not moved:
         raise InvalidAction("That route is blocked, too costly for this turn, or the units are already there.")
+    if not any(unit.get("side", "attackers") == "attackers" for unit in next_state["units"]):
+        next_state["captured"] = bool(next_state["withdrawn"])
+        next_state["defeated"] = not next_state["captured"]
     return remember_visibility(next_state, map_data)

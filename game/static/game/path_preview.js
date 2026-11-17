@@ -15,7 +15,8 @@ export function previewMovement(map, units, unit, destination) {
   const costs = mounted ? { road: 1, grass: 2, mud: 4, swamp: Infinity } :
     { road: 1, grass: 2, mud: 3, swamp: 4 };
   const terrain = new Map((map.terrain || []).map(tile => [key(tile.x, tile.y), costs[tile.type]]));
-  const costAt = tile => terrain.get(key(tile.x, tile.y)) || 1;
+  const fire = new Set((map.fire || []).map(tile => key(tile.x, tile.y)));
+  const costAt = tile => (terrain.get(key(tile.x, tile.y)) || 1) + (fire.has(key(tile.x, tile.y)) ? 2 : 0);
   const objects = new Set((map.objects || []).map(tile => key(tile.x, tile.y)));
   const breaches = new Set((map.breaches || []).map(tile => key(tile.x, tile.y)));
   const strongpoints = [{ ...map.keep, gate: map.gate }, ...(map.strongpoints || [])];

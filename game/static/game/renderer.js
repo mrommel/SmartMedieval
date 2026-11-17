@@ -370,6 +370,24 @@ export function createBattlefieldRenderer(canvas) {
     ctx.restore();
   }
 
+  function drawFire(flame) {
+    const p = project(flame.x, flame.y);
+    ctx.save();
+    ctx.fillStyle = "rgba(239,98,36,.42)";
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + tileH * .52, tileW * .31, tileH * .24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    polygon([[p.x - tileW * .15, p.y + tileH * .53],
+      [p.x - tileW * .09, p.y - tileH * .35], [p.x, p.y + tileH * .08],
+      [p.x + tileW * .06, p.y - tileH * .52], [p.x + tileW * .17, p.y + tileH * .53]],
+      "#ef8439", "#ffe2a1", 1);
+    ctx.fillStyle = "#29241d";
+    ctx.font = `bold ${Math.max(10, tileW * .19)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(`F${flame.turns}`, p.x, p.y + tileH * .55);
+    ctx.restore();
+  }
+
   function drawHouse(x, y) {
     const base = diamond(x, y, 0);
     const roof = base.map(([px, py]) => [px, py - tileH * 1.35]);
@@ -751,6 +769,8 @@ export function createBattlefieldRenderer(canvas) {
     simulation.units.forEach(unit => layers.push({ depth: unit.x + unit.y + .5, kind: "unit", unit }));
     (simulation.smoke || []).forEach(cloud =>
       layers.push({ depth: cloud.x + cloud.y + .8, kind: "smoke", cloud }));
+    (simulation.fire || []).forEach(flame =>
+      layers.push({ depth: flame.x + flame.y + .9, kind: "fire", flame }));
     layers.sort((a, b) => a.depth - b.depth);
 
     let objectiveDrawn = false;
@@ -766,6 +786,7 @@ export function createBattlefieldRenderer(canvas) {
       else if (layer.kind === "object") drawObject(layer.obj);
       else if (layer.kind === "watchfire") drawWatchfire(layer.fire);
       else if (layer.kind === "smoke") drawSmoke(layer.cloud);
+      else if (layer.kind === "fire") drawFire(layer.flame);
       else if (layer.kind === "breach") drawBreach(layer.point);
       else if (layer.kind === "catapult") drawCatapult(layer.catapult);
       else if (layer.kind === "horse") drawHorse(layer.horse);

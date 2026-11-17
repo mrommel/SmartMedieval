@@ -64,8 +64,30 @@ class GameInstanceApiTests(TestCase):
         ended = self.action(2, {"type": "end_turn"})
         self.assertEqual(ended.status_code, 200)
         ai_map = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])["map"]
-        self.assertEqual(ai_map["smoke"], [cloud, {"x": 0, "y": 0, "turns": 2}])
+        self.assertEqual(ai_map["smoke"], [])
         self.assertEqual(ended.json()["state"]["smoke"], [{**cloud, "turns": 1}])
+
+    def test_fire_is_persisted_but_unseen_flames_are_hidden(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, terrain=[{"x": 4, "y": 6, "type": "grass"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        state = instance.state
+        state["fire"] = [{"x": 4, "y": 6, "turns": 3}, {"x": 0, "y": 0, "turns": 2}]
+        state["burned"] = [{"x": 4, "y": 6}, {"x": 0, "y": 0}]
+        instance.state = state
+        instance.save(update_fields=["state"])
+        visible = self.client.get(reverse("current-game")).json()["state"]
+        self.assertEqual(visible["fire"], [{"x": 4, "y": 6, "turns": 3}])
+        self.assertEqual(visible["burned"], [{"x": 4, "y": 6}])
+        self.assertEqual(len(GameInstance.objects.get(pk=started["id"]).state["fire"]), 2)
+        invalid = self.action(0, {"type": "extinguish_fire", "unit_id": 0, "x": 0, "y": 0})
+        self.assertEqual(invalid.status_code, 400)
+        extinguished = self.action(0, {"type": "extinguish_fire", "unit_id": 0, "x": 4, "y": 6})
+        self.assertEqual(extinguished.status_code, 400)  # Too far away.
 
     def test_shield_stance_persists_and_hides_distant_defenders(self):
         battlefield = default_map()

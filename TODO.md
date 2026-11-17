@@ -89,9 +89,9 @@
 - [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
   - [x] Add a crouch stance costing one fight point and all remaining move points; reduce each incoming ranged shot by one damage until the next turn, before armor, without mitigating melee or catapults.
   - [x] Add shield-raising and visibility-aware cover trade-offs: carried shields block one direct damage from visible attackers at the cost of one FP, one MP, and reduced sight.
-- [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
+- [x] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
   - [x] Make catapult impacts leave two-turn smoke clouds that block sight and ranged attacks without blocking movement; persist and render smoke, including fog-safe snapshots.
-  - [ ] Add spreading fire, damage, movement costs, and ways to extinguish hazards.
+  - [x] Add spreading fire from catapult-ignited grass or enterable wooden house floors, 1 damage to occupants, +2 MP on entry, and an adjacent one-FP extinguish action. Burned fuel does not spread again unless struck by another stone.
 - [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.
   - [x] Wound surviving units reduced to 1 HP for two turn transitions; reduce on-foot movement by 1 MP without refunding spent points, allow healing potions to treat injuries (even at full HP), and show injury/recovery in the selected-soldier panel.
   - [ ] Add persistent wounds and infirmary treatment when a campaign carries soldiers between battles.

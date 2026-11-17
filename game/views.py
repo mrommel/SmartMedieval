@@ -95,6 +95,10 @@ def serialize_instance(instance):
                            or (item["x"], item["y"]) in visible],
                 "smoke": [cloud for cloud in state.get("smoke", [])
                           if (cloud["x"], cloud["y"]) in visible],
+                "fire": [flame for flame in state.get("fire", [])
+                         if (flame["x"], flame["y"]) in visible],
+                "burned": [tile for tile in state.get("burned", [])
+                           if (tile["x"], tile["y"]) in visible],
                 "horses": [horse for horse in state.get("horses", [])
                            if (horse["x"], horse["y"]) in visible],
                 "visible": [{"x": x, "y": y} for x, y in sorted(visible)],

@@ -39,7 +39,10 @@ def enemy_turn(state, map_data, combat_events=None):
                                   if fire not in state.get("extinguished_watchfires", [])],
                    "mission": map_data.get("mission", "courtyard"),
                     "breaches": state.get("breaches", []),
-                    "smoke": state.get("smoke", [])},
+                     "smoke": [cloud for cloud in state.get("smoke", [])
+                               if sight is None or (cloud["x"], cloud["y"]) in sight],
+                     "fire": [flame for flame in state.get("fire", [])
+                              if sight is None or (flame["x"], flame["y"]) in sight]},
         "units": [
             {key: unit.get(key) for key in (
                 "id", "side", "weapon", "tools", "armor", "armor_equipped", "is_king", "x", "y", "health", "fight_points", "reload_turns",
@@ -70,6 +73,9 @@ def enemy_turn(state, map_data, combat_events=None):
                 "with walls, houses, trees, rocks, and wells blocking line of sight and movement. "
                 "Catapult impacts leave smoke for two turn transitions; smoke blocks sight and "
                 "ranged attacks, including shots from within it, but not movement. "
+                 "Impacts on grass or enterable wooden house floors ignite fires lasting three "
+                 "transitions, spreading to adjacent grass or floors in the same house. Fire "
+                 "blocks sight, adds two MP to entry cost and burns occupants for one damage. "
                 "Houses without doors are solid; houses with a door have walkable ground-floor tiles, "
                 "but entering and leaving is possible only through the perimeter door tile. "
                 "Shots cannot cross house walls even at doors; units in the same room can shoot each other. "

@@ -450,6 +450,24 @@ test("route preview chooses cheaper terrain and never splits a costly tile betwe
   assert.equal(waiting.turns, 3);
 });
 
+test("burning tiles add movement cost and can be extinguished from an adjacent tile", async () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, fire: [{ x: 1, y: 0, turns: 3 }],
+    terrain: [{ x: 1, y: 0, type: "grass" }] };
+  const unit = { id: 0, x: 0, y: 0, move_points: 3, move_capacity: 4, next_move_capacity: 4 };
+  const preview = previewMovement(map, [unit], unit, { x: 1, y: 0 });
+  assert.equal(preview.totalCost, 4);
+  assert.equal(preview.thisTurn, 0);
+  const game = setup();
+  game.snapshot.state.units[0].z = 0;
+  game.snapshot.state.fire = [{ x: 1, y: 0, turns: 3 }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").disabled, false);
+  assert.equal(game.get("fire-target").value, "1,0");
+  await game.get("extinguish-fire").fire("click");
+  assert.deepEqual(game.actions.at(-1), { type: "extinguish_fire", unit_id: 0, x: 1, y: 0 });
+});
+
 test("renderer draws reachable route steps and unreachable markers", () => {
   const game = setup();
   const renderer = game.createRenderer(game.get("battlefield-canvas"));

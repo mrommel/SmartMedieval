@@ -7,6 +7,118 @@ from ..engine import (
 )
 
 
+class FireHazardTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield["terrain"] = [{"x": x, "y": 6, "type": "grass"} for x in (5, 6, 7)]
+        self.state = initial_state(self.battlefield)
+        self.state["units"][1]["fight_points"] = 2
+
+    def fire_catapult(self, state, x=5, y=6):
+        aimed = apply_action(state, {"type": "aim_catapult", "unit_id": 1,
+                                    "catapult_id": 0, "x": x, "y": y}, self.battlefield)
+        return apply_action(aimed, {"type": "fire_catapult", "unit_id": 1,
+                                    "catapult_id": 0}, self.battlefield)
+
+    def test_ignition_spread_exhaustion_and_legacy_matches(self):
+        burning = self.fire_catapult(self.state)
+        self.assertEqual(burning["fire"], [{"x": 5, "y": 6, "turns": 3}])
+        self.assertEqual(self.state["fire"], [])
+        self.assertFalse(has_line_of_sight((4, 6), (6, 6), battle_map(self.battlefield, burning)))
+        self.assertEqual(find_path((4, 6), (5, 6), battle_map(self.battlefield, burning)), [(5, 6)])
+        after = apply_action(burning, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual({(f["x"], f["y"], f["turns"]) for f in after["fire"]},
+                         {(5, 6, 2), (6, 6, 3)})
+        after = apply_action(after, {"type": "end_turn"}, self.battlefield)
+        self.assertIn((7, 6), {(f["x"], f["y"]) for f in after["fire"]})
+        for _ in range(3):
+            after = apply_action(after, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after["fire"], [])
+        self.assertEqual(len(after["burned"]), 3)
+        legacy = initial_state(self.battlefield)
+        del legacy["fire"], legacy["burned"]
+        self.assertEqual(apply_action(legacy, {"type": "end_turn"}, self.battlefield)["fire"], [])
+
+    def test_fire_costs_and_entry_damage_apply_to_intermediate_steps(self):
+        state = self.fire_catapult(self.state)
+        state["units"][0].update(x=4, y=6, move_points=4, health=2)
+        # Entering grass with fire costs 2 + 2, leaving no MP for the next grass tile.
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 5, "y": 6}, self.battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["y"]), (5, 6))
+        self.assertEqual((moved["units"][0]["move_points"], moved["units"][0]["health"]), (0, 1))
+        self.assertEqual(moved["units"][0]["wound_turns"], 2)
+        self.assertEqual(moved["history"][-1]["type"], "fire_damage")
+
+    def test_extinguish_costs_a_fight_point_and_checks_range(self):
+        state = self.fire_catapult(self.state)
+        order = {"type": "extinguish_fire", "unit_id": 0, "x": 5, "y": 6}
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        state["units"][0].update(x=4, y=6)
+        result = apply_action(state, order, self.battlefield)
+        self.assertEqual(result["fire"], [])
+        self.assertEqual(result["units"][0]["fight_points"], 0)
+        self.assertEqual(result["burned"], [{"x": 5, "y": 6}])
+        self.assertEqual(state["fire"][0]["turns"], 3)
+        with self.assertRaises(InvalidAction):
+            apply_action(result, order, self.battlefield)
+
+    def test_fire_damages_armor_and_drops_gear_on_casualty(self):
+        state = initial_state(self.battlefield)
+        state["units"][0].update(x=5, y=6, health=1, armor="leather", armor_equipped=True)
+        state["fire"] = [{"x": 5, "y": 6, "turns": 3}]
+        state["burned"] = [{"x": 5, "y": 6}]
+        protected = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(protected["units"][0]["health"], 1)
+        self.assertEqual(protected["history"][-1]["armor_blocked"], 1)
+        protected["units"][0]["armor_equipped"] = False
+        killed = apply_action(protected, {"type": "end_turn"}, self.battlefield)
+        self.assertFalse(any(unit["id"] == 0 for unit in killed["units"]))
+        self.assertTrue(any(item["type"] == "armor" and item["name"] == "leather" for item in killed["items"]))
+
+    def test_defender_entry_into_fire_can_kill_before_reactions(self):
+        state = initial_state(self.battlefield)
+        state["units"] = [unit for unit in state["units"] if unit["id"] != 3]
+        defender = state["units"][-3]  # First defender (id 6).
+        defender.update(x=4, y=6, health=1)
+        state["fire"] = [{"x": 5, "y": 6, "turns": 3}]
+        state["burned"] = [{"x": 5, "y": 6}]
+        result = apply_action(state, {"type": "end_turn"}, self.battlefield,
+                              enemy_orders=[{"unit_id": defender["id"], "x": 5, "y": 6}])
+        self.assertFalse(any(unit["id"] == defender["id"] for unit in result["units"]))
+        self.assertTrue(any(event["type"] == "fire_damage" and event["killed"] for event in result["history"]))
+
+    def test_a_mount_takes_fire_damage_before_its_rider(self):
+        self.battlefield["horses"] = [{"x": 2, "y": 6}]
+        self.battlefield["terrain"].append({"x": 2, "y": 6, "type": "grass"})
+        state = initial_state(self.battlefield)
+        state["units"][0]["mount_id"] = 0
+        state["horses"][0]["rider_id"] = 0
+        state["fire"] = [{"x": 2, "y": 6, "turns": 3}]
+        state["burned"] = [{"x": 2, "y": 6}]
+        after = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after["horses"][0]["health"], 1)
+        self.assertEqual(after["units"][0]["health"], 3)
+        after = apply_action(after, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after["horses"], [])
+        self.assertIsNone(after["units"][0]["mount_id"])
+
+    def test_house_fire_stays_inside_house_and_open_ground_does_not_ignite(self):
+        self.battlefield["houses"] = [{"left": 5, "right": 6, "top": 5, "bottom": 6,
+                                        "door": {"x": 5, "y": 6}}]
+        self.battlefield["terrain"] = [{"x": 4, "y": 6, "type": "grass"}]
+        state = initial_state(self.battlefield)
+        state["units"][1]["fight_points"] = 2
+        state = self.fire_catapult(state)
+        state = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertNotIn((4, 6), {(f["x"], f["y"]) for f in state["fire"]})
+        self.assertIn((6, 6), {(f["x"], f["y"]) for f in state["fire"]})
+        state["units"][1]["fight_points"] = 2
+        state["catapults"][0]["reload_turns"] = 0
+        state = self.fire_catapult(state, 8, 6)
+        self.assertNotIn((8, 6), {(f["x"], f["y"]) for f in state["fire"]})
+
+
 class CatapultSmokeTests(TestCase):
     def setUp(self):
         self.battlefield = default_map()

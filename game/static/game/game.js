@@ -42,6 +42,8 @@ import { previewMovement } from "./path_preview.js";
   const watchfireTarget = document.getElementById("watchfire-target");
   const toggleWatchfireButton = document.getElementById("toggle-watchfire");
   const toggleTorchButton = document.getElementById("toggle-torch");
+  const fireTarget = document.getElementById("fire-target");
+  const extinguishFireButton = document.getElementById("extinguish-fire");
   const armorButton = document.getElementById("equip-armor");
   const mountButton = document.getElementById("mount-horse");
   const pauseButton = document.getElementById("pause-game");
@@ -55,7 +57,7 @@ import { previewMovement } from "./path_preview.js";
 
   let COLS, ROWS, KEEP, GATE, OBJECTIVE, mapData;
   let objects = new Map();
-  const simulation = { units: [], catapults: [], horses: [], items: [], smoke: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0, visible: null, explored: null };
+  const simulation = { units: [], catapults: [], horses: [], items: [], smoke: [], fire: [], selected: new Set(), captured: false, defeated: false, captureProgress: 0, visible: null, explored: null };
   let aimingCatapult = false;
   let startingAttackerCount = 0;
   let instanceId = null;
@@ -94,6 +96,22 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     const crew = selectedCrew();
     const medic = selectedMedic();
+    const nearbyFlames = medic ? simulation.fire.filter(flame =>
+      Math.abs(medic.x - flame.x) + Math.abs(medic.y - flame.y) <= 1 &&
+      medic.z === renderer.tileHeight(flame.x, flame.y) &&
+      (medic.x === flame.x && medic.y === flame.y || canMeleeAttack(medic, flame))) : [];
+    const previousFlame = fireTarget.value;
+    fireTarget.replaceChildren(...nearbyFlames.map(flame => {
+      const option = document.createElement("option");
+      option.value = `${flame.x},${flame.y}`;
+      option.textContent = `Fire ${flame.x + 1}, ${flame.y + 1}`;
+      return option;
+    }));
+    fireTarget.value = nearbyFlames.some(flame => `${flame.x},${flame.y}` === previousFlame)
+      ? previousFlame : nearbyFlames.length ? `${nearbyFlames[0].x},${nearbyFlames[0].y}` : "";
+    fireTarget.hidden = extinguishFireButton.hidden = !simulation.fire.length;
+    fireTarget.disabled = pendingAction || paused || ended || !nearbyFlames.length;
+    extinguishFireButton.disabled = fireTarget.disabled || !medic?.fight_points;
     const nearbyFires = medic && mapData?.night ? (mapData.watchfires || []).filter(fire =>
       Math.abs(medic.x - fire.x) + Math.abs(medic.y - fire.y) <= 1 &&
       medic.z === renderer.tileHeight(fire.x, fire.y)) : [];
@@ -337,7 +355,7 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function blocksSight(x, y, interior = -1) {
-    return simulation.smoke.some(cloud => cloud.x === x && cloud.y === y) || renderer.isWall(x, y) || (renderer.isHouse(x, y) &&
+    return [...simulation.smoke, ...simulation.fire].some(cloud => cloud.x === x && cloud.y === y) || renderer.isWall(x, y) || (renderer.isHouse(x, y) &&
       (interior < 0 || houseAt(x, y) !== interior)) ||
       (objects.has(`${x},${y}`) && objects.get(`${x},${y}`).type !== "fence");
   }
@@ -421,7 +439,7 @@ import { previewMovement } from "./path_preview.js";
   }
 
   function hasLineOfSight(start, end) {
-    if (simulation.smoke.some(cloud => (cloud.x === start[0] && cloud.y === start[1]) ||
+    if ([...simulation.smoke, ...simulation.fire].some(cloud => (cloud.x === start[0] && cloud.y === start[1]) ||
       (cloud.x === end[0] && cloud.y === end[1]))) return false;
     const interior = houseAt(...start);
     if (interior !== houseAt(...end)) return false;
@@ -471,12 +489,13 @@ import { previewMovement } from "./path_preview.js";
     const horse = simulation.horses.find(item => item.x === cursor.x && item.y === cursor.y);
     const groundItems = simulation.items.filter(item => item.carrier_id === null && item.x === cursor.x && item.y === cursor.y);
     const smoke = simulation.smoke.find(cloud => cloud.x === cursor.x && cloud.y === cursor.y);
+    const fire = simulation.fire.find(flame => flame.x === cursor.x && flame.y === cursor.y);
     const potion = groundItems.some(item => item.type === "healing_potion");
     const gear = groundItems.filter(item => item.type === "weapon" || item.type === "armor")
       .map(equipmentName).join(", ");
     const tools = groundItems.filter(item => item.type === "tool").map(item => item.name).join(", ");
     const location = `Tile ${cursor.x + 1}, ${cursor.y + 1}`;
-    cursorStatus.textContent = `${location}: ${smoke ? `smoke (${smoke.turns} turn${smoke.turns === 1 ? "" : "s"} left); ` : ""}${unit
+    cursorStatus.textContent = `${location}: ${fire ? `fire (${fire.turns} turns left, +2 MP and 1 damage); ` : ""}${smoke ? `smoke (${smoke.turns} turn${smoke.turns === 1 ? "" : "s"} left); ` : ""}${unit
       ? `${unit.side === "defenders" ? "defender" : "friendly"} ${unit.is_king ? "king" : `with ${unit.weapon || "no weapon"}`} #${unit.id + 1}${unit.mount_id != null ? `, mounted (horse ${horse?.health ?? "?"} HP)` : horse ? ", horse available" : ""}${simulation.selected.has(unit.id) ? ", selected" : ""}${potion ? ", healing potion on ground" : ""}${gear ? `, ${gear} on ground` : ""}${tools ? `, ${tools} tool on ground` : ""}`
       : gear || tools ? `${[gear && `${gear} on ground`, tools && `${tools} tool on ground`].filter(Boolean).join(", ")}${potion ? ", healing potion" : ""}`
       : potion ? "healing potion"
@@ -627,6 +646,10 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} ${event.lit ? "lit" : "extinguished"} their torch.`;
       } else if (event.type === "light_watchfire" || event.type === "extinguish_watchfire") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "light_watchfire" ? "lit" : "extinguished"} watchfire at ${event.x + 1}, ${event.y + 1}.`;
+      } else if (event.type === "extinguish_fire") {
+        item.textContent = `Turn ${event.turn} · ${actor} extinguished fire at ${event.x + 1}, ${event.y + 1}.`;
+      } else if (event.type === "fire_damage") {
+        item.textContent = `Turn ${event.turn} · Fire burned ${event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}${event.horse_hit ? "'s horse" : ""} for ${event.damage} damage${event.armor_blocked ? " (armor absorbed it)" : ""}${event.killed ? " (fallen)" : ""}.`;
       } else if (event.type === "use_item") {
         item.textContent = `Turn ${event.turn} · ${actor} treated attacker #${event.target_id + 1} for ${event.healed} HP${event.treated ? " and cleared their injury" : ""}.`;
       } else {
@@ -665,12 +688,12 @@ import { previewMovement } from "./path_preview.js";
     if (mapData.exit) document.getElementById("mission-help").textContent +=
       " At the marked exit, select a soldier and choose Withdraw (one fight point). Escaped soldiers keep their equipment. The battle ends once no soldiers remain in the field; at least one escape secures a retreat.";
     if (mapData.catapults?.length) document.getElementById("mission-help").textContent +=
-      " Catapult impacts leave smoke for two turn transitions. Smoke blocks sight and ranged shots but not movement; S2/S1 marks its remaining duration.";
+      " Catapult impacts leave smoke for two turn transitions. Smoke blocks sight and ranged shots but not movement; S2/S1 marks its remaining duration. Impacts on grass or enterable wooden house floors also ignite fire. Fire spreads to neighboring combustible tiles, blocks sight, costs +2 MP to enter and burns occupants for 1 damage. A soldier on or beside a burning tile can extinguish it for one fight point.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage,
       watchfires: (mapData.watchfires || []).map(fire => ({ ...fire, lit: !snapshot.state.extinguished_watchfires?.some(
         out => out.x === fire.x && out.y === fire.y) })) });
-    previewMap = { ...mapData, breaches: snapshot.state.breaches || [] };
+    previewMap = { ...mapData, breaches: snapshot.state.breaches || [], fire: snapshot.state.fire || [] };
     previewKey = null;
     objects = new Map((snapshot.map.objects || []).map(obj => [`${obj.x},${obj.y}`, obj]));
     simulation.units = snapshot.state.units;
@@ -680,6 +703,7 @@ import { previewMovement } from "./path_preview.js";
     simulation.horses = snapshot.state.horses || [];
     simulation.items = snapshot.state.items || [];
     simulation.smoke = snapshot.state.smoke || [];
+    simulation.fire = snapshot.state.fire || [];
     simulation.extinguishedWatchfires = snapshot.state.extinguished_watchfires || [];
     simulation.captured = snapshot.state.captured;
     simulation.defeated = snapshot.state.defeated || false;
@@ -806,7 +830,7 @@ import { previewMovement } from "./path_preview.js";
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
         (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
         "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
+      else showToast(combat || (action.type === "extinguish_fire" ? "Fire extinguished." : action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -985,6 +1009,12 @@ import { previewMovement } from "./path_preview.js";
     if (soldier && !toggleTorchButton.disabled) {
       sendAction({ type: "toggle_torch", unit_id: soldier.id, lit: soldier.torch_lit === false });
     }
+  });
+  extinguishFireButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (!soldier || extinguishFireButton.disabled) return;
+    const [x, y] = fireTarget.value.split(",").map(Number);
+    sendAction({ type: "extinguish_fire", unit_id: soldier.id, x, y });
   });
   mountButton.addEventListener("click", () => {
     const soldier = selectedMedic();
