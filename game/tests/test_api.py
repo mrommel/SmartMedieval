@@ -35,6 +35,29 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_shield_stance_persists_and_hides_distant_defenders(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword", "tools": ["shield"]}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "longbow"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 2)
+        raised = self.action(0, {"type": "raise_shield", "unit_id": 0, "raised": True})
+        self.assertEqual(raised.status_code, 200)
+        state = raised.json()["state"]
+        self.assertTrue(state["units"][0]["shield_raised"])
+        self.assertEqual(len(state["units"]), 1)
+        self.assertNotIn({"x": 7, "y": 6}, state["visible"])
+        self.assertIn({"x": 7, "y": 6}, state["explored"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], state)
+        self.assertTrue(GameInstance.objects.get(pk=started["id"]).state["units"][0]["shield_raised"])
+        self.assertEqual(self.action(0, {"type": "raise_shield", "unit_id": 0, "raised": False}).status_code, 409)
+        lowered = self.action(1, {"type": "raise_shield", "unit_id": 0, "raised": False}).json()
+        self.assertEqual(len(lowered["state"]["units"]), 2)
+
     def test_withdrawal_persists_and_resumes_with_fog(self):
         battlefield = default_map()
         battlefield.update(exit={"x": 2, "y": 6}, fog_of_war=True,

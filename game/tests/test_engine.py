@@ -89,6 +89,91 @@ class WithdrawalTests(TestCase):
         self.assertEqual(state["withdrawn"], [])
 
 
+class ShieldTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield.update(
+            fog_of_war=True,
+            startPositions=[{"x": 2, "y": 6, "weapon": "sword", "tools": ["shield"], "armor": "leather"}],
+            enemyStartPositions=[{"x": 7, "y": 6, "weapon": "longbow"}],
+        )
+        validate_map(self.battlefield)
+
+    def toggle(self, state, raised=True):
+        return apply_action(state, {"type": "raise_shield", "unit_id": 0, "raised": raised}, self.battlefield)
+
+    def test_raise_lower_costs_and_turn_expiry(self):
+        state = initial_state(self.battlefield)
+        del state["units"][0]["shield_raised"]  # Legacy matches are unshielded.
+        raised = self.toggle(state)
+        self.assertNotIn("shield_raised", state["units"][0])
+        self.assertEqual((raised["units"][0]["fight_points"], raised["units"][0]["move_points"]), (0, 2))
+        lowered = self.toggle(raised, False)
+        self.assertEqual((lowered["units"][0]["fight_points"], lowered["units"][0]["move_points"]), (0, 2))
+        with self.assertRaises(InvalidAction):
+            self.toggle(lowered)
+        after_turn = apply_action(raised, {"type": "end_turn"}, self.battlefield, enemy_orders=[])
+        self.assertFalse(after_turn["units"][0]["shield_raised"])
+
+    def test_shield_reduces_sight_and_only_blocks_visible_direct_attacks(self):
+        state = initial_state(self.battlefield)
+        self.assertIn((7, 6), visible_tiles(state, self.battlefield))
+        raised = self.toggle(state)
+        self.assertNotIn((7, 6), visible_tiles(raised, self.battlefield))
+        record_attack(raised, raised["units"][1], raised["units"][0], True, self.battlefield, damage=1)
+        self.assertEqual(raised["history"][-1]["damage"], 1)  # Hidden archer ambushes through the shield and armor.
+        self.assertNotIn("shield_blocked", raised["history"][-1])
+        raised = self.toggle(initial_state(self.battlefield))
+        raised["units"][1]["x"] = 5
+        record_attack(raised, raised["units"][1], raised["units"][0], False, self.battlefield, damage=3)
+        self.assertEqual(raised["history"][-1]["shield_blocked"], 1)
+        self.assertEqual(raised["history"][-1]["armor_blocked"], 1)
+        self.assertEqual(raised["history"][-1]["damage"], 1)
+        record_attack(raised, raised["units"][1], raised["units"][0], True, self.battlefield, damage=2)
+        self.assertEqual(raised["history"][-1]["shield_blocked"], 1)
+        self.assertEqual(raised["history"][-1]["damage"], 1)
+        record_attack(raised, raised["units"][1], raised["units"][0], True, self.battlefield,
+                      damage=1, weapon="catapult")
+        self.assertNotIn("shield_blocked", raised["history"][-1])
+
+    def test_night_shield_reduces_torch_and_dark_sight(self):
+        battlefield = {**self.battlefield, "night": True,
+                       "startPositions": [{"x": 2, "y": 6, "weapon": "sword", "tools": ["shield", "torch"]}]}
+        state = initial_state(battlefield)
+        self.assertIn((6, 6), visible_tiles(state, battlefield))
+        raised = apply_action(state, {"type": "raise_shield", "unit_id": 0, "raised": True}, battlefield)
+        self.assertNotIn((6, 6), visible_tiles(raised, battlefield))
+        self.assertIn((5, 6), visible_tiles(raised, battlefield))
+        raised["units"][0]["torch_lit"] = False
+        self.assertNotIn((4, 6), visible_tiles(raised, battlefield))
+        self.assertIn((3, 6), visible_tiles(raised, battlefield))
+
+    def test_invalid_orders_and_dropping_last_shield(self):
+        state = initial_state(self.battlefield)
+        for action in ({"type": "raise_shield", "unit_id": True, "raised": True},
+                       {"type": "raise_shield", "unit_id": 1, "raised": True},
+                       {"type": "raise_shield", "unit_id": 0, "raised": 1},
+                       {"type": "raise_shield", "unit_id": 0, "raised": True, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, self.battlefield)
+        for change in ({"tools": []}, {"move_points": 0}, {"fight_points": 0},
+                       {"mount_id": 0}, {"move_reserved": 1}, {"crouched": True}):
+            invalid = initial_state(self.battlefield)
+            invalid["units"][0].update(change)
+            with self.subTest(change=change), self.assertRaises(InvalidAction):
+                self.toggle(invalid)
+        veteran = initial_state(self.battlefield)
+        veteran["units"][0].update(rank="veteran", fight_points=2, fight_capacity=2)
+        raised = self.toggle(veteran)
+        with self.assertRaises(InvalidAction):
+            apply_action(raised, {"type": "crouch", "unit_id": 0}, self.battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(raised, {"type": "mount", "unit_id": 0, "horse_id": 0}, self.battlefield)
+        dropped = apply_action(raised, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, self.battlefield)
+        self.assertFalse(dropped["units"][0]["shield_raised"])
+        self.assertNotIn("shield_blocked", dropped["history"][-1])
+
+
 class CrouchTests(TestCase):
     def setUp(self):
         self.battlefield = default_map()

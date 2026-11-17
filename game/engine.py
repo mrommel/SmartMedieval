@@ -93,6 +93,7 @@ def normalize_unit(unit):
     result.setdefault("move_reserved", 0)
     result.setdefault("torch_lit", True)
     result.setdefault("crouched", False)
+    result.setdefault("shield_raised", False)
     return result
 
 
@@ -534,17 +535,18 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
             continue
         start = (unit["x"], unit["y"])
         visible.add(start)
+        sight_range = VISION_RANGE - (2 if unit.get("shield_raised") else 0)
         for y in range(max(0, unit["y"] - VISION_RANGE), min(battlefield["rows"], unit["y"] + VISION_RANGE + 1)):
             for x in range(max(0, unit["x"] - VISION_RANGE), min(battlefield["cols"], unit["x"] + VISION_RANGE + 1)):
                 tile = (x, y)
                 if tile in visible:
                     continue
                 distance = abs(x - unit["x"]) + abs(y - unit["y"])
-                if night and distance > VISION_RANGE:
+                if distance > sight_range:
                     continue
-                if night and not (distance <= NIGHT_VISION_RANGE
+                if night and not (distance <= NIGHT_VISION_RANGE - (1 if unit.get("shield_raised") else 0)
                                   or ("torch" in unit.get("tools", ()) and unit.get("torch_lit", True)
-                                      and distance <= TORCH_VISION_RANGE)
+                                      and distance <= TORCH_VISION_RANGE - (2 if unit.get("shield_raised") else 0))
                                   or tile in torch_bearers
                                   or any(abs(x - fx) + abs(y - fy) <= WATCHFIRE_LIGHT_RANGE
                                          and has_line_of_sight((fx, fy), tile, battlefield) for fx, fy in fires)):
@@ -852,6 +854,11 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
     if cover:
         target["cover_turn"] = state["turn"]
     horse = next((horse for horse in state.get("horses", ()) if horse["id"] == target.get("mount_id")), None)
+    shield_blocks = (target.get("shield_raised") and "shield" in target.get("tools", ())
+                     and (not fog or (attacker["x"], attacker["y"]) in visible_tiles(
+                         state, map_data, target.get("side", "attackers"))))
+    shield_blocked = min(damage, 1) if weapon != "catapult" and not cover and not horse and shield_blocks else 0
+    damage -= shield_blocked
     stance_blocked = min(damage, 1) if ranged and weapon != "catapult" and not cover and not horse and target.get("crouched") else 0
     damage -= stance_blocked
     absorbed = 0 if cover or horse else min(damage, armor_remaining(target, state["turn"]))
@@ -879,6 +886,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
         **({"stance_blocked": stance_blocked} if stance_blocked else {}),
+        **({"shield_blocked": shield_blocked} if shield_blocked else {}),
         **({"ambush": True} if ambush else {}),
         **({"witnessed": witnessed} if fog else {}),
         **({"horse_hit": True, "horse_killed": horse["health"] <= 0} if horse else {}),
@@ -1025,6 +1033,7 @@ def initial_state(map_data=MAP):
                 "reaction_reserved": False,
                 "move_reserved": 0,
                 "crouched": False,
+                "shield_raised": False,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
             }
@@ -1090,7 +1099,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
             "mount", "dismount", "reserve_reaction", "reserve_movement",
-            "crouch", "withdraw",
+            "crouch", "raise_shield", "withdraw",
             "light_watchfire", "extinguish_watchfire", "toggle_torch"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
@@ -1148,13 +1157,29 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Choose a soldier to crouch.")
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
-        if (unit is None or unit["fight_points"] < 1 or unit["crouched"]
+        if (unit is None or unit["fight_points"] < 1 or unit["crouched"] or unit["shield_raised"]
                 or unit.get("mount_id") is not None or unit["move_reserved"]):
             raise InvalidAction("Crouching requires one fight point, no mount and no movement reservation.")
         unit["fight_points"] -= 1
         unit["move_points"] = 0
         unit["crouched"] = True
         return next_state
+    if action["type"] == "raise_shield":
+        if (set(action) != {"type", "unit_id", "raised"} or type(action["unit_id"]) is not int
+                or type(action["raised"]) is not bool):
+            raise InvalidAction("Choose a soldier and whether to raise their shield.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (unit is None or "shield" not in unit["tools"] or unit["shield_raised"] == action["raised"]
+                or action["raised"] and (unit["fight_points"] < 1 or unit["move_points"] < 1
+                                          or unit["crouched"] or unit.get("mount_id") is not None
+                                          or unit["move_reserved"])):
+            raise InvalidAction("Raising a carried shield requires one fight point, one move point and no mount or movement reserve.")
+        if action["raised"]:
+            unit["fight_points"] -= 1
+            unit["move_points"] -= 1
+        unit["shield_raised"] = action["raised"]
+        return remember_visibility(next_state, map_data)
     if action["type"] == "toggle_torch":
         if (set(action) != {"type", "unit_id", "lit"} or type(action["unit_id"]) is not int
                 or type(action["lit"]) is not bool):
@@ -1237,7 +1262,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Choose a soldier and a valid horse.")
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
-        if unit is None or unit["fight_points"] < 1 or unit["crouched"]:
+        if unit is None or unit["fight_points"] < 1 or unit["crouched"] or unit["shield_raised"]:
             raise InvalidAction("A living soldier needs one fight point to mount or dismount.")
         if mounting:
             horse = next((horse for horse in next_state["horses"] if horse["id"] == action["horse_id"]), None)
@@ -1354,6 +1379,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             unit["tools"].pop(index)
             if name == "torch" and "torch" not in unit["tools"]:
                 unit["torch_lit"] = True
+            if name == "shield" and "shield" not in unit["tools"]:
+                unit["shield_raised"] = False
         refresh_inventory_movement(unit, old_penalty, next_state["items"])
         unit["fight_points"] -= 1
         next_state["history"] = (next_state["history"] + [{
@@ -1670,6 +1697,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 unit["reaction_reserved"] = False
                 unit["move_reserved"] = 0
                 unit["crouched"] = False
+                unit["shield_raised"] = False
                 unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)

@@ -88,7 +88,7 @@
     - [x] Let soldiers extinguish or relight carried torches for one fight point, trading night vision for concealment without dropping the tool.
 - [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
   - [x] Add a crouch stance costing one fight point and all remaining move points; reduce each incoming ranged shot by one damage until the next turn, before armor, without mitigating melee or catapults.
-  - [ ] Add shield-raising and visibility-aware cover trade-offs.
+  - [x] Add shield-raising and visibility-aware cover trade-offs: carried shields block one direct damage from visible attackers at the cost of one FP, one MP, and reduced sight.
 - [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
 - [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.
 - [ ] Support withdrawing surviving units through a designated exit and show a mission debrief with casualties, rescued villagers, prisoners, and recovered equipment.

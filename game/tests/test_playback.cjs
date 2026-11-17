@@ -157,6 +157,29 @@ test("crouch costs a fight point and shows its movement and ranged-defense trade
   assert.match(game.get("selected-stats").textContent, /−1 incoming ranged damage/);
 });
 
+test("shield tool enables a sight-limited defensive stance and can be lowered freely", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const button = game.get("raise-shield");
+  assert.equal(button.hidden, true);
+  game.snapshot.state.units[0].tools = ["shield"];
+  await game.get("continue-game").fire("click");
+  assert.equal(button.hidden, false);
+  assert.equal(button.disabled, false);
+  await button.fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "raise_shield", unit_id: 0, raised: true }));
+  game.snapshot.state.units[0].shield_raised = true;
+  game.snapshot.state.units[0].fight_points = 0;
+  game.snapshot.state.units[0].move_points = 2;
+  await game.get("continue-game").fire("click");
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-pressed"], "true");
+  assert.match(game.get("selected-stats").textContent, /sight reduced/);
+  assert.equal(game.get("crouch").disabled, true);
+  await button.fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "raise_shield", unit_id: 0, raised: false }));
+});
+
 test("reaction control reserves a fight point and shows the selected soldier's reservation", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");

@@ -11,6 +11,24 @@ from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameCatalogApiTests(TestCase):
+    def test_seeded_shieldwall_keeps_custom_games_and_active_matches(self):
+        upgrade = import_module("game.migrations.0016_seed_shieldwall")
+        game = SingleGame.objects.get(slug="greywatch-shieldwall")
+        self.assertIn("shield", game.map_definition["startPositions"][0]["tools"])
+        validate_map(game.map_definition)
+        self.assertEqual(list(Scenario.objects.get(slug="shieldwall-greywatch").games.all()), [game])
+        match = GameInstance.objects.create(single_game=game, source_game=game,
+                                            map_definition=deepcopy(game.map_definition),
+                                            state=initial_state(game.map_definition))
+        game.map_definition["startPositions"][0]["tools"] = ["rope"]
+        game.save(update_fields=["map_definition"])
+        schema_editor = type("Editor", (), {"connection": type("Connection", (), {"alias": "default"})()})()
+        upgrade.seed_shieldwall(apps, schema_editor)
+        game.refresh_from_db()
+        match.refresh_from_db()
+        self.assertEqual(game.map_definition["startPositions"][0]["tools"], ["rope"])
+        self.assertEqual(match.state["units"][0]["tools"], ["shield"])
+
     def test_seeded_reconnaissance_is_playable_and_preserves_existing_matches(self):
         upgrade = import_module("game.migrations.0014_seed_reconnaissance")
         game = SingleGame.objects.get(slug="greywatch-reconnaissance")
