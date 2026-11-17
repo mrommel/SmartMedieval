@@ -91,6 +91,7 @@ def normalize_unit(unit):
     result.setdefault("armor_equipped", result["armor"] is not None)
     result.setdefault("mount_id", None)
     result.setdefault("move_reserved", 0)
+    result.setdefault("torch_lit", True)
     return result
 
 
@@ -514,7 +515,7 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
     # A carried torch lights its bearer to either side, but only its own side gets
     # the longer torch sight radius. A fire lights tiles, not observers behind walls.
     torch_bearers = {(unit["x"], unit["y"]) for unit in state["units"]
-                     if "torch" in unit.get("tools", ())} if night else set()
+                     if "torch" in unit.get("tools", ()) and unit.get("torch_lit", True)} if night else set()
     for unit in state["units"]:
         if unit.get("side", "attackers") != side:
             continue
@@ -529,7 +530,8 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
                 if night and distance > VISION_RANGE:
                     continue
                 if night and not (distance <= NIGHT_VISION_RANGE
-                                  or "torch" in unit.get("tools", ()) and distance <= TORCH_VISION_RANGE
+                                  or ("torch" in unit.get("tools", ()) and unit.get("torch_lit", True)
+                                      and distance <= TORCH_VISION_RANGE)
                                   or tile in torch_bearers
                                   or any(abs(x - fx) + abs(y - fy) <= WATCHFIRE_LIGHT_RANGE
                                          and has_line_of_sight((fx, fy), tile, battlefield) for fx, fy in fires)):
@@ -986,6 +988,7 @@ def initial_state(map_data=MAP):
                 "z": tile_height(point["x"], point["y"], map_data),
                 "weapon": normalize_position(point)["weapon"],
                 "tools": list(point.get("tools", [])),
+                "torch_lit": True,
                 "armor": point.get("armor"),
                 "armor_equipped": point.get("armor") is not None,
                 "mount_id": None,
@@ -1062,7 +1065,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
             "mount", "dismount", "reserve_reaction", "reserve_movement",
-            "light_watchfire", "extinguish_watchfire"):
+            "light_watchfire", "extinguish_watchfire", "toggle_torch"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -1091,6 +1094,22 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "toggle_torch":
+        if (set(action) != {"type", "unit_id", "lit"} or type(action["unit_id"]) is not int
+                or type(action["lit"]) is not bool):
+            raise InvalidAction("Choose a soldier and whether to light their torch.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (not map_data.get("night") or unit is None or "torch" not in unit["tools"]
+                or unit["fight_points"] < 1 or unit["torch_lit"] == action["lit"]):
+            raise InvalidAction("A soldier needs a carried torch and one fight point to change its light.")
+        unit["torch_lit"] = action["lit"]
+        unit["fight_points"] -= 1
+        next_state["history"] = (next_state["history"] + [{
+            "turn": state["turn"], "type": "toggle_torch", "actor_id": unit["id"],
+            "actor_side": "attackers", "actor_weapon": unit["weapon"], "lit": unit["torch_lit"],
+        }])[-HISTORY_LIMIT:]
+        return remember_visibility(next_state, map_data)
     if action["type"] in ("light_watchfire", "extinguish_watchfire"):
         if (set(action) != {"type", "unit_id", "x", "y"}
                 or any(type(action[key]) is not int for key in ("unit_id", "x", "y"))):
@@ -1266,10 +1285,14 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         old_penalty = weight_penalty(unit, next_state["items"])
         if picking_up:
             next_state["items"].remove(item)
+            if name == "torch" and "torch" not in unit["tools"]:
+                unit["torch_lit"] = True
             unit["tools"].append(name)
         else:
             drop_equipment(next_state, unit, "tool", name)
             unit["tools"].pop(index)
+            if name == "torch" and "torch" not in unit["tools"]:
+                unit["torch_lit"] = True
         refresh_inventory_movement(unit, old_penalty, next_state["items"])
         unit["fight_points"] -= 1
         next_state["history"] = (next_state["history"] + [{

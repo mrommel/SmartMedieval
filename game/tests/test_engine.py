@@ -279,6 +279,19 @@ class NightBattleTests(TestCase):
         legacy = apply_action(initial_state(battlefield), action, battlefield)
         self.assertNotIn("ambush", legacy["history"][-1])
 
+    def test_extinguishing_torch_restores_ambush_when_ally_spots_target(self):
+        battlefield = self.ambush_map()
+        battlefield["startPositions"][0]["tools"] = ["torch"]
+        state = initial_state(battlefield)
+        self.assertIn((2, 6), visible_tiles(state, battlefield, "defenders"))
+        dark = apply_action(state, {"type": "toggle_torch", "unit_id": 0, "lit": False}, battlefield)
+        self.assertNotIn((2, 6), visible_tiles(dark, battlefield, "defenders"))
+        self.assertIn((7, 6), visible_tiles(dark, battlefield))
+        dark = apply_action(dark, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        attacked = apply_action(dark, {"type": "ranged_attack", "unit_id": 0, "target_id": 2}, battlefield)
+        self.assertTrue(attacked["history"][-1]["ambush"])
+        self.assertEqual(attacked["history"][-1]["damage"], 2)
+
     def test_ambush_still_respects_cover_armor_and_indirect_fire(self):
         battlefield = self.ambush_map()
         battlefield["objects"] = [{"x": 6, "y": 5, "type": "fence"}]
@@ -346,6 +359,57 @@ class NightBattleTests(TestCase):
         self.assertNotIn((7, 6), visible_tiles(dropped, battlefield))
         self.assertNotIn((2, 6), visible_tiles(dropped, battlefield, "defenders"))
         self.assertIn({"x": 7, "y": 6}, dropped["explored"])
+
+    def test_torch_toggle_changes_sight_without_dropping_or_changing_load(self):
+        battlefield = self.night_map()
+        battlefield["startPositions"][0]["tools"] = ["torch"]
+        state = initial_state(battlefield)
+        del state["units"][0]["torch_lit"]  # Old saved matches start with lit torches.
+        dark = apply_action(state, {"type": "toggle_torch", "unit_id": 0, "lit": False}, battlefield)
+        self.assertNotIn("torch_lit", state["units"][0])
+        self.assertFalse(dark["units"][0]["torch_lit"])
+        self.assertEqual(dark["units"][0]["tools"], ["torch"])
+        self.assertEqual(dark["units"][0]["move_points"], state["units"][0]["move_points"])
+        self.assertEqual(dark["units"][0]["fight_points"], 0)
+        self.assertEqual(dark["history"][-1]["lit"], False)
+        self.assertNotIn((7, 6), visible_tiles(dark, battlefield))
+        self.assertNotIn((2, 6), visible_tiles(dark, battlefield, "defenders"))
+        self.assertIn({"x": 7, "y": 6}, dark["explored"])
+        with self.assertRaises(InvalidAction):
+            apply_action(dark, {"type": "toggle_torch", "unit_id": 0, "lit": True}, battlefield)
+        next_turn = apply_action(dark, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        self.assertFalse(next_turn["units"][0]["torch_lit"])
+        lit = apply_action(next_turn, {"type": "toggle_torch", "unit_id": 0, "lit": True}, battlefield)
+        self.assertIn((7, 6), visible_tiles(lit, battlefield))
+        self.assertIn((2, 6), visible_tiles(lit, battlefield, "defenders"))
+
+    def test_torch_toggle_rejects_invalid_orders_and_pickup_relites_torch(self):
+        battlefield = self.night_map()
+        battlefield["startPositions"][0]["tools"] = ["torch"]
+        state = initial_state(battlefield)
+        base = {"type": "toggle_torch", "unit_id": 0, "lit": False}
+        for action in ({**base, "unit_id": True}, {**base, "unit_id": 1},
+                       {**base, "lit": 0}, {**base, "lit": True},
+                       {**base, "extra": 1}, {"type": "toggle_torch", "unit_id": 0}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, battlefield)
+        battlefield["night"] = False
+        with self.assertRaises(InvalidAction):
+            apply_action(state, base, battlefield)
+        battlefield["night"] = True
+        state["units"][0]["tools"] = []
+        with self.assertRaises(InvalidAction):
+            apply_action(state, base, battlefield)
+        state["units"][0]["tools"] = ["torch"]
+        dark = apply_action(state, base, battlefield)
+        next_turn = apply_action(dark, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        dropped = apply_action(next_turn, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, battlefield)
+        self.assertTrue(dropped["units"][0]["torch_lit"])
+        next_turn = apply_action(dropped, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        recovered = apply_action(next_turn, {"type": "pickup_tool", "unit_id": 0,
+                                             "item_id": dropped["items"][-1]["id"]}, battlefield)
+        self.assertTrue(recovered["units"][0]["torch_lit"])
+        self.assertIn((7, 6), visible_tiles(recovered, battlefield))
 
     def test_watchfires_light_tiles_for_both_sides_without_seeing_through_walls(self):
         battlefield = self.night_map()

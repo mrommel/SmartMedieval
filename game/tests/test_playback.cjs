@@ -162,6 +162,34 @@ test("nearby watchfire controls extinguish and relight saved fires", async () =>
   assert.equal(button.disabled, true);
 });
 
+test("torch control changes light without dropping the tool", async () => {
+  const game = setup();
+  game.snapshot.map.night = true;
+  game.snapshot.map.fog_of_war = true;
+  game.snapshot.state.units[0].tools = ["torch"];
+  await game.get("continue-game").fire("click");
+  const button = game.get("toggle-torch");
+  assert.equal(button.hidden, false);
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-pressed"], "true");
+  assert.match(game.get("selected-stats").textContent, /torch \(lit\)/);
+  await button.fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)),
+    JSON.stringify({ type: "toggle_torch", unit_id: 0, lit: false }));
+  game.snapshot.state.units[0].torch_lit = false;
+  await game.get("continue-game").fire("click");
+  assert.equal(button["aria-pressed"], "false");
+  assert.match(game.get("selected-stats").textContent, /torch \(unlit\)/);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).lit, true);
+  game.snapshot.state.units[0].fight_points = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(button.disabled, true);
+  game.snapshot.state.units[0].tools = [];
+  await game.get("continue-game").fire("click");
+  assert.equal(button.hidden, true);
+});
+
 test("movement reservation control shows reserved MP and allows cancellation", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");

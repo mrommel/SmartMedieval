@@ -84,6 +84,32 @@ class GameInstanceApiTests(TestCase):
         self.assertIn({"x": 7, "y": 6}, dropped["state"]["explored"])
         self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dropped["state"])
 
+    def test_toggling_torch_persists_and_changes_visible_enemy_roster(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True, night=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "crossbow", "tools": ["torch"]}],
+                           enemyStartPositions=[{"x": 7, "y": 6, "weapon": "sword"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 2)
+        dark = self.action(0, {"type": "toggle_torch", "unit_id": 0, "lit": False}).json()
+        self.assertEqual(dark["revision"], 1)
+        self.assertEqual(len(dark["state"]["units"]), 1)
+        self.assertFalse(dark["state"]["units"][0]["torch_lit"])
+        self.assertIn({"x": 7, "y": 6}, dark["state"]["explored"])
+        self.assertNotIn({"x": 7, "y": 6}, dark["state"]["visible"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dark["state"])
+        self.assertFalse(GameInstance.objects.get(pk=started["id"]).state["units"][0]["torch_lit"])
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "toggle_torch", "unit_id": 0, "lit": True}).status_code, 400)
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 200)
+        lit = self.action(2, {"type": "toggle_torch", "unit_id": 0, "lit": True}).json()
+        self.assertEqual(len(lit["state"]["units"]), 2)
+        self.assertTrue(lit["state"]["units"][0]["torch_lit"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], lit["state"])
+
     def test_night_ambush_is_persisted_without_exposing_hidden_roster(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True, night=True,

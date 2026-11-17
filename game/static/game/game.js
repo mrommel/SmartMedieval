@@ -38,6 +38,7 @@ import { previewMovement } from "./path_preview.js";
   const dropToolButton = document.getElementById("drop-tool");
   const watchfireTarget = document.getElementById("watchfire-target");
   const toggleWatchfireButton = document.getElementById("toggle-watchfire");
+  const toggleTorchButton = document.getElementById("toggle-torch");
   const armorButton = document.getElementById("equip-armor");
   const mountButton = document.getElementById("mount-horse");
   const pauseButton = document.getElementById("pause-game");
@@ -108,6 +109,11 @@ import { previewMovement } from "./path_preview.js";
     watchfireTarget.disabled = pendingAction || paused || ended || !nearbyFires.length;
     toggleWatchfireButton.disabled = watchfireTarget.disabled || !medic?.fight_points;
     toggleWatchfireButton.textContent = out ? "Light watchfire (1 FP)" : "Extinguish watchfire (1 FP)";
+    const hasTorch = Boolean(medic?.tools?.includes("torch"));
+    toggleTorchButton.hidden = !mapData?.night || !hasTorch;
+    toggleTorchButton.disabled = pendingAction || paused || ended || !hasTorch || !medic.fight_points;
+    toggleTorchButton.textContent = medic?.torch_lit === false ? "Light torch (1 FP)" : "Extinguish torch (1 FP)";
+    toggleTorchButton.setAttribute("aria-pressed", String(hasTorch && medic.torch_lit !== false));
     reactionButton.disabled = pendingAction || paused || ended || !medic ||
       (!medic.reaction_reserved && (!medic.fight_points || !["sword", "longbow", "crossbow"].includes(medic.weapon) || medic.reload_turns > 0));
     reactionButton.textContent = medic?.reaction_reserved ? "Cancel reaction" : "Reserve attack (1 FP)";
@@ -544,7 +550,8 @@ import { previewMovement } from "./path_preview.js";
           simulation.horses.some(item => item.rider_id === null && item.x === unit.x && item.y === unit.y)
             ? "Available here · mount for one fight point" : "On foot"),
         detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
-        detailRow("Tools", unit.tools?.length ? unit.tools.join(", ") : "none"),
+        detailRow("Tools", unit.tools?.length ? unit.tools.map(tool =>
+          tool === "torch" && mapData?.night ? `torch (${unit.torch_lit === false ? "unlit" : "lit"})` : tool).join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(gear.length ? [detailRow("Equipment here", gear.map(equipmentName).join(", "))] : []),
         ...(groundTools.length ? [detailRow("Tools here", groundTools.map(item => item.name).join(", "))] : []),
@@ -595,6 +602,8 @@ import { previewMovement } from "./path_preview.js";
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_equipment" ? "recovered" : "dropped"} ${event.equipment}${event.type === "drop_armor" || event.equipment === "mail" || event.equipment === "leather" ? " armor" : ""}.`;
       } else if (event.type === "pickup_tool" || event.type === "drop_tool") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "pickup_tool" ? "picked up" : "dropped"} ${event.tool} tool.`;
+      } else if (event.type === "toggle_torch") {
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.lit ? "lit" : "extinguished"} their torch.`;
       } else if (event.type === "light_watchfire" || event.type === "extinguish_watchfire") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "light_watchfire" ? "lit" : "extinguished"} watchfire at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "use_item") {
@@ -629,7 +638,7 @@ import { previewMovement } from "./path_preview.js";
       : "Click open ground to spend move points. Houses marked D can be entered through their doors; their open roofs show interior tiles. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.";
     if (mapData.fog_of_war) document.getElementById("mission-help").textContent +=
       (mapData.night
-        ? " Night battle: allies see two steps in the dark. Carrying a torch extends sight to five steps, but also reveals its bearer to enemies up to six steps away. Lit watchfires light tiles within three steps for both sides. Walls still block sight. Drop or recover a torch as a tool (one fight point); use watchfire controls beside a fire to extinguish or relight it (one fight point)."
+        ? " Night battle: allies see two steps in the dark. A lit carried torch extends sight to five steps, but reveals its bearer to enemies up to six steps away. Lit watchfires light tiles within three steps for both sides. Walls still block sight. Extinguish or relight a carried torch for one fight point; use watchfire controls beside a fire to extinguish or relight it (one fight point)."
         : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage,
@@ -924,6 +933,12 @@ import { previewMovement } from "./path_preview.js";
     const [x, y] = watchfireTarget.value.split(",").map(Number);
     const out = simulation.extinguishedWatchfires.some(fire => fire.x === x && fire.y === y);
     sendAction({ type: out ? "light_watchfire" : "extinguish_watchfire", unit_id: soldier.id, x, y });
+  });
+  toggleTorchButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (soldier && !toggleTorchButton.disabled) {
+      sendAction({ type: "toggle_torch", unit_id: soldier.id, lit: soldier.torch_lit === false });
+    }
   });
   mountButton.addEventListener("click", () => {
     const soldier = selectedMedic();
