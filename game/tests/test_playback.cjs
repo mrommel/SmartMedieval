@@ -138,6 +138,24 @@ test("reaction control reserves a fight point and shows the selected soldier's r
   assert.equal(game.actions.at(-1).reserved, false);
 });
 
+test("movement reservation control shows reserved MP and allows cancellation", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const button = game.get("reserve-movement");
+  assert.equal(button.disabled, false);
+  assert.match(button.textContent, /3 MP/);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).type, "reserve_movement");
+  assert.equal(game.actions.at(-1).reserved, true);
+  game.snapshot.state.units[0].move_reserved = 3;
+  game.snapshot.state.units[0].move_points = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(button["aria-pressed"], "true");
+  assert.match(game.get("selected-stats").textContent, /3 MP held/);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).reserved, false);
+});
+
 test("fog shrouds unseen tiles and does not report lost contact as a casualty", async () => {
   const game = setup();
   game.snapshot.map.fog_of_war = true;

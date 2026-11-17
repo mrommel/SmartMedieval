@@ -19,6 +19,106 @@ class ReactionTests(TestCase):
     def reserve(self, state, battlefield, reserved=True):
         return apply_action(state, {"type": "reserve_reaction", "unit_id": 0, "reserved": reserved}, battlefield)
 
+    def reserve_movement(self, state, battlefield, reserved=True):
+        return apply_action(state, {"type": "reserve_movement", "unit_id": 0, "reserved": reserved}, battlefield)
+
+    def test_movement_reservation_validation_cancel_and_legacy_state(self):
+        battlefield = self.battlefield()
+        original = initial_state(battlefield)
+        del original["units"][0]["move_reserved"]
+        for action in ({"type": "reserve_movement", "unit_id": 0, "reserved": 1},
+                       {"type": "reserve_movement", "unit_id": True, "reserved": True},
+                       {"type": "reserve_movement", "unit_id": 1, "reserved": True},
+                       {"type": "reserve_movement", "unit_id": 0, "reserved": True, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(original, action, battlefield)
+        armed = self.reserve_movement(original, battlefield)
+        self.assertEqual((armed["units"][0]["move_points"], armed["units"][0]["move_reserved"]), (0, 4))
+        self.assertEqual(original["units"][0]["move_points"], 4)
+        with self.assertRaises(InvalidAction):
+            self.reserve_movement(armed, battlefield)
+        with self.assertRaises(InvalidAction):
+            apply_action(armed, {"type": "move", "units": [0], "x": 1, "y": 6}, battlefield)
+        cancelled = self.reserve_movement(armed, battlefield, False)
+        self.assertEqual((cancelled["units"][0]["move_points"], cancelled["units"][0]["move_reserved"]), (4, 0))
+        with self.assertRaises(InvalidAction):
+            self.reserve_movement(cancelled, battlefield, False)
+        spent = initial_state(battlefield)
+        spent["units"][0]["move_points"] = 0
+        with self.assertRaises(InvalidAction):
+            self.reserve_movement(spent, battlefield)
+
+    def test_movement_reaction_evasion_precedes_enemy_attack_and_expires(self):
+        battlefield = self.battlefield()
+        armed = self.reserve_movement(initial_state(battlefield), battlefield)
+        result = apply_action(armed, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 3, "y": 6}])
+        self.assertEqual((result["units"][0]["x"], result["units"][0]["y"]), (1, 6))
+        self.assertEqual(result["units"][0]["health"], 3)
+        self.assertEqual(result["history"], [])
+        self.assertEqual(result["units"][0]["move_reserved"], 0)
+        self.assertEqual(result["units"][0]["move_points"], 4)
+        idle = apply_action(armed, {"type": "end_turn"}, battlefield, enemy_orders=[])
+        self.assertEqual((idle["units"][0]["x"], idle["units"][0]["move_reserved"]), (2, 0))
+
+    def test_movement_reaction_respects_terrain_cost(self):
+        battlefield = self.battlefield()
+        battlefield["terrain"] = [{"x": 1, "y": 6, "type": "grass"},
+                                  {"x": 2, "y": 5, "type": "mud"},
+                                  {"x": 2, "y": 7, "type": "swamp"}]
+        state = initial_state(battlefield)
+        state["units"][0]["move_points"] = 2
+        armed = self.reserve_movement(state, battlefield)
+        result = apply_action(armed, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 3, "y": 6}])
+        self.assertEqual((result["units"][0]["x"], result["units"][0]["y"]), (1, 6))
+        state["units"][0]["move_points"] = 1
+        armed = self.reserve_movement(state, battlefield)
+        result = apply_action(armed, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 3, "y": 6}])
+        self.assertEqual((result["units"][0]["x"], result["units"][0]["y"]), (2, 6))
+
+    def test_movement_reaction_does_not_enter_occupied_or_blocked_exits(self):
+        battlefield = self.battlefield()
+        battlefield["objects"] = [{"x": 1, "y": 6, "type": "rock"},
+                                  {"x": 2, "y": 5, "type": "tree"}]
+        battlefield["startPositions"].append({"x": 2, "y": 7, "weapon": "sword"})
+        state = self.reserve_movement(initial_state(battlefield), battlefield)
+        result = apply_action(state, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 2, "x": 3, "y": 6}])
+        self.assertEqual((result["units"][0]["x"], result["units"][0]["y"]), (2, 6))
+        self.assertEqual(result["units"][0]["health"], 2)
+        self.assertEqual(result["units"][0]["move_reserved"], 0)
+
+    def test_reservation_reconciles_equipment_weight_changes(self):
+        battlefield = self.battlefield("crossbow")
+        state = self.reserve_movement(initial_state(battlefield), battlefield)
+        self.assertEqual(state["units"][0]["move_reserved"], 3)
+        state = apply_action(state, {"type": "drop_weapon", "unit_id": 0}, battlefield)
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["move_points"],
+                          state["units"][0]["move_reserved"]), (4, 1, 3))
+        state = self.reserve_movement(state, battlefield, False)
+        self.assertEqual((state["units"][0]["move_points"], state["units"][0]["move_reserved"]), (4, 0))
+        battlefield = self.battlefield("sword")
+        battlefield["items"] = [{"x": 2, "y": 6, "type": "armor", "name": "mail"}]
+        state = self.reserve_movement(initial_state(battlefield), battlefield)
+        state = apply_action(state, {"type": "pickup_equipment", "unit_id": 0, "item_id": 0}, battlefield)
+        self.assertEqual((state["units"][0]["move_capacity"], state["units"][0]["move_reserved"]), (3, 3))
+        state = self.reserve_movement(state, battlefield, False)
+        self.assertEqual(state["units"][0]["move_points"], 3)
+
+    def test_mounted_movement_reaction_moves_horse_and_combines_with_attack(self):
+        battlefield = self.battlefield()
+        battlefield["horses"] = [{"x": 2, "y": 6}]
+        state = initial_state(battlefield)
+        state["units"][0].update(rank="veteran", fight_points=2, fight_capacity=2)
+        state = apply_action(state, {"type": "mount", "unit_id": 0, "horse_id": 0}, battlefield)
+        state = self.reserve_movement(self.reserve(state, battlefield), battlefield)
+        result = apply_action(state, {"type": "end_turn"}, battlefield,
+                              enemy_orders=[{"unit_id": 1, "x": 3, "y": 6}])
+        self.assertEqual((result["units"][0]["x"], result["horses"][0]["x"]), (1, 1))
+        self.assertTrue(result["history"][-1]["reaction"])
+
     def test_reservation_cost_cancellation_and_validation(self):
         battlefield = self.battlefield()
         original = initial_state(battlefield)

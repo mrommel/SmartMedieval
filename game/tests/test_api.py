@@ -54,6 +54,24 @@ class GameInstanceApiTests(TestCase):
         self.assertFalse(ended["state"]["units"][0]["reaction_reserved"])
         self.assertEqual(self.client.get(reverse("current-game")).json()["state"], ended["state"])
 
+    def test_reserved_movement_survives_resume_and_evades_during_ai_turn(self):
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword"}]
+        battlefield["enemyStartPositions"] = [{"x": 5, "y": 6, "weapon": "sword"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        reserved = self.action(started["revision"], {"type": "reserve_movement", "unit_id": 0, "reserved": True}).json()
+        self.assertEqual(reserved["revision"], 1)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["units"][0]["move_reserved"], 4)
+        self.assertEqual(self.action(0, {"type": "reserve_movement", "unit_id": 0, "reserved": False}).status_code, 409)
+        self.set_ai_orders([{"unit_id": 1, "x": 3, "y": 6}])
+        ended = self.action(1, {"type": "end_turn"}).json()
+        self.assertEqual((ended["state"]["units"][0]["x"], ended["state"]["units"][0]["health"]), (1, 3))
+        self.assertEqual(ended["state"]["units"][0]["move_reserved"], 0)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], ended["state"])
+
     def test_authored_equipment_launch_and_resume(self):
         battlefield = default_map()
         battlefield["items"] = [{"x": 2, "y": 6, "type": "weapon", "name": "longbow"},

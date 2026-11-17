@@ -86,6 +86,7 @@ def normalize_unit(unit):
     result.setdefault("armor", None)
     result.setdefault("armor_equipped", result["armor"] is not None)
     result.setdefault("mount_id", None)
+    result.setdefault("move_reserved", 0)
     return result
 
 
@@ -547,6 +548,40 @@ def trigger_reactions(state, target, map_data, combat_events=None):
         state["history"][-1]["reaction"] = True
 
 
+def trigger_movement_reactions(state, target, map_data):
+    """Evade an adjacent visible mover by one affordable, unoccupied legal step."""
+    for soldier in state["units"]:
+        budget = soldier.get("move_reserved", 0)
+        if not budget or soldier.get("side", "attackers") != "attackers":
+            continue
+        start = (soldier["x"], soldier["y"])
+        threat = (target["x"], target["y"])
+        if (abs(start[0] - threat[0]) + abs(start[1] - threat[1]) != 1
+                or soldier["z"] != target["z"]
+                or not can_step(start, threat, map_data)
+                or map_data.get("fog_of_war", False) and threat not in visible_tiles(state, map_data)):
+            continue
+        occupied = {(unit["x"], unit["y"]) for unit in state["units"] if unit is not soldier}
+        mounted = soldier.get("mount_id") is not None
+        costs = terrain_cost_index(map_data, mounted)
+        options = [tile for tile in neighbors(*start)
+                   if tile not in occupied and costs.get(tile, 1) <= budget
+                   and can_step(start, tile, map_data, mounted=mounted)
+                   and abs(tile[0] - threat[0]) + abs(tile[1] - threat[1]) > 1]
+        if not options:
+            continue
+        # Prefer distance, then lower terrain cost and stable map coordinates.
+        tile = min(options, key=lambda point: (-abs(point[0] - threat[0]) - abs(point[1] - threat[1]),
+                                                costs.get(point, 1), point[0], point[1]))
+        soldier["x"], soldier["y"] = tile
+        soldier["z"] = tile_height(*tile, map_data)
+        soldier["facing"] = 1 if tile[0] >= start[0] else -1
+        soldier["move_reserved"] = 0
+        for horse in state["horses"]:
+            if horse["rider_id"] == soldier["id"]:
+                horse["x"], horse["y"] = tile
+
+
 def terrain_cost_index(map_data, mounted=False):
     costs = MOUNTED_TERRAIN_COSTS if mounted else TERRAIN_COSTS
     return {(tile["x"], tile["y"]): costs.get(tile["type"])
@@ -634,9 +669,11 @@ def move_allowance(unit, items=()):
 def change_mount_movement(unit, old_capacity, items):
     """Change riding allowance without restoring points already spent this turn."""
     capacity = max(1, unit.get("move_capacity", old_capacity) + move_allowance(unit, items) - old_capacity)
-    spent = max(0, unit.get("move_capacity", old_capacity) - unit["move_points"])
+    reserved = unit.get("move_reserved", 0)
+    spent = max(0, unit.get("move_capacity", old_capacity) - unit["move_points"] - reserved)
+    unit["move_reserved"] = min(reserved, max(0, capacity - spent))
     unit["move_capacity"] = capacity
-    unit["move_points"] = max(0, capacity - spent)
+    unit["move_points"] = max(0, capacity - spent - unit["move_reserved"])
 
 
 def refresh_inventory_movement(unit, old_penalty, items):
@@ -648,12 +685,15 @@ def refresh_inventory_movement(unit, old_penalty, items):
     if "move_capacity" not in unit:
         # Older matches do not record how many points were already spent this turn.
         unit["move_points"] = max(0, unit["move_points"] + old_penalty - new_penalty)
+        unit["move_reserved"] = min(unit.get("move_reserved", 0), move_allowance(unit, items))
         return
     previous_capacity = unit["move_capacity"]
     capacity = max(1, previous_capacity + old_penalty - new_penalty)
-    spent = max(0, previous_capacity - unit["move_points"])
+    reserved = unit.get("move_reserved", 0)
+    spent = max(0, previous_capacity - unit["move_points"] - reserved)
+    unit["move_reserved"] = min(reserved, max(0, capacity - spent))
     unit["move_capacity"] = capacity
-    unit["move_points"] = max(0, capacity - spent)
+    unit["move_points"] = max(0, capacity - spent - unit["move_reserved"])
 
 
 def fight_allowance(unit):
@@ -908,6 +948,7 @@ def initial_state(map_data=MAP):
                 "fight_capacity": FIGHT_POINTS,
                 "reload_turns": 0,
                 "reaction_reserved": False,
+                "move_reserved": 0,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
             }
@@ -967,7 +1008,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "move", "attack", "ranged_attack", "capture", "promote", "end_turn",
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
-            "mount", "dismount", "reserve_reaction"):
+            "mount", "dismount", "reserve_reaction", "reserve_movement"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
         raise InvalidAction("The battle has already ended.")
@@ -1008,6 +1049,22 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("This soldier cannot change their reaction reservation.")
         unit["reaction_reserved"] = action["reserved"]
         unit["fight_points"] += -1 if action["reserved"] else 1
+        return next_state
+    if action["type"] == "reserve_movement":
+        if (set(action) != {"type", "unit_id", "reserved"} or type(action["unit_id"]) is not int
+                or type(action["reserved"]) is not bool):
+            raise InvalidAction("Choose a soldier and whether to reserve movement.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (unit is None or bool(unit["move_reserved"]) == action["reserved"]
+                or action["reserved"] and unit["move_points"] < 1):
+            raise InvalidAction("This soldier cannot change their movement reservation.")
+        if action["reserved"]:
+            unit["move_reserved"] = unit["move_points"]
+            unit["move_points"] = 0
+        else:
+            unit["move_points"] += unit["move_reserved"]
+            unit["move_reserved"] = 0
         return next_state
     if action["type"] in ("mount", "dismount"):
         mounting = action["type"] == "mount"
@@ -1373,6 +1430,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 raise InvalidAction("Invalid defender destination.")
             terrain_costs = terrain_cost_index(map_data, unit["mount_id"] is not None)
             for tile in path:
+                if any((other["x"], other["y"]) == tile for other in next_state["units"] if other is not unit):
+                    break
                 old_x = unit["x"]
                 unit["x"], unit["y"] = tile
                 unit["z"] = tile_height(*tile, map_data)
@@ -1384,6 +1443,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 trigger_reactions(next_state, unit, map_data, combat_events)
                 if unit not in next_state["units"]:
                     break
+                trigger_movement_reactions(next_state, unit, map_data)
         for defender in [unit for unit in next_state["units"]
                          if unit.get("side") == "defenders" and not unit.get("is_king")]:
             if defender["fight_points"] < 1:
@@ -1436,6 +1496,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
                 unit["reaction_reserved"] = False
+                unit["move_reserved"] = 0
                 unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)

@@ -722,6 +722,9 @@ export function createBattlefieldRenderer(canvas) {
     for (const tile of scene.reactionTiles || []) {
       polygon(diamond(tile.x, tile.y), "rgba(240,185,69,.17)", "rgba(255,215,123,.68)", 1);
     }
+    for (const tile of scene.movementReactionTiles || []) {
+      polygon(diamond(tile.x, tile.y), "rgba(65,169,231,.18)", "rgba(98,209,255,.82)", 1);
+    }
     drawProjectiles(time);
     drawFog(simulation.visible, simulation.explored);
     if (cursor.visible) {
