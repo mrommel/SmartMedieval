@@ -23,6 +23,7 @@ import { previewMovement } from "./path_preview.js";
   const crouchButton = document.getElementById("crouch");
   const promoteButton = document.getElementById("promote");
   const captureButton = document.getElementById("capture-king");
+  const withdrawButton = document.getElementById("withdraw-unit");
   const aimButton = document.getElementById("aim-catapult");
   const fireButton = document.getElementById("fire-catapult");
   const pickupButton = document.getElementById("pickup-potion");
@@ -172,6 +173,8 @@ import { previewMovement } from "./path_preview.js";
     promoteButton.disabled = pendingAction || paused || ended ||
       !promotionCandidate();
     captureButton.disabled = pendingAction || paused || ended || captureCandidate() === null;
+    withdrawButton.disabled = pendingAction || paused || ended || !medic?.fight_points ||
+      !mapData?.exit || medic.x !== mapData.exit.x || medic.y !== mapData.exit.y;
     aimButton.hidden = fireButton.hidden = !simulation.catapults.length;
     aimButton.disabled = pendingAction || paused || ended || !crew || crew.unit.mount_id != null || !crew.unit.fight_points || !crew.catapult.ammo;
     fireButton.disabled = pendingAction || paused || ended || !crew || !crew.unit.fight_points ||
@@ -637,6 +640,7 @@ import { previewMovement } from "./path_preview.js";
     mapData = snapshot.map;
     const throneMission = mapData.mission === "capture_king";
     captureButton.hidden = !throneMission;
+    withdrawButton.hidden = !mapData.exit;
     document.getElementById("objective-name").textContent = throneMission ? "THRONE ROOM" : "KEEP COURTYARD";
     document.getElementById("mission-help").textContent = throneMission
       ? "Reach the throne room. Defeat guards beside the king, then select a soldier with a sword on an adjacent tile at the same height and press Capture king (one fight point). Clicking the king also captures him when ready. Killing the king loses the battle; simply standing on the throne cannot win. End the turn to let defenders act and restore points."
@@ -645,6 +649,8 @@ import { previewMovement } from "./path_preview.js";
       (mapData.night
         ? " Night battle: allies see two steps in the dark. A lit carried torch extends sight to five steps, but reveals its bearer to enemies up to six steps away. Lit watchfires light tiles within three steps for both sides. Walls still block sight. Extinguish or relight a carried torch for one fight point; use watchfire controls beside a fire to extinguish or relight it (one fight point)."
         : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
+    if (mapData.exit) document.getElementById("mission-help").textContent +=
+      " At the marked exit, select a soldier and choose Withdraw (one fight point). Escaped soldiers keep their equipment. The battle ends once no soldiers remain in the field; at least one escape secures a retreat.";
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = mapData);
     renderer.setMap({ ...mapData, breaches: snapshot.state.breaches, wall_damage: snapshot.state.wall_damage,
       watchfires: (mapData.watchfires || []).map(fire => ({ ...fire, lit: !snapshot.state.extinguished_watchfires?.some(
@@ -708,15 +714,26 @@ import { previewMovement } from "./path_preview.js";
     renderHistory(snapshot.state.history);
     victoryNode.hidden = !simulation.captured && !simulation.defeated;
     victoryNode.classList.toggle("defeat", simulation.defeated);
+    const withdrawn = snapshot.state.withdrawn || [];
+    const retreated = withdrawn.length > 0 && !attackers.length;
+    const debrief = document.getElementById("mission-debrief");
+    debrief.hidden = !mapData.exit || (!simulation.captured && !simulation.defeated);
+    if (!debrief.hidden) {
+      const fallen = startingAttackerCount - attackers.length - withdrawn.length;
+      const recovered = withdrawn.reduce((count, unit) => count + Number(Boolean(unit.weapon)) +
+        Number(Boolean(unit.armor)) + (unit.tools?.length || 0) + (unit.items?.length || 0), 0);
+      debrief.textContent = `Mission debrief: ${withdrawn.length} withdrawn, ${fallen} fallen, ` +
+        `${attackers.length} still on the field. ${recovered} carried items and pieces of equipment evacuated.`;
+    }
     const kingAlive = mapData.fog_of_war ? !snapshot.state.king_fallen : defenders.some(unit => unit.is_king);
     victoryNode.querySelector(".victory-kicker").textContent = simulation.defeated
       ? throneMission && !kingAlive ? "THE KING HAS FALLEN" : "THE COMPANY HAS FALLEN"
-      : throneMission ? "THE KING IS CAPTIVE" : "GREYWATCH HAS FALLEN";
+      : retreated ? "THE COMPANY HAS WITHDRAWN" : throneMission ? "THE KING IS CAPTIVE" : "GREYWATCH HAS FALLEN";
     victoryNode.querySelector("h2").textContent = simulation.defeated ? "Your assault is broken."
-      : throneMission ? "The king is your prisoner." : "The keep is yours.";
+      : retreated ? "Your survivors escaped." : throneMission ? "The king is your prisoner." : "The keep is yours.";
     victoryNode.querySelector("p").textContent = simulation.defeated
       ? throneMission && !kingAlive ? "You needed the king alive. The mission has failed." : "No attackers remain on the field."
-      : throneMission ? "Your company captured the king alive." : "Your small band has secured the courtyard.";
+      : retreated ? "At least one soldier made it out through the exit." : throneMission ? "Your company captured the king alive." : "Your small band has secured the courtyard.";
     updatePromotion();
     updateMovementPreview();
   }
@@ -769,11 +786,11 @@ import { previewMovement } from "./path_preview.js";
       const combat = combatSummary(simulation.units, snapshot.state.units, snapshot.state.history);
       applySnapshot(snapshot);
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
-      if (!wasCaptured && simulation.captured) showToast(mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
+      if (!wasCaptured && simulation.captured) showToast(snapshot.state.capture_status === "WITHDRAWN" ? "Survivors escaped through the exit." : mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
       else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
         (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
         "The king was killed. Mission failed." : "Your company has been defeated.");
-      else showToast(combat || (action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
+      else showToast(combat || (action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (error.status === 409) {
         try {
@@ -984,6 +1001,10 @@ import { previewMovement } from "./path_preview.js";
   captureButton.addEventListener("click", () => {
     const unitId = captureCandidate();
     if (unitId !== null && !captureButton.disabled) sendAction({ type: "capture", unit_id: unitId });
+  });
+  withdrawButton.addEventListener("click", () => {
+    const unit = selectedMedic();
+    if (unit && !withdrawButton.disabled) sendAction({ type: "withdraw", unit_id: unit.id });
   });
   window.addEventListener("resize", resize);
 })();

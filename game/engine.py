@@ -121,7 +121,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war", "night", "watchfires"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war", "night", "watchfires", "exit"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     if "fog_of_war" in map_data and type(map_data["fog_of_war"]) is not bool:
         raise InvalidMap("fog_of_war must be true or false.")
@@ -145,7 +145,9 @@ def validate_map(map_data):
             or not (0 <= keep["left"] < keep["right"] < cols)
             or not (0 <= keep["top"] < keep["bottom"] < rows)):
         raise InvalidMap("Keep bounds must form a rectangle inside the map.")
-    for name in ("gate", "objective"):
+    for name in ("gate", "objective", "exit"):
+        if name == "exit" and name not in map_data:
+            continue
         point = map_data[name]
         if (not isinstance(point, dict) or set(point) != {"x", "y"}
                 or any(type(value) is not int for value in point.values())
@@ -275,6 +277,11 @@ def validate_map(map_data):
     objective = map_data["objective"]
     if is_house(objective["x"], objective["y"], map_data) or not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
+    exit_tile = map_data.get("exit")
+    if exit_tile and (exit_tile == objective or is_house(exit_tile["x"], exit_tile["y"], map_data)
+                      or not is_walkable(exit_tile["x"], exit_tile["y"], map_data)
+                      or tile_height(exit_tile["x"], exit_tile["y"], map_data) != 0):
+        raise InvalidMap("The exit must be an open ground tile away from the objective.")
     if mission == "capture_king" and not (keep["left"] < objective["x"] < keep["right"]
                                           and keep["top"] < objective["y"] < keep["bottom"]):
         raise InvalidMap("The throne must be inside the keep.")
@@ -319,6 +326,11 @@ def validate_map(map_data):
                          max_step_cost=move_allowance(position),
                          rope="rope" in position.get("tools", ())) is None:
                 raise InvalidMap("Every starting unit must be able to reach the objective.")
+            if name == "startPositions" and exit_tile and find_path(
+                    tile, (exit_tile["x"], exit_tile["y"]), map_data,
+                    max_step_cost=move_allowance(position),
+                    rope="rope" in position.get("tools", ())) is None:
+                raise InvalidMap("Every attacker must be able to reach the exit.")
             if name == "enemyStartPositions" and mission != "capture_king" and tile == (
                     objective["x"], objective["y"]):
                 raise InvalidMap("Defenders cannot start on the objective.")
@@ -1021,6 +1033,7 @@ def initial_state(map_data=MAP):
         "capture_progress": 0,
         "captured": False,
         "defeated": False,
+        "withdrawn": [],
         "history": [],
         "catapults": [
             {"id": index, "x": point["x"], "y": point["y"], "ammo": CATAPULT_AMMO,
@@ -1048,6 +1061,9 @@ def initial_state(map_data=MAP):
 def capture_status(state, map_data=MAP):
     if state.get("defeated", False):
         return "DEFEATED"
+    if state.get("withdrawn") and not any(unit.get("side", "attackers") == "attackers"
+                                           for unit in state["units"]):
+        return "WITHDRAWN"
     if state["captured"]:
         return "KING CAPTURED" if map_data.get("mission") == "capture_king" else "SECURED"
     if map_data.get("mission") == "capture_king":
@@ -1074,7 +1090,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
             "mount", "dismount", "reserve_reaction", "reserve_movement",
-            "crouch",
+            "crouch", "withdraw",
             "light_watchfire", "extinguish_watchfire", "toggle_torch"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
@@ -1095,6 +1111,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         }
         for unit in state["units"]
     ], "defeated": state.get("defeated", False),
+        "withdrawn": [dict(unit) for unit in state.get("withdrawn", [])],
         "history": [normalize_history_event(event) for event in state.get("history", [])],
         "catapults": [
             {**catapult, "aim": catapult.get("aim"), "reload_turns": catapult.get("reload_turns", 0)}
@@ -1104,6 +1121,28 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "withdraw":
+        if ("exit" not in map_data or set(action) != {"type", "unit_id"}
+                or type(action["unit_id"]) is not int):
+            raise InvalidAction("Choose one soldier to withdraw at the exit.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        exit_tile = map_data["exit"]
+        if (unit is None or (unit["x"], unit["y"]) != (exit_tile["x"], exit_tile["y"])
+                or unit["fight_points"] < 1):
+            raise InvalidAction("A soldier on the exit needs one fight point to withdraw.")
+        unit["fight_points"] -= 1
+        horse = next((horse for horse in next_state["horses"] if horse["rider_id"] == unit["id"]), None)
+        if horse:
+            next_state["horses"].remove(horse)
+        next_state["withdrawn"].append({**unit, "horse": horse,
+                                        "items": [dict(item) for item in next_state["items"]
+                                                  if item["carrier_id"] == unit["id"]]})
+        next_state["items"] = [item for item in next_state["items"] if item["carrier_id"] != unit["id"]]
+        next_state["units"].remove(unit)
+        if not any(other.get("side", "attackers") == "attackers" for other in next_state["units"]):
+            next_state["captured"] = True
+        return remember_visibility(next_state, map_data)
     if action["type"] == "crouch":
         if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
             raise InvalidAction("Choose a soldier to crouch.")
@@ -1411,7 +1450,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                 if map_data.get("mission") == "capture_king" and victim.get("is_king") and victim["health"] <= 0:
                     next_state["defeated"] = True
                 if not any(other.get("side", "attackers") == "attackers" for other in next_state["units"]):
-                    next_state["defeated"] = True
+                    next_state["captured"] = bool(next_state["withdrawn"])
+                    next_state["defeated"] = not next_state["captured"]
             elif is_wall(x, y, map_data):
                 damaged = next((point for point in next_state["wall_damage"] if (point["x"], point["y"]) == (x, y)), None)
                 if damaged is None:
@@ -1607,9 +1647,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
                            if map_data.get("fog_of_war", False) else {}),
                     })
             record_attack(next_state, defender, target, ranged, map_data)
-        next_state["defeated"] = not any(
-            unit.get("side", "attackers") == "attackers" for unit in next_state["units"]
-        )
+        remaining = any(unit.get("side", "attackers") == "attackers" for unit in next_state["units"])
+        next_state["defeated"] = not remaining and not next_state["withdrawn"]
+        if not remaining and next_state["withdrawn"]:
+            next_state["captured"] = True
         objective = map_data["objective"]
         occupiers = sum(
             (unit["x"], unit["y"]) == (objective["x"], objective["y"])
@@ -1618,10 +1659,10 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         )
         if map_data.get("mission") == "capture_king":
             next_state["capture_progress"] = 0
-        elif occupiers:
+        elif remaining and occupiers:
             next_state["capture_progress"] = min(1, state["capture_progress"] + occupiers / 2)
             next_state["captured"] = next_state["capture_progress"] == 1
-        else:
+        elif remaining:
             next_state["capture_progress"] = max(0, state["capture_progress"] - 0.25)
         next_state["turn"] += 1
         for unit in next_state["units"]:

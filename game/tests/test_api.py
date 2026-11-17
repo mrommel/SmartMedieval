@@ -35,6 +35,29 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_withdrawal_persists_and_resumes_with_fog(self):
+        battlefield = default_map()
+        battlefield.update(exit={"x": 2, "y": 6}, fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword", "tools": ["rope"]}],
+                           enemyStartPositions=[{"x": 16, "y": 8, "weapon": "sword"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 1)
+        self.assertEqual(self.action(0, {"type": "withdraw", "unit_id": 1}).status_code, 400)
+        result = self.action(0, {"type": "withdraw", "unit_id": 0})
+        self.assertEqual(result.status_code, 200)
+        state = result.json()["state"]
+        self.assertEqual(state["capture_status"], "WITHDRAWN")
+        self.assertEqual(len(state["withdrawn"]), 1)
+        self.assertEqual(state["withdrawn"][0]["tools"], ["rope"])
+        self.assertEqual(state["units"], [])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], state)
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["withdrawn"][0]["id"], 0)
+        self.assertEqual(self.action(0, {"type": "end_turn"}).status_code, 409)
+        self.assertEqual(self.action(1, {"type": "end_turn"}).status_code, 400)
+
     def test_watchfire_control_persists_and_updates_fog_and_ai(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True, night=True,

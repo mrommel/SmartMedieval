@@ -1,6 +1,6 @@
 export function createBattlefieldRenderer(canvas) {
   const ctx = canvas.getContext("2d");
-  let COLS, ROWS, KEEP, GATE, OBJECTIVE;
+  let COLS, ROWS, KEEP, GATE, OBJECTIVE, EXIT;
   let strongpoints = [];
   let elevation = new Map();
   let raisedTiles = [];
@@ -19,6 +19,7 @@ export function createBattlefieldRenderer(canvas) {
 
   function setMap(map) {
     ({ cols: COLS, rows: ROWS, keep: KEEP, gate: GATE, objective: OBJECTIVE } = map);
+    EXIT = map.exit;
     strongpoints = map.strongpoints || [];
     raisedTiles = map.elevation || [];
     elevation = new Map(raisedTiles.map(tile => [`${tile.x},${tile.y}`, tile]));
@@ -487,6 +488,16 @@ export function createBattlefieldRenderer(canvas) {
     ctx.fill();
   }
 
+  function drawExit() {
+    if (!EXIT) return;
+    const p = project(EXIT.x, EXIT.y);
+    polygon(diamond(EXIT.x, EXIT.y), "rgba(58,157,166,.38)", "#b0f3e5", 2);
+    ctx.fillStyle = "#e4ffef";
+    ctx.font = `bold ${Math.max(10, tileW * .2)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("EXIT", p.x, p.y + tileH * .63);
+  }
+
   function drawUnit(unit, time) {
     const p = project(unit.x, unit.y);
     const selectedUnit = simulation.selected.has(unit.id);
@@ -689,6 +700,7 @@ export function createBattlefieldRenderer(canvas) {
     strongpoints.forEach(point => drawGate(point.gate));
 
     const layers = [];
+    if (EXIT) layers.push({ depth: EXIT.x + EXIT.y + .15, kind: "exit" });
     for (const point of [KEEP, ...strongpoints]) {
       for (let y = point.top; y <= point.bottom; y++) {
         for (let x = point.left; x <= point.right; x++) {
@@ -729,6 +741,7 @@ export function createBattlefieldRenderer(canvas) {
         objectiveDrawn = true;
       }
       if (layer.kind === "wall") drawWall(layer.x, layer.y, layer.point);
+      else if (layer.kind === "exit") drawExit();
       else if (layer.kind === "raised") drawRaisedTile(layer.tile);
       else if (layer.kind === "house") drawHouse(layer.x, layer.y);
       else if (layer.kind === "object") drawObject(layer.obj);

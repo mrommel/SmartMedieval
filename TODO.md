@@ -92,6 +92,8 @@
 - [ ] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
 - [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.
 - [ ] Support withdrawing surviving units through a designated exit and show a mission debrief with casualties, rescued villagers, prisoners, and recovered equipment.
+  - [x] Add an optional authored exit, one-FP soldier evacuation with carried gear, successful retreats when any evacuee survives, and a survivor/casualty/evacuated-equipment debrief.
+  - [ ] Track rescued villagers and prisoners in mission debriefs when those mission mechanics exist.
 - [ ] Add nonlethal capture of enemy commanders; use prisoners and recovered gear to reveal enemy plans or unlock new tactics and equipment through medieval interrogation and smithing.
 - [ ] Carry surviving units, their experience, wounds, and equipment between linked battles so retreat and recovery have lasting consequences.
 - [ ] Add a manageable camp or fortress with a smithy, infirmary, stores, and training ground for preparing units and crafting equipment between missions.

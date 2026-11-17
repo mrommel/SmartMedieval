@@ -7,6 +7,88 @@ from ..engine import (
 )
 
 
+class WithdrawalTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield.update(
+            exit={"x": 2, "y": 6},
+            startPositions=[{"x": 2, "y": 6, "weapon": "sword", "armor": "leather", "tools": ["rope"]},
+                            {"x": 3, "y": 6, "weapon": "longbow"}],
+            enemyStartPositions=[{"x": 4, "y": 6, "weapon": "sword"}],
+            items=[{"x": 2, "y": 6, "type": "healing_potion"}],
+            horses=[{"x": 2, "y": 6}],
+        )
+
+    def withdraw(self, state, unit_id=0):
+        return apply_action(state, {"type": "withdraw", "unit_id": unit_id}, self.battlefield)
+
+    def test_exit_validation_and_legacy_maps(self):
+        validate_map(self.battlefield)
+        for exit_tile in ({"x": True, "y": 6}, {"x": 100, "y": 6},
+                          {"x": 2}, self.battlefield["objective"], {"x": 2, "y": 6, "z": 0}):
+            with self.subTest(exit=exit_tile), self.assertRaises(InvalidMap):
+                validate_map({**self.battlefield, "exit": exit_tile})
+        with self.assertRaises(InvalidMap):
+            validate_map({**self.battlefield, "exit": {"x": 2, "y": 6},
+                          "elevation": [{"x": 2, "y": 6, "height": 1, "access": "ramp"}]})
+        with self.assertRaises(InvalidMap):
+            validate_map({**self.battlefield, "exit": {"x": 0, "y": 0},
+                          "objects": [{"x": 1, "y": 0, "type": "rock"},
+                                      {"x": 0, "y": 1, "type": "rock"}]})
+        legacy = default_map()
+        with self.assertRaises(InvalidAction):
+            apply_action(initial_state(legacy), {"type": "withdraw", "unit_id": 0}, legacy)
+
+    def test_withdraw_preserves_inventory_horse_and_original_state(self):
+        state = initial_state(self.battlefield)
+        state["items"][0]["carrier_id"] = 0
+        state["units"][0]["mount_id"] = 0
+        state["horses"][0]["rider_id"] = 0
+        result = self.withdraw(state)
+        self.assertEqual(len(state["units"]), 3)
+        self.assertEqual([unit["id"] for unit in result["units"]], [1, 2])
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["horses"], [])
+        survivor = result["withdrawn"][0]
+        self.assertEqual((survivor["id"], survivor["fight_points"], survivor["armor"], survivor["tools"]),
+                         (0, 0, "leather", ["rope"]))
+        self.assertEqual(survivor["items"][0]["type"], "healing_potion")
+        self.assertEqual(survivor["horse"]["id"], 0)
+        self.assertFalse(result["captured"])
+        with self.assertRaises(InvalidAction):
+            self.withdraw(result)
+
+    def test_last_soldier_withdraws_and_battle_locks(self):
+        state = initial_state(self.battlefield)
+        state["units"].remove(state["units"][1])
+        result = self.withdraw(state)
+        self.assertTrue(result["captured"])
+        self.assertFalse(result["defeated"])
+        self.assertEqual(capture_status(result, self.battlefield), "WITHDRAWN")
+        with self.assertRaises(InvalidAction):
+            apply_action(result, {"type": "end_turn"}, self.battlefield)
+
+    def test_partial_withdrawal_then_last_soldier_falls_is_retreat(self):
+        state = self.withdraw(initial_state(self.battlefield))
+        state["units"][0]["health"] = 1
+        result = apply_action(state, {"type": "end_turn"}, self.battlefield, enemy_orders=[])
+        self.assertTrue(result["captured"])
+        self.assertFalse(result["defeated"])
+        self.assertEqual(capture_status(result, self.battlefield), "WITHDRAWN")
+
+    def test_invalid_orders_do_not_change_state(self):
+        state = initial_state(self.battlefield)
+        for action in ({"type": "withdraw", "unit_id": True}, {"type": "withdraw", "unit_id": 2},
+                       {"type": "withdraw", "unit_id": 1},
+                       {"type": "withdraw", "unit_id": 0, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, self.battlefield)
+        state["units"][0]["fight_points"] = 0
+        with self.assertRaises(InvalidAction):
+            self.withdraw(state)
+        self.assertEqual(state["withdrawn"], [])
+
+
 class CrouchTests(TestCase):
     def setUp(self):
         self.battlefield = default_map()

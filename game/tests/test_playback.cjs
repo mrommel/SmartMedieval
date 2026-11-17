@@ -119,6 +119,27 @@ function setup(savedSpeed = null, catalogFetch = null) {
   };
 }
 
+test("exit withdrawal sends the selected soldier and debriefs evacuated gear", async () => {
+  const game = setup();
+  game.snapshot.map.exit = { x: 0, y: 0 };
+  await game.get("continue-game").fire("click");
+  const button = game.get("withdraw-unit");
+  assert.equal(button.hidden, false);
+  assert.equal(button.disabled, false);
+  await button.fire("click");
+  assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "withdraw", unit_id: 0 }));
+  game.snapshot.state.withdrawn = [{ id: 0, weapon: "sword", armor: "leather", tools: ["rope"],
+    items: [{ type: "healing_potion" }] }];
+  game.snapshot.state.units = [];
+  game.snapshot.state.captured = true;
+  game.snapshot.state.capture_status = "WITHDRAWN";
+  await game.get("continue-game").fire("click");
+  assert.equal(button.disabled, true);
+  assert.match(game.get("mission-debrief").textContent, /1 withdrawn, 0 fallen, 0 still on the field/);
+  assert.match(game.get("mission-debrief").textContent, /4 carried items and pieces/);
+  assert.equal(game.get("victory").hidden, false);
+});
+
 test("crouch costs a fight point and shows its movement and ranged-defense trade-off", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");
