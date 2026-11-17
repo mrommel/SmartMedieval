@@ -119,6 +119,23 @@ function setup(savedSpeed = null, catalogFetch = null) {
   };
 }
 
+test("crouch costs a fight point and shows its movement and ranged-defense trade-off", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const button = game.get("crouch");
+  assert.equal(button.disabled, false);
+  await button.fire("click");
+  assert.equal(game.actions.at(-1).type, "crouch");
+  assert.equal(game.actions.at(-1).unit_id, 0);
+  game.snapshot.state.units[0].crouched = true;
+  game.snapshot.state.units[0].fight_points = 0;
+  game.snapshot.state.units[0].move_points = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(button.disabled, true);
+  assert.equal(button["aria-pressed"], "true");
+  assert.match(game.get("selected-stats").textContent, /−1 incoming ranged damage/);
+});
+
 test("reaction control reserves a fight point and shows the selected soldier's reservation", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");

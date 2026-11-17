@@ -20,6 +20,7 @@ import { previewMovement } from "./path_preview.js";
   const endTurnButton = document.getElementById("end-turn");
   const reactionButton = document.getElementById("reserve-reaction");
   const movementReactionButton = document.getElementById("reserve-movement");
+  const crouchButton = document.getElementById("crouch");
   const promoteButton = document.getElementById("promote");
   const captureButton = document.getElementById("capture-king");
   const aimButton = document.getElementById("aim-catapult");
@@ -123,11 +124,14 @@ import { previewMovement } from "./path_preview.js";
     movementReactionButton.textContent = medic?.move_reserved ? "Cancel movement reserve" :
       `Reserve movement (${medic?.move_points ?? 0} MP)`;
     movementReactionButton.setAttribute("aria-pressed", String(Boolean(medic?.move_reserved)));
+    crouchButton.disabled = pendingAction || paused || ended || !medic || medic.crouched ||
+      !medic.fight_points || medic.mount_id != null || Boolean(medic.move_reserved);
+    crouchButton.setAttribute("aria-pressed", String(Boolean(medic?.crouched)));
     const availableHorse = simulation.horses.find(horse => medic && horse.rider_id === null &&
       horse.x === medic.x && horse.y === medic.y);
     mountButton.hidden = !simulation.horses.length;
     mountButton.textContent = medic?.mount_id != null ? "Dismount" : "Mount";
-    mountButton.disabled = pendingAction || paused || ended || !medic?.fight_points ||
+    mountButton.disabled = pendingAction || paused || ended || !medic?.fight_points || medic?.crouched ||
       (medic.mount_id == null && !availableHorse);
     armorButton.hidden = !medic?.armor;
     armorButton.disabled = pendingAction || paused || ended || !medic?.fight_points;
@@ -544,6 +548,7 @@ import { previewMovement } from "./path_preview.js";
         statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
         ...(unit.reaction_reserved ? [detailRow("Reaction", "1 FP reserved  attacks the first visible defender moving into range")] : []),
         ...(unit.move_reserved ? [detailRow("Movement reserve", `${unit.move_reserved} MP held · evade an adjacent visible defender if a legal escape tile is available`)] : []),
+        ...(unit.crouched ? [detailRow("Stance", "Crouched · −1 incoming ranged damage per shot; cannot move until next turn")] : []),
         nextTurn,
         detailRow("Weapon", unit.weapon || "none"),
         detailRow("Horse", horse ? `${horse.health}/${horse.max_health} HP · mounted; sword melee deals 2 damage` :
@@ -612,7 +617,7 @@ import { previewMovement } from "./path_preview.js";
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.ambush ? " (ambush +1)" : ""}${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.ambush ? " (ambush +1)" : ""}${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.stance_blocked ? ` (crouch absorbed ${event.stance_blocked})` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
@@ -872,6 +877,10 @@ import { previewMovement } from "./path_preview.js";
   movementReactionButton.addEventListener("click", () => {
     const soldier = selectedMedic();
     if (soldier && !movementReactionButton.disabled) sendAction({ type: "reserve_movement", unit_id: soldier.id, reserved: !soldier.move_reserved });
+  });
+  crouchButton.addEventListener("click", () => {
+    const soldier = selectedMedic();
+    if (soldier && !crouchButton.disabled) sendAction({ type: "crouch", unit_id: soldier.id });
   });
   aimButton.addEventListener("click", () => {
     aimingCatapult = !aimingCatapult;

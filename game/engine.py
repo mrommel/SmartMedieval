@@ -92,6 +92,7 @@ def normalize_unit(unit):
     result.setdefault("mount_id", None)
     result.setdefault("move_reserved", 0)
     result.setdefault("torch_lit", True)
+    result.setdefault("crouched", False)
     return result
 
 
@@ -730,6 +731,8 @@ def refresh_inventory_movement(unit, old_penalty, items):
         # Older matches do not record how many points were already spent this turn.
         unit["move_points"] = max(0, unit["move_points"] + old_penalty - new_penalty)
         unit["move_reserved"] = min(unit.get("move_reserved", 0), move_allowance(unit, items))
+        if unit.get("crouched"):
+            unit["move_points"] = 0
         return
     previous_capacity = unit["move_capacity"]
     capacity = max(1, previous_capacity + old_penalty - new_penalty)
@@ -738,6 +741,8 @@ def refresh_inventory_movement(unit, old_penalty, items):
     unit["move_reserved"] = min(reserved, max(0, capacity - spent))
     unit["move_capacity"] = capacity
     unit["move_points"] = max(0, capacity - spent - unit["move_reserved"])
+    if unit.get("crouched"):
+        unit["move_points"] = 0
 
 
 def fight_allowance(unit):
@@ -835,6 +840,8 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
     if cover:
         target["cover_turn"] = state["turn"]
     horse = next((horse for horse in state.get("horses", ()) if horse["id"] == target.get("mount_id")), None)
+    stance_blocked = min(damage, 1) if ranged and weapon != "catapult" and not cover and not horse and target.get("crouched") else 0
+    damage -= stance_blocked
     absorbed = 0 if cover or horse else min(damage, armor_remaining(target, state["turn"]))
     if absorbed:
         target["armor_absorbed"] = (target.get("armor_absorbed", 0)
@@ -859,6 +866,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"stance_blocked": stance_blocked} if stance_blocked else {}),
         **({"ambush": True} if ambush else {}),
         **({"witnessed": witnessed} if fog else {}),
         **({"horse_hit": True, "horse_killed": horse["health"] <= 0} if horse else {}),
@@ -1004,6 +1012,7 @@ def initial_state(map_data=MAP):
                 "reload_turns": 0,
                 "reaction_reserved": False,
                 "move_reserved": 0,
+                "crouched": False,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
             }
@@ -1065,6 +1074,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "aim_catapult", "fire_catapult", "pickup_item", "drop_item", "use_item", "equip_armor",
             "pickup_equipment", "drop_weapon", "drop_armor", "pickup_tool", "drop_tool",
             "mount", "dismount", "reserve_reaction", "reserve_movement",
+            "crouch",
             "light_watchfire", "extinguish_watchfire", "toggle_torch"):
         raise InvalidAction("Unknown action.")
     if state["captured"] or state.get("defeated", False):
@@ -1094,6 +1104,18 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         "breaches": [dict(point) for point in state.get("breaches", [])],
         "extinguished_watchfires": [dict(point) for point in state.get("extinguished_watchfires", [])],
         "items": [dict(item) for item in state.get("items", [])]}
+    if action["type"] == "crouch":
+        if set(action) != {"type", "unit_id"} or type(action["unit_id"]) is not int:
+            raise InvalidAction("Choose a soldier to crouch.")
+        unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
+                     and unit.get("side", "attackers") == "attackers"), None)
+        if (unit is None or unit["fight_points"] < 1 or unit["crouched"]
+                or unit.get("mount_id") is not None or unit["move_reserved"]):
+            raise InvalidAction("Crouching requires one fight point, no mount and no movement reservation.")
+        unit["fight_points"] -= 1
+        unit["move_points"] = 0
+        unit["crouched"] = True
+        return next_state
     if action["type"] == "toggle_torch":
         if (set(action) != {"type", "unit_id", "lit"} or type(action["unit_id"]) is not int
                 or type(action["lit"]) is not bool):
@@ -1160,7 +1182,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
         if (unit is None or bool(unit["move_reserved"]) == action["reserved"]
-                or action["reserved"] and unit["move_points"] < 1):
+                or action["reserved"] and (unit["move_points"] < 1 or unit["crouched"])):
             raise InvalidAction("This soldier cannot change their movement reservation.")
         if action["reserved"]:
             unit["move_reserved"] = unit["move_points"]
@@ -1176,7 +1198,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             raise InvalidAction("Choose a soldier and a valid horse.")
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
-        if unit is None or unit["fight_points"] < 1:
+        if unit is None or unit["fight_points"] < 1 or unit["crouched"]:
             raise InvalidAction("A living soldier needs one fight point to mount or dismount.")
         if mounting:
             horse = next((horse for horse in next_state["horses"] if horse["id"] == action["horse_id"]), None)
@@ -1606,6 +1628,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             if unit.get("side", "attackers") == "attackers":
                 unit["reaction_reserved"] = False
                 unit["move_reserved"] = 0
+                unit["crouched"] = False
                 unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
                 unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
                 unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
@@ -1626,6 +1649,8 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
     }
     if any(unit_id not in units for unit_id in ids):
         raise InvalidAction("Unknown unit.")
+    if any(units[unit_id]["crouched"] for unit_id in ids):
+        raise InvalidAction("Crouching soldiers cannot move until next turn.")
     if any(units[unit_id]["move_points"] == 0 for unit_id in ids):
         raise InvalidAction("Selected units have no move points left. End the turn.")
 

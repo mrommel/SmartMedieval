@@ -7,6 +7,75 @@ from ..engine import (
 )
 
 
+class CrouchTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "sword", "armor": "leather"}]
+        self.battlefield["enemyStartPositions"] = [{"x": 6, "y": 6, "weapon": "longbow"}]
+
+    def crouch(self, state):
+        return apply_action(state, {"type": "crouch", "unit_id": 0}, self.battlefield)
+
+    def test_cost_lockout_and_expiry(self):
+        state = initial_state(self.battlefield)
+        del state["units"][0]["crouched"]  # Legacy matches are standing.
+        crouched = self.crouch(state)
+        self.assertFalse(state["units"][0].get("crouched", False))
+        self.assertEqual((crouched["units"][0]["fight_points"], crouched["units"][0]["move_points"]), (0, 0))
+        self.assertTrue(crouched["units"][0]["crouched"])
+        for action in ({"type": "move", "units": [0], "x": 3, "y": 6},
+                       {"type": "reserve_movement", "unit_id": 0, "reserved": True},
+                       {"type": "crouch", "unit_id": 0}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(crouched, action, self.battlefield)
+        next_turn = apply_action(crouched, {"type": "end_turn"}, self.battlefield, enemy_orders=[])
+        self.assertFalse(next_turn["units"][0]["crouched"])
+        self.assertGreater(next_turn["units"][0]["move_points"], 0)
+
+    def test_defender_shot_is_blocked_then_stance_expires(self):
+        state = self.crouch(initial_state(self.battlefield))
+        next_turn = apply_action(state, {"type": "end_turn"}, self.battlefield, enemy_orders=[])
+        self.assertEqual(next_turn["units"][0]["health"], 3)
+        self.assertEqual(next_turn["history"][-1]["stance_blocked"], 1)
+        self.assertFalse(next_turn["units"][0]["crouched"])
+
+    def test_dropping_weight_does_not_restore_crouched_movement(self):
+        state = initial_state(self.battlefield)
+        state["units"][0].update(rank="veteran", fight_points=2, fight_capacity=2)
+        state = self.crouch(state)
+        state = apply_action(state, {"type": "drop_armor", "unit_id": 0}, self.battlefield)
+        self.assertEqual(state["units"][0]["move_points"], 0)
+        with self.assertRaises(InvalidAction):
+            apply_action(state, {"type": "move", "units": [0], "x": 3, "y": 6}, self.battlefield)
+
+    def test_validation(self):
+        state = initial_state(self.battlefield)
+        for action in ({"type": "crouch", "unit_id": True}, {"type": "crouch", "unit_id": 1},
+                       {"type": "crouch", "unit_id": 0, "extra": 1}):
+            with self.subTest(action=action), self.assertRaises(InvalidAction):
+                apply_action(state, action, self.battlefield)
+        state["units"][0]["fight_points"] = 0
+        with self.assertRaises(InvalidAction):
+            self.crouch(state)
+        state = initial_state(self.battlefield)
+        state = apply_action(state, {"type": "reserve_movement", "unit_id": 0, "reserved": True}, self.battlefield)
+        with self.assertRaises(InvalidAction):
+            self.crouch(state)
+
+    def test_ranged_defense_stacks_with_armor_but_not_melee_or_catapult(self):
+        state = self.crouch(initial_state(self.battlefield))
+        record_attack(state, state["units"][1], state["units"][0], True, self.battlefield, damage=3)
+        self.assertEqual(state["units"][0]["health"], 2)
+        self.assertEqual(state["history"][-1]["stance_blocked"], 1)
+        self.assertEqual(state["history"][-1]["armor_blocked"], 1)
+        record_attack(state, state["units"][1], state["units"][0], False, self.battlefield)
+        self.assertEqual(state["units"][0]["health"], 1)
+        self.assertNotIn("stance_blocked", state["history"][-1])
+        record_attack(state, state["units"][1], state["units"][0], True, self.battlefield,
+                      damage=1, weapon="catapult")
+        self.assertNotIn("stance_blocked", state["history"][-1])
+
+
 class ReactionTests(TestCase):
     def battlefield(self, weapon="sword", defender_x=5, fog=False):
         battlefield = default_map()
