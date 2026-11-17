@@ -35,6 +35,37 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_defender_ai_only_sees_spotted_horses_on_initial_request_and_retry(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 16, "y": 8, "weapon": "sword"}],
+                           horses=[{"x": 2, "y": 6}, {"x": 16, "y": 7}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual([horse["id"] for horse in started["state"]["horses"]], [0])
+        mounted = self.action(0, {"type": "mount", "unit_id": 0, "horse_id": 0}).json()
+        self.assertEqual(mounted["state"]["horses"][0]["rider_id"], 0)
+
+        invalid = json.dumps({"choices": [{"message": {"content": "not JSON"}}]}).encode()
+        valid = json.dumps({"choices": [{"message": {"content": json.dumps({"orders": []})}}]}).encode()
+        self.ai.return_value.__enter__.return_value.read.side_effect = [invalid, valid]
+        ended = self.action(1, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        self.assertEqual(self.ai.call_count, 2)
+        for call in self.ai.call_args_list:
+            content = json.loads(call.args[0].data)["messages"][1]["content"]
+            ai_view = json.loads(content.split("\n")[0])
+            self.assertEqual([horse["id"] for horse in ai_view["horses"]], [1])
+            self.assertEqual([unit["side"] for unit in ai_view["units"]], ["defenders"])
+        self.assertEqual([horse["id"] for horse in ended.json()["state"]["horses"]], [0])
+        self.assertEqual(self.client.get(reverse("current-game")).json(),
+                         {key: value for key, value in ended.json().items() if key != "combat_events"})
+        self.assertEqual([horse["id"] for horse in GameInstance.objects.get(pk=started["id"]).state["horses"]],
+                         [0, 1])
+
     def test_hidden_house_door_is_not_exposed_until_discovered(self):
         battlefield = default_map()
         battlefield["fog_of_war"] = True

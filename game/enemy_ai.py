@@ -53,7 +53,7 @@ def enemy_turn(state, map_data, combat_events=None):
             if sight is None or unit.get("side", "attackers") == "defenders" or (unit["x"], unit["y"]) in sight
         ],
         "horses": [horse for horse in state.get("horses", [])
-                   if sight is None or horse["rider_id"] is None or (horse["x"], horse["y"]) in sight],
+                   if sight is None or (horse["x"], horse["y"]) in sight],
     }
     request_data = {
         "model": AI_MODEL,
