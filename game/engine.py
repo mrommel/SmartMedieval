@@ -43,6 +43,7 @@ CATAPULT_RELOAD = 2
 WALL_HEALTH = 2
 INVENTORY_LIMIT = 2
 POTION_HEAL = 2
+WOUND_TURNS = 2
 MAX_CARRY_WEIGHT = 8
 WEAPON_WEIGHTS = {None: 0, "sword": 1, "longbow": 2, "crossbow": 3}
 TOOL_WEIGHT = 1
@@ -94,6 +95,7 @@ def normalize_unit(unit):
     result.setdefault("torch_lit", True)
     result.setdefault("crouched", False)
     result.setdefault("shield_raised", False)
+    result.setdefault("wound_turns", 0)
     return result
 
 
@@ -722,7 +724,8 @@ def move_allowance(unit, items=()):
     morale = unit.get("morale", STARTING_MORALE)
     mounted = unit.get("mount_id") is not None
     return max(1, (HORSE_MOVE_POINTS if mounted else MOVE_POINTS) + (unit.get("rank") == "veteran")
-               + (morale == MAX_MORALE) - (morale <= 1) - (0 if mounted else weight_penalty(unit, items)))
+               + (morale == MAX_MORALE) - (morale <= 1)
+               - (0 if mounted else weight_penalty(unit, items) + (unit.get("wound_turns", 0) > 0)))
 
 
 def change_mount_movement(unit, old_capacity, items):
@@ -875,7 +878,11 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
             target["mount_id"] = None
             change_mount_movement(target, old_capacity, state.get("items", ()))
     else:
+        old_capacity = move_allowance(target, state.get("items", ()))
         target["health"] -= damage
+        if damage and target["health"] == 1:
+            target["wound_turns"] = WOUND_TURNS
+            change_mount_movement(target, old_capacity, state.get("items", ()))
     killed = target["health"] <= 0
     morale_changes = record_casualty(state, attacker, target) if killed else []
     state["history"] = (state["history"] + [{
@@ -885,6 +892,7 @@ def record_attack(state, attacker, target, ranged, map_data=MAP, damage=ATTACK_D
         "target_side": target.get("side", "attackers"), "target_weapon": target["weapon"],
         "target_is_king": target.get("is_king", False),
         "damage": damage, "killed": killed, "morale_changes": morale_changes,
+        **({"wounded": True} if not horse and damage and target["health"] == 1 else {}),
         **({"stance_blocked": stance_blocked} if stance_blocked else {}),
         **({"shield_blocked": shield_blocked} if shield_blocked else {}),
         **({"ambush": True} if ambush else {}),
@@ -1034,6 +1042,7 @@ def initial_state(map_data=MAP):
                 "move_reserved": 0,
                 "crouched": False,
                 "shield_raised": False,
+                "wound_turns": 0,
                 "morale": STARTING_MORALE,
                 "rank": "recruit",
             }
@@ -1414,13 +1423,18 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         else:
             target = next((other for other in next_state["units"] if other["id"] == action["target_id"]
                            and other.get("side", "attackers") == "attackers"), None)
-            if (not target or target["health"] >= target["max_health"] or
+            if (not target or (target["health"] >= target["max_health"] and not target["wound_turns"]) or
                     (target is not unit and (abs(target["x"] - unit["x"]) + abs(target["y"] - unit["y"]) != 1
                      or target["z"] != unit["z"]
                      or not can_step((unit["x"], unit["y"]), (target["x"], target["y"]), map_data)))):
                 raise InvalidAction("Heal a wounded ally on your tile or an adjacent reachable tile at the same height.")
             healed = min(POTION_HEAL, target["max_health"] - target["health"])
             target["health"] += healed
+            treated = target["wound_turns"] > 0
+            if treated:
+                old_capacity = move_allowance(target, next_state["items"])
+                target["wound_turns"] = 0
+                change_mount_movement(target, old_capacity, next_state["items"])
             old_penalty = weight_penalty(unit, next_state["items"])
             next_state["items"].remove(item)
         refresh_inventory_movement(unit, old_penalty, next_state["items"])
@@ -1429,7 +1443,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             "turn": state["turn"], "type": operation, "actor_id": unit["id"],
             "actor_side": "attackers", "actor_weapon": unit["weapon"],
             "item_id": item["id"],
-            **({"target_id": target["id"], "healed": healed} if operation == "use_item" else {}),
+            **({"target_id": target["id"], "healed": healed, "treated": treated} if operation == "use_item" else {}),
         }])[-HISTORY_LIMIT:]
         return remember_visibility(next_state, map_data)
     if action["type"] in ("aim_catapult", "fire_catapult"):
@@ -1600,6 +1614,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         if not isinstance(enemy_orders, (list, tuple)) or len(enemy_orders) > len(defenders):
             raise InvalidAction("Invalid defender orders.")
         for unit in defenders.values():
+            unit["wound_turns"] = max(0, unit["wound_turns"] - 1)
             unit["move_capacity"] = unit["move_points"] = move_allowance(unit, next_state["items"])
             unit["fight_capacity"] = unit["fight_points"] = fight_allowance(unit)
             unit["reload_turns"] = max(0, unit.get("reload_turns", 0) - 1)
@@ -1694,6 +1709,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         next_state["turn"] += 1
         for unit in next_state["units"]:
             if unit.get("side", "attackers") == "attackers":
+                unit["wound_turns"] = max(0, unit["wound_turns"] - 1)
                 unit["reaction_reserved"] = False
                 unit["move_reserved"] = 0
                 unit["crouched"] = False

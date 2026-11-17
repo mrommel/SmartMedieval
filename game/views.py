@@ -86,7 +86,9 @@ def serialize_instance(instance):
                        "carried_weight": carried_weight(unit, instance.state.get("items", ())),
                        "max_carry_weight": MAX_CARRY_WEIGHT,
                        "weight_penalty": weight_penalty(unit, instance.state.get("items", ())),
-                       "next_move_capacity": move_allowance(unit, instance.state.get("items", ())),
+                       "next_move_capacity": move_allowance(
+                           {**unit, "wound_turns": max(0, unit.get("wound_turns", 0) - 1)},
+                           instance.state.get("items", ())),
                        "next_fight_capacity": fight_allowance(unit)} for unit in units],
             "history": history,
             **({"items": [item for item in state.get("items", []) if item["carrier_id"] in friendly_ids

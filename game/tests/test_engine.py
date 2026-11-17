@@ -1324,6 +1324,74 @@ class EquipmentRecoveryTests(TestCase):
         self.assertEqual(dropped["next_item_id"], 11)
 
 
+class InjuryTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield["items"] = [{"x": 2, "y": 6, "type": "healing_potion"}]
+
+    def test_injury_reduces_unspent_movement_without_refunding_spent_points(self):
+        state = initial_state(self.battlefield)
+        attacker, target = state["units"][-1], state["units"][0]
+        target["health"] = 2
+        target["move_points"] = 2
+        record_attack(state, attacker, target, False, self.battlefield)
+        self.assertEqual((target["health"], target["wound_turns"], target["move_capacity"], target["move_points"]),
+                         (1, 2, 3, 1))
+        self.assertTrue(state["history"][-1]["wounded"])
+        self.assertEqual(move_allowance(target), 3)
+        recovered = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual((recovered["units"][0]["wound_turns"], recovered["units"][0]["move_points"]), (1, 3))
+        recovered = apply_action(recovered, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual((recovered["units"][0]["wound_turns"], recovered["units"][0]["move_points"]), (0, 4))
+
+    def test_blocked_hits_and_horse_hits_do_not_injure_rider(self):
+        state = initial_state(self.battlefield)
+        attacker, target = state["units"][-1], state["units"][0]
+        target.update(health=2, armor="mail", armor_equipped=True)
+        record_attack(state, attacker, target, False, self.battlefield)
+        self.assertEqual(target["wound_turns"], 0)
+        self.assertEqual(target["health"], 2)
+        target["armor_equipped"] = False
+        state["horses"] = [{"id": 0, "x": target["x"], "y": target["y"], "health": 2, "rider_id": target["id"]}]
+        target["mount_id"] = 0
+        record_attack(state, attacker, target, False, self.battlefield)
+        self.assertEqual(target["wound_turns"], 0)
+        self.assertEqual(target["health"], 2)
+
+    def test_potion_treats_injury_even_at_full_health_and_preserves_spent_mp(self):
+        state = initial_state(self.battlefield)
+        unit = state["units"][0]
+        unit.update(wound_turns=2, move_capacity=3, move_points=1)
+        state["items"][0].update(carrier_id=0, x=None, y=None)
+        unit["health"] = unit["max_health"]
+        healed = apply_action(state, {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 0}, self.battlefield)
+        self.assertEqual((healed["units"][0]["wound_turns"], healed["units"][0]["move_points"]), (0, 2))
+        self.assertEqual(healed["history"][-1]["healed"], 0)
+        self.assertTrue(healed["history"][-1]["treated"])
+        self.assertEqual(healed["items"], [])
+        self.assertEqual(state["units"][0]["wound_turns"], 2)
+
+    def test_potion_treats_adjacent_wounded_ally_without_restoring_spent_movement(self):
+        state = initial_state(self.battlefield)
+        state["units"][1].update(x=3, y=6, health=1, wound_turns=2, move_capacity=2, move_points=0)
+        state["items"][0].update(carrier_id=0, x=None, y=None)
+        treated = apply_action(state, {"type": "use_item", "unit_id": 0, "item_id": 0, "target_id": 1}, self.battlefield)
+        ally = treated["units"][1]
+        self.assertEqual((ally["health"], ally["wound_turns"], ally["move_capacity"], ally["move_points"]),
+                         (3, 0, 3, 1))
+        self.assertTrue(treated["history"][-1]["treated"])
+
+    def test_legacy_state_defaults_to_unwounded_and_defenders_recover(self):
+        state = initial_state(self.battlefield)
+        for unit in state["units"]:
+            del unit["wound_turns"]
+        state["units"][-1]["wound_turns"] = 1
+        resumed = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(resumed["units"][0]["wound_turns"], 0)
+        self.assertEqual(resumed["units"][-1]["wound_turns"], 0)
+        self.assertEqual(resumed["units"][-1]["move_capacity"], move_allowance(resumed["units"][-1]))
+
+
 class FieldMedicineTests(TestCase):
     def potion_map(self):
         battlefield = default_map()

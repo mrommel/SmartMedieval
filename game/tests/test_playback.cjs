@@ -892,6 +892,30 @@ test("load penalty and carrying limit are visible before moving or picking up", 
   assert.match(game.get("selected-stats").textContent, /Projected next turn: 2 MP/);
 });
 
+test("wounded soldiers can be treated even at full HP and see their recovery forecast", async () => {
+  const game = setup();
+  const soldier = game.snapshot.state.units[0];
+  soldier.wound_turns = 2;
+  soldier.next_move_capacity = 3;
+  soldier.health = 3;
+  game.snapshot.map.items = [{ x: 0, y: 0, type: "healing_potion" }];
+  game.snapshot.state.items = [{ id: 0, carrier_id: 0, x: null, y: null, type: "healing_potion" }];
+  game.snapshot.state.history = [{ turn: 1, type: "attack", actor_id: 1, actor_side: "defenders",
+    actor_weapon: "sword", target_id: 0, target_side: "attackers", target_weapon: "sword",
+    damage: 1, killed: false, wounded: true, morale_changes: [] }];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /Wounded · −1 MP on foot; 2 turn/);
+  assert.match(game.get("selected-stats").textContent, /Projected next turn: 3 MP.*injury/);
+  assert.equal(game.get("heal-potion").disabled, false);
+  assert.match(game.get("heal-target").children[0].textContent, /wounded/);
+  assert.match(game.get("combat-history-list").textContent, /wounded: −1 MP/);
+  soldier.wound_turns = 1;
+  soldier.next_move_capacity = 4;
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /Projected next turn: 4 MP/);
+  assert.doesNotMatch(game.get("selected-stats").textContent, /and injury/);
+});
+
 test("selected panel separates turn capacity from future morale and rank bonuses", async () => {
   const game = setup();
   const soldier = game.snapshot.state.units[0];

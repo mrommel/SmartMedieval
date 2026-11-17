@@ -687,6 +687,20 @@ class GameInstanceApiTests(TestCase):
                          (2, 4, 5, 1, 1, 2))
         self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["units"][0], promoted)
 
+    def test_api_projects_injury_recovery_on_resume(self):
+        started = self.start().json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        instance.state["units"][0].update(wound_turns=2, health=1, move_capacity=3, move_points=1)
+        del instance.state["units"][1]["wound_turns"]
+        instance.save(update_fields=["state"])
+        current = self.client.get(reverse("current-game")).json()["state"]["units"]
+        self.assertEqual((current[0]["wound_turns"], current[0]["move_capacity"],
+                          current[0]["move_points"], current[0]["next_move_capacity"]), (2, 3, 1, 3))
+        self.assertEqual(current[1]["wound_turns"], 0)
+        instance.state["units"][0]["wound_turns"] = 1
+        instance.save(update_fields=["state"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["units"][0]["next_move_capacity"], 4)
+
     def test_legacy_match_resumes_without_unit_types_and_converts_on_action(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])

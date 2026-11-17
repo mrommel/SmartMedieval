@@ -211,12 +211,12 @@ import { previewMovement } from "./path_preview.js";
     const medic = selectedMedic();
     const previous = healTarget.value;
     const candidates = medic ? simulation.units.filter(unit => unit.side !== "defenders" &&
-      unit.health < unit.max_health && (unit.id === medic.id ||
+      (unit.health < unit.max_health || unit.wound_turns > 0) && (unit.id === medic.id ||
       (unit.z === medic.z && canMeleeAttack(medic, unit)))) : [];
     healTarget.replaceChildren(...candidates.map(unit => {
       const option = document.createElement("option");
       option.value = String(unit.id);
-      option.textContent = `Heal #${unit.id + 1} (${unit.health}/${unit.max_health} HP)`;
+      option.textContent = `Treat #${unit.id + 1} (${unit.health}/${unit.max_health} HP${unit.wound_turns ? ", wounded" : ""})`;
       return option;
     }));
     if (candidates.some(unit => String(unit.id) === previous)) healTarget.value = previous;
@@ -551,9 +551,10 @@ import { previewMovement } from "./path_preview.js";
       nextTurn.className = "next-turn-preview";
       nextTurn.textContent = unit.next_move_capacity == null || unit.next_fight_capacity == null
         ? "Next turn: allowance unavailable until the game refreshes."
-        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank${horse ? " and mount" : unit.carried_weight == null ? "" : " and load"})`;
+        : `Projected next turn: ${unit.next_move_capacity} MP · ${unit.next_fight_capacity} FP (at current morale and rank${horse ? " and mount" : unit.carried_weight == null ? "" : " and load"}${unit.wound_turns > 1 ? " and injury" : ""})`;
       selectedStats.replaceChildren(identity,
         statRow("Health", unit.health, unit.max_health, "HP", "health"),
+        ...(unit.wound_turns ? [detailRow("Injury", `Wounded · −1 MP on foot; ${unit.wound_turns} turn(s) until recovery. A healing potion treats it immediately.`)] : []),
         statRow("Morale", unit.morale ?? 3, 5, "", "morale"),
         statRow("Movement", unit.move_points, moveCapacity, "MP", "movement"),
         statRow("Fight", unit.fight_points, fightCapacity, "FP", "fight"),
@@ -624,12 +625,12 @@ import { previewMovement } from "./path_preview.js";
       } else if (event.type === "light_watchfire" || event.type === "extinguish_watchfire") {
         item.textContent = `Turn ${event.turn} · ${actor} ${event.type === "light_watchfire" ? "lit" : "extinguished"} watchfire at ${event.x + 1}, ${event.y + 1}.`;
       } else if (event.type === "use_item") {
-        item.textContent = `Turn ${event.turn} · ${actor} healed attacker #${event.target_id + 1} for ${event.healed} HP.`;
+        item.textContent = `Turn ${event.turn} · ${actor} treated attacker #${event.target_id + 1} for ${event.healed} HP${event.treated ? " and cleared their injury" : ""}.`;
       } else {
         const target = `${event.target_is_king ? "king" : event.target_side === "defenders" ? "defender" : "attacker"} #${event.target_id + 1}`;
         const morale = event.morale_changes.map(change =>
           `#${change.unit_id + 1} ${change.change > 0 ? "+" : ""}${change.change}`).join(", ");
-        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.ambush ? " (ambush +1)" : ""}${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.stance_blocked ? ` (crouch absorbed ${event.stance_blocked})` : ""}${event.shield_blocked ? ` (shield absorbed ${event.shield_blocked})` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
+        item.textContent = `Turn ${event.turn} · ${actor} ${event.reaction ? "reacted and " : ""}${event.weapon === "catapult" ? "hit with a catapult" : event.type === "ranged_attack" ? "shot" : "struck"} ${event.horse_hit ? `${target}'s horse` : target} for ${event.damage} damage${event.ambush ? " (ambush +1)" : ""}${event.cover ? ` (${event.cover} cover blocked the shot)` : ""}${event.stance_blocked ? ` (crouch absorbed ${event.stance_blocked})` : ""}${event.shield_blocked ? ` (shield absorbed ${event.shield_blocked})` : ""}${event.armor_blocked ? ` (${event.target_armor} armor absorbed ${event.armor_blocked})` : ""}${event.horse_killed ? " (horse fallen; rider dismounted)" : event.killed ? " (fallen)" : event.wounded ? " (wounded: −1 MP on foot)" : ""}.${morale ? ` Morale: ${morale}.` : ""}`;
       }
       return item;
     }));
