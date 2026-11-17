@@ -1,134 +1,64 @@
 # Siege of Greywatch — implementation plan
 
-## First playable milestone
+Check off only shipped, tested behavior. The **Completed baseline** records existing features; the open lists below are remaining work, not claims that their parent systems are absent. See [AGENTS.md](AGENTS.md) for detailed current mechanics and [readme.md](readme.md) for setup and controls.
 
-- [x] Add a browser-playable isometric map served by the Django project, with original canvas-drawn placeholder art.
-- [x] Spawn six attackers, support single-unit and shift-click group selection, and issue movement orders with click-to-move.
-- [x] Route units around castle walls through the open gate and make the courtyard objective capturable.
-- [x] Add a start/restart flow, concise controls, responsive layout, and status feedback.
-- [x] Add a scenario/single-game launch catalog with seeded entries and read-only APIs.
+## Next milestone: playable-quality validation
 
-## Game authoring and server-owned play
+- [ ] Play the seeded assault, throne-room, hamlet, reconnaissance, night-watch and shieldwall games in current desktop and mobile browsers. Check routes, turn progression, balance, AI wait time, combat feedback, selection and performance; record and fix reproducible problems before declaring the encounter tuned.
+- [ ] Manually review the selected-soldier panel and battlefield with keyboard-only input, a real screen reader and reduced motion at desktop/mobile sizes. Verify focus order, spoken status changes, controls, zoom and selection; fix any issues. Automated keyboard/ARIA assertions are not a substitute for this review.
+- [ ] Expand integration/regression checks around the complete editor → link → launch → play → resume flow, especially legacy match snapshots, AI failures/retries, fog-safe responses and mobile interactions. Editor, engine, API and browser tests already exist; add targeted tests for gaps uncovered by the manual review rather than reimplementing existing coverage.
+- [ ] Decide what to do when the local defender AI is slow or unavailable (retry messaging, timeout and/or an explicitly designed offline fallback). Currently end turn fails without advancing the match; preserve that atomicity and keep credentials server-side if behavior changes.
+- [ ] Decide whether preferences besides animation speed should persist locally; pause/resume, speed selection, reduced motion, keyboard orders and combat history are already implemented.
 
-- [x] Add an authenticated admin editor to create single games and link them to scenarios.
-- [x] Persist session-owned game instances and load the battlefield, units, and current instance state from the server.
-- [x] Store editable game definitions on the server instead of using one fixed map and starting roster for all catalog entries.
-- [x] Send player movement and end-turn actions to the server for validation and state updates, with revision checks against stale actions.
-- [x] Make movement and courtyard capture turn-based rather than advancing them in a continuous client-side animation loop.
-- [x] Add exactly one opposing enemy side with its own units and server-side AI. Connect the server to `http://127.0.0.1:11435/v1` using `unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL`; read the API key from `.env` and never expose it to the browser or commit it. Defenders move on end turn but cannot fight or occupy the objective until combat is implemented.
+## Tactical expansion
 
-## Game engine and siege systems
+### Interiors, exploration and equipment
 
-- [x] Separate simulation state, input, pathfinding, rendering, and UI so each can evolve without coupling.
-  - [x] Move prototype state, movement, capture, and pathfinding out of the browser UI into a testable server engine.
-  - [x] Move battlefield rendering behind a renderer module.
-  - [x] Isolate pointer/camera input and launch/catalog UI.
-- [x] Add robust terrain collision, unit spacing, and map configuration for multiple strongpoints and elevation levels; allow units to climb between levels using ladders and ramps.
-  - [x] Support optional elevated tiles, ladder/ramp traversal, height-aware melee, and raised-tile rendering and picking.
-  - [x] Keep units on distinct tiles during movement and prevent paths through occupied tiles.
-  - [x] Add multiple gated strongpoints and terrain collision beyond keep walls.
-  - [x] Add editable map objects such as trees and rocks, with rendering and appropriate movement and line-of-sight collision.
-- [x] Add camera pan and zoom with pointer dragging, wheel input, and accessible zoom buttons.
-- [x] Give units turn-based move points that are spent on movement and restored at turn end.
-- [ ] Complete unit stats and turn-based combat rules.
-  - [x] Add health, one fight point per turn, adjacent melee attacks, defender counterattacks, casualties, and defeat state.
-  - [x] Add casualty-driven morale and veteran promotion effects to unit stats.
-- [x] Allow recruits with full morale to promote to veteran with increased move and fight allowances.
-- [ ] Extend combat with bow and crossbow ranges, reload times, projectile motion, and line-of-sight checks.
-  - [x] Add server-validated bow/crossbow attacks with wall-blocked line of sight, weapon ranges, reloads, and defender ranged attacks.
-  - [x] Animate arrows and bolts as projectiles.
-- [ ] Add defender behavior, cover and wall advantages, capture/defeat states, and a tuned playable encounter.
-  - [x] Keep a nearby garrison at the objective during AI movement and target capturing attackers first.
-  - [x] Add wall, tree, and rock cover against ranged attacks with combat feedback.
-  - [x] Add a gate-covering crossbow to the seeded assault and test that the gate must be cleared before capture.
-  - [ ] Playtest and tune the encounter on desktop and mobile.
-- [ ] Persist settings and add accessible controls, pause and animation-speed controls, and clear combat feedback.
-  - [x] Add pause/resume, locally saved animation-speed controls, reduced-motion support, and damage/casualty feedback.
-  - [x] Add keyboard-accessible battlefield orders.
-  - [x] Add richer combat history: persist the latest 100 attacks and promotions, including casualties and morale changes, and show them in the battlefield sidebar.
+- [ ] Model walkable multi-floor house **and castle** interiors, including upper floors, basements and dungeons. Define stairs, ladders, doors and passages, floor/wall collision, route costs, line of sight, AI and combat across levels. Ground-floor house doors and hidden-door discovery already work.
+- [ ] Add isometric floor selection, roof/floor cutaways and picking/route previews for indoor and underground spaces; make transitions from outside to rooms and between floors readable and keyboard-accessible.
+- [ ] Add discoverable hidden passages and traps: spotting, disarming, avoidance, triggering, effects and fog-safe server/AI behavior. Hidden house doors are already supported.
+- [ ] Specify and implement effects for tools beyond rope, torch and shield; document action costs, inventory limits, AI interactions and tests for each new tool. Ground item authoring, carrying, dropping and casualty recovery already work.
+- [ ] When flammable castle interiors exist, extend the current grass/wooden-house fire rules to those materials and test spreading, extinguishing and visibility across floors. Fire already spreads on grass and enterable house floors; smoke, damage and extinguishing are implemented.
 
-## Medieval tactical expansion (inspired by UFO: Enemy Unknown)
+### Outdoor map authoring
 
-- [x] Add a throne-room mission where attackers must reach the throne and capture the living king; make the king a unit, define capture range/action and guards, and distinguish capture from killing him in victory/defeat rules.
-- [x] Add catapults as crewed siege equipment with limited ammunition, aiming, firing and reload costs, projectile impacts, and damage to units or fortifications.
-- [x] Add an editable medieval village with houses, lanes, fences, wells, and other cover; define movement, visibility, and combat interactions for its structures (solid houses; entering buildings is the next milestone).
-- [ ] Let units enter and navigate houses and castles across multiple floors, including basements and dungeons; connect levels with doors, stairs, ladders, and passages, and account for walls and floors in movement and line of sight.
-  - [x] Add optional perimeter doors and walkable ground-floor house interiors with doorway-only movement, wall-aware combat and cutaway rendering; retain solid legacy houses.
-- [ ] Make multi-level interiors readable and selectable in the isometric view with roof/floor cutaways and floor controls; allow routes from outside to rooms, upper floors, and underground spaces.
-- [ ] Add discoverable hidden doors and passages, plus traps that can be spotted, disarmed, avoided, or triggered; include their effects in server-validated movement and enemy behavior.
-  - [x] Support hidden ground-floor house doors that become visible and enterable when an attacker reaches an adjacent exterior tile; keep unrevealed doors out of snapshots, routes and AI orders.
-  - [ ] Add hidden passages and discoverable/disarmable traps.
-- [ ] Let units pick up, drop, carry, and equip items from ground tiles, with inventory limits and turn-based action costs; make dropped gear recoverable after a casualty.
-  - [x] Add server-owned ground potions, two-potion carrying limits, fight-point-costed pickup/drop and casualty drops.
-  - [x] Drop weapons and armor on casualties; let attackers spend fight points to drop or recover ground gear in empty slots, within the carried-weight limit. Persist unique item IDs and respect fog of war.
-  - [x] Support authoring starting ground weapons and armor, with existing recovery rules.
-  - [x] Support authored ground tools, pickup/drop with inventory costs, and recovery after casualties.
-  - [ ] Define and implement special uses for carried tools.
-    - [x] Let a soldier carrying rope climb or descend one-level ledges without built-in access while on foot; keep route previews and defender paths consistent.
-- [x] Add consumable healing potions that units can carry, use on themselves or nearby allies, and find on the ground; cap healing at maximum health and consume the potion on use.
-- [x] Replace unit classes with a weapon, a carried-tools list, and a separate king mission marker. Migrate saved rosters, active matches, and history, while still accepting imported legacy labels.
-- [x] Show the selected soldier's current HP, morale, remaining movement/fight points, weapon, tools, potions, and reload/catapult status in a dedicated sidebar readout; refresh on selection and after each action.
-- [x] Refine the selected-soldier UI with labeled stat rows and graphical remaining/max indicators, mobile styling and text equivalents for screen readers. Keep current-turn capacities separate from projected next-turn allowances after morale changes or promotion; test empty/group selections, zero points, reload, death, and resume.
-- [ ] Manually review the selected-soldier panel on desktop/mobile screens and with a screen reader in a real browser.
-- [x] Add equippable armor with distinct protection and weight; apply protection consistently to melee and ranged damage. Leather absorbs 1 damage per turn (weight 1), mail absorbs 2 (weight 3); equipping or removing costs one fight point. Catapult hits also use armor protection.
-- [x] Make carried weight (including armor, weapons, tools and potions) reduce movement allowance, with an eight-weight cap, a one-MP minimum, immediate inventory adjustments, and load/route feedback before orders.
-- [x] Add horseback riding: mount/dismount actions, mounted movement and melee, horse health and casualties, and terrain or doorway restrictions for horses.
-- [x] Give ground types such as roads, grass, mud, and swamp different movement costs and traversal rules for foot units and horses; have pathfinding choose routes by move-point cost, not just tile count.
-  - [x] Add optional authored road/grass/mud/swamp tiles, cheapest-cost routing, turn-based MP spending for both sides, and cost-aware route previews for foot units.
-  - [x] Add mounted movement costs, swamp/house/ladder restrictions and weight-independent riding allowances.
-- [ ] Add authorable rivers, varied vegetation, sloped hills, and additional ground terrain to maps.
-  - [ ] Define map data for connected river segments (including banks and deliberate crossings), tree varieties such as pine, cactus and willow, hedges, and flowers. Decide which features occupy tiles versus edges, which are decorative, and how each affects movement, sight, cover, horses, and fire.
-  - [ ] Extend the existing elevation/access rules to support adjacent slopes that form continuous hills. Allow ground terrain on hills, including swamp, desert, gravel, grass and plains; retain existing road/mud behavior and specify terrain costs and slope restrictions for foot and mounted units.
-  - [ ] Validate placement and connections against map bounds, walls, houses, objectives, starting units, other objects and existing elevation; keep authored maps without the new fields playable. Update pathfinding, AI, line of sight, route previews and fog-of-war snapshots to match the rules.
-  - [ ] Render joined rivers, crossings, distinct vegetation, flowers, hill faces/slopes and each ground type in the isometric view; keep elevation picking and route highlights aligned with the visible terrain.
-  - [ ] Add editor help or controls for choosing and placing these features, with clear validation errors, a preview and a way to test a saved map. Cover combinations and edge cases in engine, API and renderer tests.
-  - [ ] Document a map designer workflow: create or duplicate a single game in `/admin/`; set map bounds, keep, objective and rosters; lay out ground types and hill heights/slopes; draw connected rivers and crossings; place trees, hedges and flowers; preview and fix validation/reachability errors; save, link the game to a scenario, launch a new instance and playtest foot/mounted routes, sight and visuals. Existing instances snapshot their maps, so restart to see edits.
-- [x] Preview the exact path, terrain costs, and turns required while hovering or selecting a destination; update the preview for occupancy, equipment weight, and mounted status, and distinguish unreachable tiles.
-  - [x] Preview the current single-soldier route, occupancy, terrain MP cost, turn boundaries, and unreachable tiles on hover and keyboard focus; update it after actions and selection changes. Allowances account for carried weight and mounted movement.
-- [x] Let units reserve move/fight points for reactions during the enemy turn, such as a bow shot or melee strike when a visible enemy enters range; show the reserved cost and eligible trigger area.
-  - [x] Reserve or cancel one fight point for a sword or bow reaction on each visible defender movement step; interrupt before defender attacks, show the selected soldier's eligible tiles, and expire unused reservations after the turn.
-  - [x] Support move-point reservations and movement-based reactions: hold remaining MP to take one legal evasive step when a visible defender moves adjacent.
-- [ ] Add fog of war and night battles: reveal only what allied units can see, and let torches, watchfires, and daylight affect detection and ambushes without revealing hidden enemies to the player.
-  - [x] Add opt-in daylight fog of war with shared six-tile line of sight, persistent explored ground, hidden enemies and supplies, AI sight limits, and a seeded reconnaissance encounter. Existing matches without fog stay unchanged.
-  - [ ] Add night maps, torches, watchfires, lighting-dependent detection and ambush rules.
-    - [x] Add opt-in night fog, two-step dark sight, carried torches, static watchfires, lighting-dependent detection for both teams and a seeded night encounter.
-    - [x] Add explicit +1 damage ambush bonuses to direct attacks from soldiers unseen by their targets' team on fog maps, including reactions; keep cover, armor and catapult rules intact.
-    - [x] Let soldiers extinguish and relight adjacent watchfires for one fight point, changing sight for both teams immediately.
-    - [x] Let soldiers extinguish or relight carried torches for one fight point, trading night vision for concealment without dropping the tool.
-- [ ] Add defensive stances such as crouching behind cover or raising a shield, with explicit action costs and trade-offs between protection, visibility, and movement.
-  - [x] Add a crouch stance costing one fight point and all remaining move points; reduce each incoming ranged shot by one damage until the next turn, before armor, without mitigating melee or catapults.
-  - [x] Add shield-raising and visibility-aware cover trade-offs: carried shields block one direct damage from visible attackers at the cost of one FP, one MP, and reduced sight.
-- [x] Add smoke and fire hazards that affect visibility, movement, and health; let fires spread through appropriate village or castle structures and provide ways to avoid or extinguish them.
-  - [x] Make catapult impacts leave two-turn smoke clouds that block sight and ranged attacks without blocking movement; persist and render smoke, including fog-safe snapshots.
-  - [x] Add spreading fire from catapult-ignited grass or enterable wooden house floors, 1 damage to occupants, +2 MP on entry, and an adjacent one-FP extinguish action. Burned fuel does not spread again unless struck by another stone.
-- [ ] Expand injuries beyond lost health with temporary penalties and treatment, while retaining the existing casualty-driven morale and promotion rules.
-  - [x] Wound surviving units reduced to 1 HP for two turn transitions; reduce on-foot movement by 1 MP without refunding spent points, allow healing potions to treat injuries (even at full HP), and show injury/recovery in the selected-soldier panel.
-  - [ ] Add persistent wounds and infirmary treatment when a campaign carries soldiers between battles.
-- [ ] Support withdrawing surviving units through a designated exit and show a mission debrief with casualties, rescued villagers, prisoners, and recovered equipment.
-  - [x] Add an optional authored exit, one-FP soldier evacuation with carried gear, successful retreats when any evacuee survives, and a survivor/casualty/evacuated-equipment debrief.
-  - [ ] Track rescued villagers and prisoners in mission debriefs when those mission mechanics exist.
-- [ ] Add nonlethal capture of enemy commanders; use prisoners and recovered gear to reveal enemy plans or unlock new tactics and equipment through medieval interrogation and smithing.
-- [ ] Carry surviving units, their experience, wounds, and equipment between linked battles so retreat and recovery have lasting consequences.
-- [ ] Add a manageable camp or fortress with a smithy, infirmary, stores, and training ground for preparing units and crafting equipment between missions.
-- [ ] Add a regional campaign in which protecting villages earns supplies and noble support while ignored raids escalate and threaten later missions.
+- [ ] Design connected rivers (banks/crossings), vegetation (pine, cactus, willow, hedges, flowers), sloped hills and new terrain (swamp, desert, gravel, grass, plains). Decide tile versus edge placement, decorative versus blocking features, movement costs, sight/cover, fire and horse restrictions; preserve existing road/mud rules.
+- [ ] Extend the map schema and validation for joined river segments, crossings, continuous adjacent slopes and terrain on hills. Reject invalid overlap with map bounds, walls, houses, objectives, starts, objects and elevation; keep older authored maps and active match snapshots playable.
+- [ ] Update pathfinding, defender AI, line of sight, fog snapshots, movement costs and route previews for the new features; test foot/mounted routes, crossings, elevation and mixed terrain in engine and API tests.
+- [ ] Render joined rivers, crossings, vegetation, flowers, hill faces/slopes and each ground type; keep isometric picking and route highlights accurate, with renderer/browser tests.
+- [ ] Improve the admin JSON authoring workflow with placement guidance, understandable validation errors, a map preview and a way to test a saved game. Document how to duplicate/create a single game, set bounds/keep/objective/rosters, lay out terrain and rivers, resolve reachability errors, link a scenario, launch and playtest; restart matches to see edits.
 
-Mechanics references: [UFO: Enemy Unknown gameplay](https://en.wikipedia.org/wiki/X-COM:_UFO_Defense#Gameplay), [terror missions](https://www.ufopaedia.org/Terror_Mission), [research](https://www.ufopaedia.org/Research), and [persistent soldiers](https://www.ufopaedia.org/Soldiers).
+## Later: persistent campaign
 
-## Asset creation
+- [ ] Add mission mechanics for rescuing villagers and taking commanders prisoner without killing them; include rescued people, prisoners and recovered gear in debriefs. Exit-based withdrawal and survivor/casualty/equipment debriefs already exist.
+- [ ] Carry survivors, rank/experience, wounds and equipment between linked battles. Define roster persistence, recovery after retreat/defeat and migration/compatibility for standalone games; only temporary in-battle wounds are implemented today.
+- [ ] Add camp/fortress preparation: stores, smithy/crafting, infirmary treatment and training. Let prisoners and recovered equipment inform tactics or unlock gear through interrogation/smithing.
+- [ ] Build a regional campaign in which defended villages supply resources and noble support, while ignored raids escalate and affect later missions.
 
-- [ ] Set an original visual direction, palette, tile scale, and asset naming/manifest conventions.
-- [ ] Create terrain, road, wall, gate, tower, castle moat, drawbridge, battlements, courtyard, objective, tree, and rock art as modular isometric tiles and objects.
-- [ ] Create original directional attacker/defender sprites with idle, walk, attack, hit, and defeat animations.
-- [ ] Create weapons, arrows/bolts, selection indicators, health bars, UI icons, and lightweight combat audio.
-- [ ] Keep editable source assets, optimized browser exports, and a record of licenses/attributions for any external material.
-- [ ] Replace the milestone's procedural placeholder drawings incrementally and confirm visual clarity at desktop and mobile sizes.
+## Art and audio
 
-## Release and validation
+- [ ] Set an original visual direction, palette, tile scale and asset naming/manifest conventions.
+- [ ] Produce modular isometric terrain, road, wall, gate, tower, moat, drawbridge, battlements, courtyard, objective, tree and rock art; add new outdoor/interior assets as their mechanics land.
+- [ ] Produce original directional attacker/defender sprites with idle, walk, attack, hit and defeat animations.
+- [ ] Produce weapons, arrows/bolts, selection indicators, health bars, UI icons and lightweight combat audio.
+- [ ] Keep editable source assets, optimized browser exports and licenses/attributions for any external material.
+- [ ] Replace procedural placeholders incrementally; confirm readability at desktop/mobile sizes and with the planned floor controls.
 
-- [x] Add server-engine and API tests for pathfinding, movement, turn transitions, objective capture, session access, and stale actions, plus Django catalog/page smoke tests.
-- [x] Add automated tests for morale and promotion as those systems are implemented.
-  - [x] Add automated tests for line of sight, ranged combat, and reload timing.
-- [ ] Test game editing and scenario links, server-loaded instances and action updates, turn rules, elevation traversal, unit stats and promotion, and enemy AI.
-  - [x] Add engine tests for elevation validation, climbing, descending, capture, and defender movement.
-- [ ] Test the complete scenario in current desktop and mobile browsers and tune performance and balance.
-- [ ] Document local setup, controls, asset workflow, and production build/deployment steps.
+## Release and documentation
+
+- [ ] Document the asset workflow and a production deployment/build procedure. Local setup and controls are already in the README; Django settings are development-only, so production needs environment-managed secrets, DEBUG/host/static-file configuration and a deployment security review before publishing.
+- [ ] Run engine/API/editor and browser-interaction tests, JS syntax checks and the manual desktop/mobile/accessibility playtest on each release candidate; resolve regressions and tune performance/balance.
+
+## Completed baseline
+
+- [x] Django-served isometric canvas prototype with original placeholder art, six attackers, individual/group selection, click/keyboard movement, pan/zoom, open-gate routing and courtyard capture; start/restart flow and responsive UI.
+- [x] Seeded scenario/single-game catalog, staff admin map/roster editing and scenario links; session-owned, revisioned server instances that snapshot definitions, validate actions and support resume. Engine, renderer, input and launch UI are separated.
+- [x] Turn-based move/fight points, health, melee/counterattacks, ranged bow/crossbow attacks with reloads and animated projectiles, casualties, morale and veteran promotion, cover, history, capture/defeat and objective-guarding defender AI. The local model can fail without committing a partial turn.
+- [x] Gated strongpoints, elevation with ladders/ramps, objects and collision; a village with lanes, fences, wells, ground-floor enterable houses and discoverable hidden doors; cheapest-MP road/grass/mud/swamp routing for foot/mounted soldiers and exact route/turn previews.
+- [x] Throne-room capture-king mission, catapult ammunition/aim/reload/wall breaches, impact smoke and spreading grass/house fire with damage and extinguishing.
+- [x] Weapons, armor, tools, potions, load limits, dropped/recoverable casualty gear and rope climbing; mounted movement/combat, horse casualties, temporary wounds and potion treatment.
+- [x] Daylight/night fog with shared sight, torches, toggled watchfires and ambush damage; crouching, raised shields, reserved attack reactions and reserved-movement evasions.
+- [x] Authored exit/withdrawal and debrief for evacuated/fallen soldiers and their equipment; selected-soldier status, combat feedback, pause/resume, saved animation speed and reduced-motion support.
+- [x] Automated engine, editor, catalog, API and browser-controller tests cover many of these mechanics, including fire spreading and AI error handling; manual full-scenario and accessibility validation remains open above.
+
+Mechanics references: [UFO: Enemy Unknown gameplay](https://en.wikipedia.org/wiki/X-COM:_UFO_Defense#Gameplay), [terror missions](https://www.ufopaedia.org/Terror_Mission), [research](https://www.ufopaedia.org/Research) and [persistent soldiers](https://www.ufopaedia.org/Soldiers).

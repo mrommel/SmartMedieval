@@ -4,7 +4,7 @@
 
 **Siege of Greywatch** is a browser-playable, isometric medieval siege strategy prototype set in the Northern March in 1348. Lead an attacking company through the keep’s open southern gate and capture its courtyard.
 
-> **Prototype status:** Movement, turn-taking, melee and ranged combat, equippable armor and recoverable casualty gear, carried-weight and terrain-cost movement, horseback riding, catapults, wall breaches and temporary impact smoke, health, morale, veteran promotion, elevation, projectile animation, cover, courtyard capture, a throne-room mission, a village with enterable ground-floor houses and healing potions, and optional daylight or torchlit night fog of war with ambush bonuses are playable. Defenders move and attack automatically on end turn. Spreading fire and desktop/mobile playtesting remain future work.
+> **Prototype status:** Movement, turn-taking, melee and ranged combat, equippable armor and recoverable casualty gear, carried-weight and terrain-cost movement, horseback riding, catapults, wall breaches, impact smoke and spreading grass/house fire, health, morale, veteran promotion, elevation, projectile animation, cover, courtyard capture, a throne-room mission, a village with enterable ground-floor houses and healing potions, and optional daylight or torchlit night fog of war with ambush bonuses are playable. Defenders move and attack automatically on end turn. Full desktop/mobile playtesting remains future work.
 
 The browser controller in `game/static/game/game.js` handles input, actions, and menus; `game/static/game/renderer.js` owns battlefield drawing, projection, and projectile effects.
 
