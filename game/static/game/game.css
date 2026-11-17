@@ -171,7 +171,9 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .playback-settings { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .playback-settings label { display: block; margin-bottom: 7px; color: #d2bd8c; font-size: 10px; font-weight: 700; }
 .playback-settings select { width: 100%; padding: 8px; border: 1px solid #879385; border-radius: 3px; color: var(--ink); background: var(--panel-deep); font: inherit; }
-.playback-settings select:focus-visible, .restart-button:focus-visible { outline: 2px solid #e6c374; outline-offset: 2px; }
+.playback-settings .motion-setting { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; cursor: pointer; }
+.motion-setting input { margin: 0; accent-color: #d3ac69; }
+.playback-settings select:focus-visible, .motion-setting input:focus-visible, .restart-button:focus-visible { outline: 2px solid #e6c374; outline-offset: 2px; }
 .playback-settings p { margin: 9px 0 0; color: #aeb5a8; font-size: 10px; line-height: 1.6; }
 kbd { padding: 2px 4px; border: 1px solid #566057; border-radius: 2px; color: #e0d6bb; font: 8px "DM Sans", sans-serif; }
 .field-quote { position: relative; margin-top: 16px; padding: 12px 0 0 14px; border-top: 1px solid var(--line); }
@@ -218,6 +220,10 @@ kbd { padding: 2px 4px; border: 1px solid #566057; border-radius: 2px; color: #e
   .page-foot { font-size: 7px; }
 }
 
+body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after {
+  scroll-behavior: auto !important;
+  transition-duration: .01ms !important;
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }

@@ -8,7 +8,7 @@ Check off only shipped, tested behavior. The **Completed baseline** records exis
 - [ ] Manually review the selected-soldier panel and battlefield with keyboard-only input, a real screen reader and reduced motion at desktop/mobile sizes. Verify focus order, spoken status changes, controls, zoom and selection; fix any issues. Automated keyboard/ARIA assertions are not a substitute for this review.
 - [ ] Expand integration/regression checks around the complete editor → link → launch → play → resume flow, especially legacy match snapshots, AI failures/retries, fog-safe responses and mobile interactions. Editor, engine, API and browser tests already exist; add targeted tests for gaps uncovered by the manual review rather than reimplementing existing coverage.
 - [ ] Measure and tune the local defender AI wait time on real devices. When AI fails, the turn now stays unchanged and offers retry or an explicit offline end turn: defenders hold position but still attack and other turn effects run. Credentials remain server-side.
-- [ ] Decide whether preferences besides animation speed should persist locally; pause/resume, speed selection, reduced motion, keyboard orders and combat history are already implemented.
+- [x] Persist the optional reduced-motion setting locally alongside animation speed. Keep pause transient, keyboard orders available without a preference, and combat history server-owned; device reduced-motion settings always take precedence.
 
 ## Tactical expansion
 

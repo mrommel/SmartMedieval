@@ -16,12 +16,15 @@ const previewMovement = previewContext.previewMovement;
 
 function element() {
   const listeners = {};
+  const classes = new Set();
   let text = "";
   return {
-    hidden: false, disabled: false, value: "1", style: {}, dataset: {},
+    hidden: false, disabled: false, checked: false, value: "1", style: {}, dataset: {},
     get textContent() { return text + (this.children || []).map(child => child.textContent).join(""); },
     set textContent(value) { text = String(value); this.children = []; },
-    classList: { add() {}, remove() {}, toggle() {} },
+    classList: { add: name => classes.add(name), remove: name => classes.delete(name),
+      toggle(name, force) { if (force ?? !classes.has(name)) classes.add(name); else classes.delete(name); },
+      contains: name => classes.has(name) },
     addEventListener(type, handler) { listeners[type] = handler; },
     setAttribute(name, value) { this[name] = value; },
     querySelector() { return element(); },
@@ -32,7 +35,7 @@ function element() {
   };
 }
 
-function setup(savedSpeed = null, catalogFetch = null, actionFetch = null) {
+function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, preferences = {}) {
   const nodes = new Map();
   const get = id => {
     if (!nodes.has(id)) nodes.set(id, element());
@@ -54,9 +57,10 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null) {
   } });
   get("battlefield-canvas").getContext = () => ctx;
   const storage = new Map(savedSpeed === null ? [] : [["greywatch.animationSpeed", savedSpeed]]);
+  if (preferences.savedMotion !== undefined) storage.set("greywatch.reduceMotion", preferences.savedMotion);
   const store = {
-    getItem: key => storage.get(key) ?? null,
-    setItem: (key, value) => storage.set(key, value)
+    getItem(key) { if (preferences.storageBlocked) throw new Error("Storage unavailable"); return storage.get(key) ?? null; },
+    setItem(key, value) { if (preferences.storageBlocked) throw new Error("Storage unavailable"); storage.set(key, value); }
   };
   const snapshot = {
     id: 1, revision: 1, kind: "single-games", game_id: 1,
@@ -75,11 +79,11 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null) {
   const window = {
     devicePixelRatio: 1, localStorage: store,
     confirm: () => true,
-    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    matchMedia: () => ({ matches: Boolean(preferences.deviceReducedMotion), addEventListener() {} }),
     addEventListener() {}
   };
   const document = {
-    getElementById: get, createElement: element,
+    body: get("body"), getElementById: get, createElement: element,
     querySelector: () => ({ content: "csrf" }),
     querySelectorAll: () => ["scenarios", "single-games"].map(kind => {
       const button = get(`catalog-${kind}`);
@@ -854,6 +858,56 @@ test("speed persists, restores, and off disables per-frame drawing", async () =>
   game.frame(16);
   assert.equal(game.draws(), count);
   assert.equal(setup("0").get("animation-speed").value, "0");
+});
+
+test("reduced motion is saved, restored and can be toggled without changing animation speed", async () => {
+  const game = setup("2");
+  await game.get("continue-game").fire("click");
+  game.frame(0);
+  game.frame(16);
+  const input = game.get("reduce-motion");
+  input.checked = true;
+  input.fire("change");
+  assert.equal(game.store.getItem("greywatch.reduceMotion"), "true");
+  assert.equal(game.get("body").classList.contains("reduce-motion"), true);
+  const count = game.draws();
+  game.frame(32);
+  assert.equal(game.draws(), count);
+  assert.equal(game.get("animation-speed").value, "2");
+  const resumed = setup("2", null, null, { savedMotion: "true" });
+  assert.equal(resumed.get("reduce-motion").checked, true);
+  assert.equal(resumed.get("body").classList.contains("reduce-motion"), true);
+  await resumed.get("continue-game").fire("click");
+  resumed.frame(0);
+  const still = resumed.draws();
+  resumed.frame(16);
+  assert.equal(resumed.draws(), still);
+  resumed.get("reduce-motion").checked = false;
+  resumed.get("reduce-motion").fire("change");
+  assert.equal(resumed.store.getItem("greywatch.reduceMotion"), "false");
+  assert.equal(resumed.get("body").classList.contains("reduce-motion"), false);
+  const now = resumed.draws();
+  resumed.frame(32);
+  assert.ok(resumed.draws() > now);
+});
+
+test("device reduced motion wins and unavailable or invalid storage falls back safely", async () => {
+  const device = setup("2", null, null, { savedMotion: "false", deviceReducedMotion: true });
+  await device.get("continue-game").fire("click");
+  device.frame(0);
+  const initial = device.draws();
+  device.frame(16);
+  assert.equal(device.draws(), initial);
+  device.get("reduce-motion").checked = false;
+  device.get("reduce-motion").fire("change");
+  const unchanged = device.draws();
+  device.frame(32);
+  assert.equal(device.draws(), unchanged);
+  assert.equal(setup(null, null, null, { savedMotion: "garbage" }).get("reduce-motion").checked, false);
+  const blocked = setup(null, null, null, { storageBlocked: true });
+  blocked.get("reduce-motion").checked = true;
+  blocked.get("reduce-motion").fire("change");
+  assert.equal(blocked.get("body").classList.contains("reduce-motion"), true);
 });
 
 test("combat history renders on resume and updates after an action", async () => {

@@ -50,6 +50,7 @@ import { previewMovement } from "./path_preview.js";
   const pauseButton = document.getElementById("pause-game");
   const pauseIndicator = document.getElementById("pause-indicator");
   const speedSelect = document.getElementById("animation-speed");
+  const reduceMotionInput = document.getElementById("reduce-motion");
   const selectedStats = document.getElementById("selected-stats");
   const historyList = document.getElementById("combat-history-list");
   const cursorStatus = document.getElementById("cursor-status");
@@ -75,8 +76,10 @@ import { previewMovement } from "./path_preview.js";
   let animationStarted = false;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const speedKey = "greywatch.animationSpeed";
+  const motionKey = "greywatch.reduceMotion";
   const validSpeeds = [0, .5, 1, 2];
   let animationSpeed = 1;
+  let userReducedMotion = false;
   let paused = false;
   let animationTime = 0;
   let lastFrameTime = null;
@@ -86,11 +89,14 @@ import { previewMovement } from "./path_preview.js";
   try {
     const savedValue = window.localStorage.getItem(speedKey);
     if (savedValue !== null && validSpeeds.includes(Number(savedValue))) animationSpeed = Number(savedValue);
+    userReducedMotion = window.localStorage.getItem(motionKey) === "true";
   } catch (_) { /* Private browsing may disable storage. */ }
   speedSelect.value = String(animationSpeed);
+  reduceMotionInput.checked = userReducedMotion;
+  document.body.classList.toggle("reduce-motion", userReducedMotion);
 
   function animationsEnabled() {
-    return animationSpeed > 0 && !reducedMotion.matches;
+    return animationSpeed > 0 && !reducedMotion.matches && !userReducedMotion;
   }
 
   function updateControls() {
@@ -1052,6 +1058,13 @@ import { previewMovement } from "./path_preview.js";
     animationSpeed = nextSpeed;
     if (!animationsEnabled()) renderer.clearProjectiles();
     try { window.localStorage.setItem(speedKey, speedSelect.value); } catch (_) { /* Storage is optional. */ }
+    draw();
+  });
+  reduceMotionInput.addEventListener("change", () => {
+    userReducedMotion = reduceMotionInput.checked;
+    document.body.classList.toggle("reduce-motion", userReducedMotion);
+    if (!animationsEnabled()) renderer.clearProjectiles();
+    try { window.localStorage.setItem(motionKey, String(userReducedMotion)); } catch (_) { /* Storage is optional. */ }
     draw();
   });
   reducedMotion.addEventListener?.("change", () => {
