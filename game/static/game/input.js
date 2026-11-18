@@ -280,6 +280,7 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     onDraw();
   });
   canvas.addEventListener("keydown", event => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const directions = {
       ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
     };
@@ -298,6 +299,17 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       if (canOrder()) keyboardOrder(event.shiftKey);
+    } else if (["+", "=", "-", "_"].includes(event.key)) {
+      event.preventDefault();
+      const { width, height, tileH } = getLayout();
+      const point = renderer.project(cursor.x, cursor.y);
+      const screenX = cursor.visible ? point.x * camera.zoom + camera.x : width / 2;
+      const screenY = cursor.visible ? (point.y + tileH / 2) * camera.zoom + camera.y : height / 2;
+      zoomAt(screenX, screenY, event.key === "+" || event.key === "=" ? 1.15 : 1 / 1.15);
+      if (cursor.visible) {
+        revealCursor();
+        onDraw();
+      }
     }
   });
   canvas.addEventListener("wheel", event => {

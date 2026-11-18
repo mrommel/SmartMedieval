@@ -129,6 +129,48 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
   };
 }
 
+test("focused battlefield zooms with keyboard without issuing orders or stealing browser shortcuts", () => {
+  const game = setup();
+  const canvas = element();
+  const map = { cols: 20, rows: 20, elevation: [] };
+  let orders = 0;
+  const input = game.createInput({
+    canvas, renderer: { project: (x, y) => ({ x: 300 + (x - y) * 28, y: 80 + (x + y) * 14 }) },
+    simulation: { units: [], selected: new Set() }, getMap: () => map,
+    getLayout: () => ({ width: 600, height: 400, tileW: 56, tileH: 28, originX: 300, originY: 80 }),
+    canOrder: () => true, isWalkable: () => true, isAiming: () => false,
+    onAim() { orders++; }, onMove() { orders++; }, onAttack() { orders++; },
+    onSelection() {}, onBlocked() {}, onDraw() {}, onCursor() {}
+  });
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.equal(input.cursor.x, 1);
+  const zoomKey = (key, modifiers = {}) => {
+    let prevented = false;
+    canvas.fire("keydown", { key, preventDefault() { prevented = true; }, ...modifiers });
+    return prevented;
+  };
+  assert.equal(zoomKey("="), true);
+  assert.equal(input.camera.zoom, 1.15);
+  assert.ok(Math.abs((328 * input.camera.zoom + input.camera.x) - 328) < 1e-10);
+  assert.ok(Math.abs((108 * input.camera.zoom + input.camera.y) - 108) < 1e-10);
+  assert.equal(zoomKey("+", { shiftKey: true }), true);
+  assert.ok(input.camera.zoom > 1.15);
+  assert.equal(zoomKey("-"), true);
+  assert.equal(zoomKey("_", { shiftKey: true }), true);
+  assert.ok(Math.abs(input.camera.zoom - 1) < 1e-10);
+  assert.equal(input.cursor.x, 1);
+  assert.equal(orders, 0);
+  assert.equal(zoomKey("+", { metaKey: true }), false);
+  assert.equal(zoomKey("-", { ctrlKey: true }), false);
+  assert.equal(zoomKey("=", { altKey: true }), false);
+  assert.equal(input.camera.zoom, 1);
+  for (let i = 0; i < 20; i++) zoomKey("+");
+  assert.equal(input.camera.zoom, 1.8);
+  for (let i = 0; i < 30; i++) zoomKey("-");
+  assert.equal(input.camera.zoom, .7);
+});
+
 test("admin playtest opens the saved session match directly", async () => {
   const game = setup(null, null, null, { playtest: true });
   await new Promise(resolve => setImmediate(resolve));
