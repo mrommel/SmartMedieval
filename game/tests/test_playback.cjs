@@ -347,6 +347,28 @@ test("exit withdrawal sends the selected soldier and debriefs evacuated gear", a
   assert.equal(game.get("victory").hidden, false);
 });
 
+for (const outcome of ["withdrawn", "defeated"]) {
+  test(`saved ${outcome} match with no active soldiers opens its result on a fresh page`, async () => {
+    const game = setup();
+    game.snapshot.map.exit = { x: 0, y: 0 };
+    game.snapshot.state.units = [];
+    game.snapshot.state.withdrawn = outcome === "withdrawn" ? [{ id: 0, weapon: "sword", tools: [] }] : [];
+    game.snapshot.state.captured = outcome === "withdrawn";
+    game.snapshot.state.defeated = outcome === "defeated";
+    game.snapshot.state.capture_status = outcome === "withdrawn" ? "WITHDRAWN" : "DEFEATED";
+    await game.get("continue-game").fire("click");
+    assert.equal(game.get("launch-error").hidden, true);
+    assert.equal(game.get("game-screen").hidden, false);
+    assert.equal(game.get("victory").hidden, false);
+    assert.equal(game.get("victory").classList.contains("defeat"), outcome === "defeated");
+    assert.equal(game.get("soldier-select").disabled, true);
+    assert.equal(game.get("end-turn").disabled, true);
+    assert.match(game.get("mission-debrief").textContent,
+      outcome === "withdrawn" ? /1 withdrawn, 0 fallen/ : /0 withdrawn, 1 fallen/);
+    assert.equal(game.postCount(), 0);
+  });
+}
+
 test("crouch costs a fight point and shows its movement and ranged-defense trade-off", async () => {
   const game = setup();
   await game.get("continue-game").fire("click");

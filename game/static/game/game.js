@@ -738,7 +738,7 @@ import { previewMovement } from "./path_preview.js";
     const attackers = simulation.units.filter(unit => unit.side !== "defenders");
     const defenders = simulation.units.filter(unit => unit.side === "defenders");
     startingAttackerCount = snapshot.map.startPositions.length;
-    if (newGame) simulation.selected = new Set([attackers[0].id]);
+    if (newGame) simulation.selected = new Set(attackers.length ? [attackers[0].id] : []);
     else simulation.selected = new Set([...simulation.selected].filter(id => attackers.some(unit => unit.id === id)));
     const cursor = input.cursor;
     input.resetCursor(newGame ? attackers[0]?.x ?? OBJECTIVE.x : cursor.x,
