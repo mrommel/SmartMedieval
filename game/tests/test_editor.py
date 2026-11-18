@@ -2,7 +2,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from ..engine import default_map, normalize_map
@@ -160,6 +160,94 @@ class GameEditorTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(list(Scenario.objects.get(slug="new-campaign").games.all()), [game])
+
+    @override_settings(ENEMY_AI_API_KEY=None)
+    def test_editor_to_scenario_play_resume_and_restart_keeps_saved_snapshots(self):
+        editor = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
+        self.client.force_login(editor)
+        player = Client()
+        original = default_map()
+        original.update(fog_of_war=True,
+                        objective={"x": 4, "y": 5},
+                        startPositions=[{"x": 2, "y": 5, "type": "vanguard"}])
+        game_form = {
+            "name": "Scout assault", "slug": "scout-assault", "description": "A short approach.",
+            "introduction": "Advance carefully.", "sort_order": 1,
+            "is_available": "on", "map_definition": json.dumps(original), "_save": "Save",
+        }
+        response = self.client.post(reverse("admin:game_singlegame_add"), game_form)
+        self.assertEqual(response.status_code, 302)
+        game = SingleGame.objects.get(slug="scout-assault")
+        self.assertEqual(game.map_definition, normalize_map(original))
+
+        response = self.client.post(reverse("admin:game_scenario_add"), {
+            "name": "Scout mission", "slug": "scout-mission", "description": "One assault.",
+            "introduction": "Find the objective.", "sort_order": 1,
+            "is_available": "on", "games": [game.pk], "_save": "Save",
+        })
+        self.assertEqual(response.status_code, 302)
+        scenario = Scenario.objects.get(slug="scout-mission")
+        self.assertEqual(player.get(reverse("scenarios-api")).json()[0]["games"][0]["id"], game.pk)
+        start_url = reverse("start-game", args=["scenarios", scenario.pk])
+        started_response = player.post(start_url, data="{}", content_type="application/json")
+        self.assertEqual(started_response.status_code, 201)
+        started = started_response.json()
+        self.assertEqual((started["kind"], started["game_id"]), ("scenarios", game.pk))
+        self.assertNotIn("enemyStartPositions", started["map"])
+        self.assertEqual([unit["id"] for unit in started["state"]["units"]], [0])
+        self.assertEqual(started["map"]["startPositions"][0]["weapon"], "sword")
+
+        action_url = reverse("game-action")
+
+        def action(revision, order):
+            return player.post(action_url, data=json.dumps({"revision": revision, "action": order}),
+                               content_type="application/json")
+
+        moved_response = action(0, {"type": "move", "units": [0], "x": 3, "y": 5})
+        self.assertEqual(moved_response.status_code, 200)
+        moved = moved_response.json()
+        self.assertEqual(moved["revision"], 1)
+        self.assertEqual((moved["state"]["units"][0]["x"], moved["state"]["units"][0]["y"]), (3, 5))
+        self.assertEqual(action(0, {"type": "end_turn", "offline": True}).status_code, 409)
+        self.assertEqual(action(1, {"type": "end_turn"}).status_code, 503)
+        self.assertEqual(player.get(reverse("current-game")).json(),
+                         {key: value for key, value in moved.items() if key != "combat_events"})
+        offline = action(1, {"type": "end_turn", "offline": True})
+        self.assertEqual(offline.status_code, 200)
+        self.assertEqual(offline.json()["revision"], 2)
+        self.assertEqual(offline.json()["state"]["turn"], 2)
+        self.assertEqual(player.get(reverse("current-game")).json(),
+                         {key: value for key, value in offline.json().items() if key != "combat_events"})
+
+        # Editor updates and catalog removal must not rewrite or strand a running session.
+        changed = default_map()
+        changed["fog_of_war"] = True
+        changed["startPositions"] = [{"x": 2, "y": 6, "weapon": "crossbow"}]
+        edit_url = reverse("admin:game_singlegame_change", args=[game.pk])
+        self.assertEqual(self.client.post(edit_url, {**game_form, "map_definition": json.dumps(changed)}).status_code,
+                         302)
+        self.assertEqual(player.get(reverse("current-game")).json()["map"]["objective"], {"x": 4, "y": 5})
+        self.assertEqual(self.client.post(edit_url, {**game_form, "map_definition": json.dumps(changed),
+                                                         "is_available": ""}).status_code, 302)
+        self.assertEqual(player.get(reverse("scenarios-api")).json()[0]["games"], [])
+        self.assertEqual(player.post(start_url, data="{}", content_type="application/json").status_code, 400)
+        self.assertEqual(player.get(reverse("current-game")).json()["id"], started["id"])
+        advanced = action(2, {"type": "move", "units": [0], "x": 4, "y": 5})
+        self.assertEqual(advanced.status_code, 200)
+        self.assertEqual(advanced.json()["state"]["capture_status"], "CAPTURING")
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).revision, 3)
+
+        self.assertEqual(self.client.post(edit_url, {**game_form, "map_definition": json.dumps(changed)}).status_code,
+                         302)
+        restarted = player.post(start_url, data="{}", content_type="application/json")
+        self.assertEqual(restarted.status_code, 201)
+        self.assertNotEqual(restarted.json()["id"], started["id"])
+        self.assertEqual(restarted.json()["map"],
+                         {key: value for key, value in normalize_map(changed).items()
+                          if key not in ("enemyStartPositions", "items", "horses")}
+                         | {"has_items": False})
+        self.assertEqual(restarted.json()["revision"], 0)
+        self.assertEqual(player.get(reverse("current-game")).json()["id"], restarted.json()["id"])
 
     def test_admin_rejects_invalid_battlefield(self):
         user = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
