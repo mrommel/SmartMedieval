@@ -1,4 +1,25 @@
 {% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script defer src="{% static 'game/admin_map_preview.js' %}"></script>
+{% endblock %}
+
+{% block after_field_sets %}
+  {{ block.super }}
+  <section id="map-preview" data-preview-url="{% url 'admin:game_singlegame_preview' %}" aria-labelledby="map-preview-heading">
+    <h2 id="map-preview-heading">Battlefield map preview</h2>
+    <p>Preview the JSON currently in the editor, including unsaved changes. This checks routes and placement on the server but does not save or start a game.</p>
+    <button type="button" id="preview-map-button">Validate and preview map</button>
+    <p id="map-preview-status" role="status" aria-live="polite">No preview yet.</p>
+    <div id="map-preview-result" hidden>
+      <canvas id="map-preview-canvas" role="img" aria-label="Top-down battlefield map" aria-describedby="map-preview-summary" style="max-width: 100%; height: auto; border: 1px solid currentColor;"></canvas>
+      <p id="map-preview-summary"></p>
+      <p><strong>Legend:</strong> Dark gray: keep/strongpoint walls; yellow: gates; brown: houses; orange: house doors; green: attackers; red: defenders; gold: objective; purple: exit; blue: elevation; teal: objects; black: catapults; white: items; cyan: horses or watchfires. Road, grass, mud and swamp use light gray, light green, tan and dark green tiles.</p>
+    </div>
+  </section>
+{% endblock %}
 
 {% block object-tools-items %}
   {{ block.super }}

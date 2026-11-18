@@ -10,6 +10,57 @@ from ..models import GameInstance, Scenario, SingleGame
 
 
 class GameEditorTests(TestCase):
+    def test_preview_unsaved_map_without_saving_or_starting_game(self):
+        editor = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
+        self.client.force_login(editor)
+        url = reverse("admin:game_singlegame_preview")
+        add_page = self.client.get(reverse("admin:game_singlegame_add"))
+        self.assertContains(add_page, url)
+        self.assertContains(add_page, "Validate and preview map")
+        game_count = SingleGame.objects.count()
+        unsaved = default_map()
+        unsaved["startPositions"][0] = {"x": 2, "y": 6, "type": "vanguard"}
+        unsaved["houses"] = [{"left": 6, "right": 7, "top": 9, "bottom": 10,
+                              "door": {"x": 6, "y": 9, "hidden": True}}]
+        response = self.client.post(url, {"map_definition": json.dumps(unsaved)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["map"], normalize_map(unsaved))
+        self.assertEqual(response.json()["map"]["startPositions"][0]["weapon"], "sword")
+        self.assertEqual(SingleGame.objects.count(), game_count)
+        self.assertFalse(GameInstance.objects.exists())
+        self.assertNotIn("active_game_id", self.client.session)
+
+    def test_preview_reports_invalid_json_and_map_errors(self):
+        editor = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
+        self.client.force_login(editor)
+        url = reverse("admin:game_singlegame_preview")
+        self.assertEqual(self.client.get(url).status_code, 405)
+        response = self.client.post(url, {"map_definition": "{bad"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("valid map JSON", response.json()["error"])
+        invalid = default_map()
+        invalid["gate"] = {"x": 1, "y": 1}
+        response = self.client.post(url, {"map_definition": json.dumps(invalid)})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("gate must lie on the keep wall", response.json()["error"])
+        response = self.client.post(url, {"map_definition": " " * 250_001})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("too large", response.json()["error"])
+
+    def test_preview_requires_staff_editor_permission_and_csrf(self):
+        url = reverse("admin:game_singlegame_preview")
+        data = {"map_definition": json.dumps(default_map())}
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        user = get_user_model().objects.create_user("staff", "staff@example.test", "password", is_staff=True)
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(url, data).status_code, 403)
+        user.is_superuser = True
+        user.save()
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(user)
+        self.assertEqual(csrf_client.post(url, data).status_code, 403)
+        self.assertFalse(GameInstance.objects.exists())
+
     def test_staff_playtest_starts_saved_match_and_resumes_it(self):
         editor = get_user_model().objects.create_superuser("editor", "editor@example.test", "password")
         self.client.force_login(editor)

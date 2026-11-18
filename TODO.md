@@ -26,7 +26,7 @@ Check off only shipped, tested behavior. The **Completed baseline** records exis
 - [ ] Extend the map schema and validation for joined river segments, crossings, continuous adjacent slopes and terrain on hills. Reject invalid overlap with map bounds, walls, houses, objectives, starts, objects and elevation; keep older authored maps and active match snapshots playable.
 - [ ] Update pathfinding, defender AI, line of sight, fog snapshots, movement costs and route previews for the new features; test foot/mounted routes, crossings, elevation and mixed terrain in engine and API tests.
 - [ ] Render joined rivers, crossings, vegetation, flowers, hill faces/slopes and each ground type; keep isometric picking and route highlights accurate, with renderer/browser tests.
-- [ ] Improve the admin JSON authoring workflow with placement guidance, understandable validation errors and a map preview. A staff-only playtest action now starts a fresh session match from a saved, available game; unsaved edits are excluded. Document how to duplicate/create a single game, set bounds/keep/objective/rosters, lay out terrain and rivers, resolve reachability errors and link a scenario.
+- [ ] Improve the admin JSON authoring workflow with richer placement guidance and eventually river authoring. Staff can now validate unsaved JSON on the server and see a schematic map preview and placement errors before saving; the staff-only playtest action still starts a fresh session match from a saved, available game. Document river layout and resolve future reachability errors as new terrain lands.
 
 ## Later: persistent campaign
 

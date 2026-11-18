@@ -1,11 +1,14 @@
+import json
+
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 
-from .engine import initial_state, normalize_map
+from .engine import InvalidMap, initial_state, normalize_map, validate_map
 from .models import GameInstance
 from .models import Scenario, SingleGame
 
@@ -25,9 +28,28 @@ class SingleGameAdmin(admin.ModelAdmin):
 
     def get_urls(self):
         return [
+            path("preview/", self.admin_site.admin_view(self.preview),
+                 name="game_singlegame_preview"),
             path("<int:object_id>/playtest/", self.admin_site.admin_view(self.playtest),
                  name="game_singlegame_playtest"),
         ] + super().get_urls()
+
+    @method_decorator(require_POST)
+    def preview(self, request):
+        if not self.has_add_permission(request) and not self.has_change_permission(request):
+            raise PermissionDenied
+        raw = request.POST.get("map_definition", "")
+        if len(raw) > 250_000:
+            return JsonResponse({"error": "Map JSON is too large to preview."}, status=400)
+        try:
+            map_data = json.loads(raw)
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Enter valid map JSON before previewing."}, status=400)
+        try:
+            validate_map(map_data)
+        except InvalidMap as error:
+            return JsonResponse({"error": str(error)}, status=400)
+        return JsonResponse({"map": normalize_map(map_data)})
 
     @method_decorator(require_POST)
     def playtest(self, request, object_id):
