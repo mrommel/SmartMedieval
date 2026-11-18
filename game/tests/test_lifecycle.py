@@ -135,6 +135,52 @@ class EditorToBattleLifecycleTests(TestCase):
         self.assertEqual(self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).status_code, 400)
         self.assertEqual(GameInstance.objects.get(pk=started["id"]).map_definition, normalize_map(original))
 
+    def test_editing_fog_only_affects_new_matches_not_active_snapshots(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=False,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 16, "y": 8, "weapon": "sword"}])
+        game = self.save_game(battlefield)
+        response = self.editor.post(reverse("admin:game_scenario_add"), {
+            "name": "Scout campaign", "slug": "scout-campaign", "description": "Explore.",
+            "introduction": "", "sort_order": 0, "is_available": "on",
+            "games": [game.pk], "_save": "Save",
+        })
+        self.assertEqual(response.status_code, 302)
+        scenario = Scenario.objects.get(slug="scout-campaign")
+        launch_url = reverse("start-game", args=["scenarios", scenario.pk])
+        started = self.player.post(launch_url, data="{}", content_type="application/json").json()
+        self.assertFalse(started["map"]["fog_of_war"])
+        self.assertIn("enemyStartPositions", started["map"])
+        self.assertEqual(len(started["state"]["units"]), 2)
+
+        moved_response = self.action(started["revision"], {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertEqual(moved_response.status_code, 200)
+        moved = moved_response.json()
+        revised = deepcopy(battlefield)
+        revised["fog_of_war"] = True
+        self.save_game(revised, change_id=game.pk)
+
+        reloaded = Client()
+        reloaded.cookies = self.player.cookies.copy()
+        self.player = reloaded
+        resumed = self.player.get(reverse("current-game")).json()
+        self.assertEqual(resumed, {key: value for key, value in moved.items() if key != "combat_events"})
+        self.assertFalse(resumed["map"]["fog_of_war"])
+        self.assertIn("enemyStartPositions", resumed["map"])
+        self.assertEqual(len(resumed["state"]["units"]), 2)
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).map_definition,
+                         normalize_map(battlefield))
+
+        restarted_response = self.player.post(launch_url, data="{}", content_type="application/json")
+        self.assertEqual(restarted_response.status_code, 201)
+        restarted = restarted_response.json()
+        self.assertNotEqual(restarted["id"], started["id"])
+        self.assertTrue(restarted["map"]["fog_of_war"])
+        self.assertNotIn("enemyStartPositions", restarted["map"])
+        self.assertEqual([unit["id"] for unit in restarted["state"]["units"]], [0])
+        self.assertEqual(self.player.get(reverse("current-game")).json(), restarted)
+
     def test_fogged_match_hides_unseen_wall_changes_on_launch_and_resume(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True,
