@@ -81,6 +81,9 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
   let postCount = 0;
   const actions = [];
   let nextFrame;
+  let now = 0;
+  let nextInterval = 0;
+  const intervals = new Map();
   const window = {
     devicePixelRatio: 1, localStorage: store,
     location: { search: preferences.playtest ? "?playtest=1" : "" },
@@ -98,9 +101,11 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
     })
   };
   const context = {
-    document, window, URLSearchParams, performance: { now: () => 0 },
+    document, window, URLSearchParams, performance: { now: () => now },
     requestAnimationFrame: callback => { nextFrame = callback; },
     setTimeout: () => 1, clearTimeout() {},
+    setInterval: callback => { intervals.set(++nextInterval, callback); return nextInterval; },
+    clearInterval: id => intervals.delete(id),
     fetch: async (url, options = {}) => {
       if (url === "/api/scenarios/" || url === "/api/single-games/") {
         return { ok: true, headers: { get: () => "application/json" },
@@ -128,6 +133,8 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
     get, document, store, snapshot, actions, fogFills, gearPaints, draws: () => draws, postCount: () => postCount,
+    advance: milliseconds => { now += milliseconds; for (const tick of intervals.values()) tick(); },
+    activeIntervals: () => intervals.size,
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer,
     createInput: context.createBattlefieldInput
   };
@@ -1108,6 +1115,59 @@ test("an AI failure offers an explicit offline turn without silently advancing",
   await game.get("end-turn").fire("click");
   assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "end_turn" }));
   assert.equal(offline.hidden, true);
+});
+
+test("AI wait readout measures pending, completed and failed requests without counting offline turns", async () => {
+  let resolveResponse;
+  const game = setup(null, null, action => action.offline ? null :
+    new Promise(resolve => { resolveResponse = resolve; }));
+  await game.get("continue-game").fire("click");
+  const status = game.get("ai-wait-status");
+  const endTurn = game.get("end-turn");
+  const response = () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => game.snapshot });
+
+  endTurn.fire("click");
+  assert.equal(status.hidden, false);
+  assert.match(status.textContent, /0s elapsed/);
+  game.advance(2400);
+  assert.match(status.textContent, /2s elapsed/);
+  resolveResponse(response());
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /2\.4s · session average: 2\.4s \(1 turn\)/);
+  assert.equal(game.activeIntervals(), 0);
+
+  endTurn.fire("click");
+  game.advance(1600);
+  resolveResponse(response());
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /1\.6s · session average: 2\.0s \(2 turns\)/);
+
+  endTurn.fire("click");
+  game.advance(5000);
+  resolveResponse({ ok: false, status: 503, headers: { get: () => "application/json" },
+    json: async () => ({ error: "Enemy AI is unavailable." }) });
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /failed after 5\.0s/);
+  assert.equal(game.activeIntervals(), 0);
+  await game.get("offline-end-turn").fire("click");
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /failed after 5\.0s/);
+  assert.equal(game.activeIntervals(), 0);
+
+  endTurn.fire("click");
+  game.advance(1000);
+  resolveResponse(response());
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /session average: 1\.7s \(3 turns\)/);
+
+  game.snapshot.id = 2;
+  await game.get("continue-game").fire("click");
+  assert.equal(status.hidden, true);
+  endTurn.fire("click");
+  game.advance(3000);
+  resolveResponse(response());
+  await new Promise(setImmediate);
+  assert.match(status.textContent, /session average: 3\.0s \(1 turn\)/);
 });
 
 test("turn actions return keyboard focus after disabling the active button, including AI failures", async () => {
