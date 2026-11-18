@@ -18,6 +18,7 @@ Check off only shipped, tested behavior. The **Completed baseline** records exis
 - [ ] Add isometric floor selection, roof/floor cutaways and picking/route previews for indoor and underground spaces; make transitions from outside to rooms and between floors readable and keyboard-accessible.
 - [ ] Add discoverable hidden passages and traps: spotting, disarming, avoidance, triggering, effects and fog-safe server/AI behavior. Hidden house doors are already supported.
 - [ ] Specify and implement effects for tools beyond rope, torch and shield; document action costs, inventory limits, AI interactions and tests for each new tool. Ground item authoring, carrying, dropping and casualty recovery already work.
+- [x] Add a spyglass tool: passive two-tile daylight fog sight bonus for either side, with shield, night, obstacle, inventory and API-fog behavior covered by tests. Other new tool effects remain open.
 - [ ] When flammable castle interiors exist, extend the current grass/wooden-house fire rules to those materials and test spreading, extinguishing and visibility across floors. Fire already spreads on grass and enterable house floors; smoke, damage and extinguishing are implemented.
 
 ### Outdoor map authoring

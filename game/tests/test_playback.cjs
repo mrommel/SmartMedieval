@@ -1224,6 +1224,18 @@ test("selected soldier displays remaining stats and carried equipment after acti
   assert.equal(row("Fight").children[0].children[1].textContent, "0/1 FP left");
 });
 
+test("spyglass sight is explained only on daylight fog maps", async () => {
+  const game = setup();
+  game.snapshot.map.fog_of_war = true;
+  game.snapshot.state.units[0].tools = ["spyglass"];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /spyglass \(8-tile daylight sight\)/);
+  assert.match(game.get("mission-help").textContent, /eight with a carried spyglass/);
+  game.snapshot.map.night = true;
+  await game.get("end-turn").fire("click");
+  assert.doesNotMatch(game.get("selected-stats").textContent, /8-tile daylight sight/);
+});
+
 test("armor protection, weight and equip action update with the snapshot", async () => {
   const game = setup();
   const soldier = game.snapshot.state.units[0];

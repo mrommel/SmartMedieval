@@ -608,7 +608,8 @@ import { previewMovement } from "./path_preview.js";
             ? "Available here · mount for one fight point" : "On foot"),
         detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
         detailRow("Tools", unit.tools?.length ? unit.tools.map(tool =>
-          tool === "torch" && mapData?.night ? `torch (${unit.torch_lit === false ? "unlit" : "lit"})` : tool).join(", ") : "none"),
+          tool === "torch" && mapData?.night ? `torch (${unit.torch_lit === false ? "unlit" : "lit"})` :
+          tool === "spyglass" && mapData?.fog_of_war && !mapData?.night ? "spyglass (8-tile daylight sight)" : tool).join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(gear.length ? [detailRow("Equipment here", gear.map(equipmentName).join(", "))] : []),
         ...(groundTools.length ? [detailRow("Tools here", groundTools.map(item => item.name).join(", "))] : []),
@@ -702,7 +703,7 @@ import { previewMovement } from "./path_preview.js";
     if (mapData.fog_of_war) document.getElementById("mission-help").textContent +=
       (mapData.night
         ? " Night battle: allies see two steps in the dark. A lit carried torch extends sight to five steps, but reveals its bearer to enemies up to six steps away. Lit watchfires light tiles within three steps for both sides. Walls still block sight. Extinguish or relight a carried torch for one fight point; use watchfire controls beside a fire to extinguish or relight it (one fight point)."
-        : " Scout ahead: allies share daylight sight within six tiles. Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
+        : " Scout ahead: allies share daylight sight within six tiles, or eight with a carried spyglass (not increased attack range). Dark ground is unexplored; shaded ground was explored but is out of sight. Only visible defenders can be attacked.");
     if (mapData.exit) document.getElementById("mission-help").textContent +=
       " At the marked exit, select a soldier and choose Withdraw (one fight point). Escaped soldiers keep their equipment. The battle ends once no soldiers remain in the field; at least one escape secures a retreat.";
     document.getElementById("mission-help").textContent +=

@@ -149,6 +149,41 @@ class GameInstanceApiTests(TestCase):
         extinguished = self.action(0, {"type": "extinguish_fire", "unit_id": 0, "x": 4, "y": 6})
         self.assertEqual(extinguished.status_code, 400)  # Too far away.
 
+    def test_spyglass_visibility_persists_and_drop_hides_distant_defender(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword", "tools": ["spyglass"]}],
+                           enemyStartPositions=[{"x": 9, "y": 6, "weapon": "sword"}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 2)
+        self.assertIn({"x": 9, "y": 6}, started["state"]["visible"])
+        dropped = self.action(0, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}).json()
+        self.assertEqual(len(dropped["state"]["units"]), 1)
+        self.assertNotIn({"x": 9, "y": 6}, dropped["state"]["visible"])
+        self.assertIn({"x": 9, "y": 6}, dropped["state"]["explored"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], dropped["state"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["units"][0]["tools"], [])
+
+    def test_defender_spyglass_updates_ai_fog_without_revealing_hidden_roster(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 9, "y": 6, "weapon": "sword", "tools": ["spyglass"]}])
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(len(started["state"]["units"]), 1)
+        self.assertNotIn("enemyStartPositions", started["map"])
+        ended = self.action(0, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        ai_view = json.loads(json.loads(self.ai.call_args.args[0].data)["messages"][1]["content"].split("\n")[0])
+        self.assertEqual([unit["id"] for unit in ai_view["units"]], [0, 1])
+        self.assertEqual([unit["side"] for unit in ended.json()["state"]["units"]], ["attackers"])
+
     def test_shield_stance_persists_and_hides_distant_defenders(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True,

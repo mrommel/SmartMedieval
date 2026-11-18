@@ -119,6 +119,52 @@ class FireHazardTests(TestCase):
         self.assertNotIn((8, 6), {(f["x"], f["y"]) for f in state["fire"]})
 
 
+class SpyglassTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield.update(fog_of_war=True,
+                                startPositions=[{"x": 2, "y": 6, "weapon": "sword", "tools": ["spyglass"]}],
+                                enemyStartPositions=[{"x": 9, "y": 6, "weapon": "sword"}])
+        validate_map(self.battlefield)
+
+    def test_carrier_extends_daylight_team_sight_but_not_through_obstacles(self):
+        state = initial_state(self.battlefield)
+        self.assertIn((9, 6), visible_tiles(state, self.battlefield))
+        self.assertIn((10, 6), visible_tiles(state, self.battlefield))
+        self.assertNotIn((11, 6), visible_tiles(state, self.battlefield))
+        self.assertNotIn((2, 6), visible_tiles(state, self.battlefield, "defenders"))
+        state["units"][0]["weapon"] = "crossbow"
+        self.assertFalse(can_ranged_attack(state["units"][0], {"x": 10, "y": 6}, self.battlefield))
+        state["units"][0]["tools"] = []
+        self.assertNotIn((9, 6), visible_tiles(state, self.battlefield))
+        state["units"][0]["tools"] = ["spyglass"]
+        self.battlefield["objects"] = [{"x": 5, "y": 6, "type": "rock"}]
+        self.assertNotIn((9, 6), visible_tiles(state, self.battlefield))
+
+    def test_shield_and_night_limit_spyglass_sight(self):
+        state = initial_state(self.battlefield)
+        state["units"][0]["shield_raised"] = True
+        self.assertNotIn((9, 6), visible_tiles(state, self.battlefield))
+        self.assertIn((8, 6), visible_tiles(state, self.battlefield))
+        self.battlefield["night"] = True
+        state["units"][0]["shield_raised"] = False
+        self.assertNotIn((5, 6), visible_tiles(state, self.battlefield))
+        state["units"][0]["tools"].append("torch")
+        self.assertIn((7, 6), visible_tiles(state, self.battlefield))
+        self.assertNotIn((9, 6), visible_tiles(state, self.battlefield))
+
+    def test_dropping_and_recovering_spyglass_changes_current_sight(self):
+        state = initial_state(self.battlefield)
+        dropped = apply_action(state, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, self.battlefield)
+        self.assertNotIn((9, 6), visible_tiles(dropped, self.battlefield))
+        self.assertIn({"x": 9, "y": 6}, dropped["explored"])
+        self.assertIn((9, 6), visible_tiles(state, self.battlefield))
+        dropped["units"][0]["fight_points"] = 1
+        picked = apply_action(dropped, {"type": "pickup_tool", "unit_id": 0,
+                                        "item_id": dropped["items"][0]["id"]}, self.battlefield)
+        self.assertIn((9, 6), visible_tiles(picked, self.battlefield))
+
+
 class CatapultSmokeTests(TestCase):
     def setUp(self):
         self.battlefield = default_map()

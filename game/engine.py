@@ -63,6 +63,7 @@ RANGED_WEAPON_STATS = {
     "crossbow": {"range": 6, "reload_turns": 3},
 }
 VISION_RANGE = 6
+SPYGLASS_VISION_BONUS = 2
 NIGHT_VISION_RANGE = 2
 TORCH_VISION_RANGE = 5
 WATCHFIRE_LIGHT_RANGE = 3
@@ -553,9 +554,11 @@ def visible_tiles(state, map_data=MAP, side="attackers"):
             continue
         start = (unit["x"], unit["y"])
         visible.add(start)
-        sight_range = VISION_RANGE - (2 if unit.get("shield_raised") else 0)
-        for y in range(max(0, unit["y"] - VISION_RANGE), min(battlefield["rows"], unit["y"] + VISION_RANGE + 1)):
-            for x in range(max(0, unit["x"] - VISION_RANGE), min(battlefield["cols"], unit["x"] + VISION_RANGE + 1)):
+        daylight_range = VISION_RANGE + (
+            SPYGLASS_VISION_BONUS if not night and "spyglass" in unit.get("tools", ()) else 0)
+        sight_range = daylight_range - (2 if unit.get("shield_raised") else 0)
+        for y in range(max(0, unit["y"] - daylight_range), min(battlefield["rows"], unit["y"] + daylight_range + 1)):
+            for x in range(max(0, unit["x"] - daylight_range), min(battlefield["cols"], unit["x"] + daylight_range + 1)):
                 tile = (x, y)
                 if tile in visible:
                     continue
