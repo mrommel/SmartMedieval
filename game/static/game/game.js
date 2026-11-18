@@ -846,6 +846,7 @@ import { previewMovement } from "./path_preview.js";
 
   async function sendAction(action) {
     if (pendingAction || !instanceId || paused || simulation.captured || simulation.defeated) return;
+    const focusedControl = document.activeElement;
     pendingAction = true;
     updateControls();
     updateMovementPreview();
@@ -881,6 +882,15 @@ import { previewMovement } from "./path_preview.js";
       pendingAction = false;
       updatePromotion();
       updateMovementPreview();
+      // Disabling a focused button while the request runs can move focus to the body.
+      // Do not steal focus if the player navigated elsewhere during the request.
+      if (gameIsVisible && focusedControl && focusedControl !== document.body &&
+          document.activeElement === document.body) {
+        const fallback = simulation.captured || simulation.defeated
+          ? document.getElementById("victory-restart") : paused ? pauseButton : endTurnButton;
+        const target = !focusedControl.disabled && !focusedControl.hidden ? focusedControl : fallback;
+        if (!target.disabled && !target.hidden) target.focus();
+      }
     }
   }
 

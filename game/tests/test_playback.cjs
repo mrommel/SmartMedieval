@@ -39,7 +39,11 @@ function element() {
 function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, preferences = {}) {
   const nodes = new Map();
   const get = id => {
-    if (!nodes.has(id)) nodes.set(id, element());
+    if (!nodes.has(id)) {
+      const node = element();
+      node.focus = () => { document.activeElement = node; node.focused = true; node.fire("focus"); };
+      nodes.set(id, node);
+    }
     return nodes.get(id);
   };
   let draws = 0;
@@ -85,7 +89,7 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
     addEventListener() {}
   };
   const document = {
-    body: get("body"), getElementById: get, createElement: element,
+    body: get("body"), activeElement: get("body"), getElementById: get, createElement: element,
     querySelector: () => ({ content: "csrf" }),
     querySelectorAll: () => ["scenarios", "single-games"].map(kind => {
       const button = get(`catalog-${kind}`);
@@ -123,7 +127,7 @@ function setup(savedSpeed = null, catalogFetch = null, actionFetch = null, prefe
     "\nthis.previewMovement = previewMovement;", context);
   vm.runInNewContext(script.replace(/^import .*;\n/gm, ""), context);
   return {
-    get, store, snapshot, actions, fogFills, gearPaints, draws: () => draws, postCount: () => postCount,
+    get, document, store, snapshot, actions, fogFills, gearPaints, draws: () => draws, postCount: () => postCount,
     frame: time => nextFrame(time), createRenderer: context.createBattlefieldRenderer,
     createInput: context.createBattlefieldInput
   };
@@ -1104,6 +1108,65 @@ test("an AI failure offers an explicit offline turn without silently advancing",
   await game.get("end-turn").fire("click");
   assert.equal(JSON.stringify(game.actions.at(-1)), JSON.stringify({ type: "end_turn" }));
   assert.equal(offline.hidden, true);
+});
+
+test("turn actions return keyboard focus after disabling the active button, including AI failures", async () => {
+  let aiAvailable = false;
+  const game = setup(null, null, action => {
+    // Browsers drop focus when the pending control becomes disabled.
+    game.document.activeElement = game.document.body;
+    return !aiAvailable && !action.offline
+      ? { ok: false, status: 503, headers: { get: () => "application/json" },
+          json: async () => ({ error: "Enemy AI is unavailable." }) }
+      : null;
+  });
+  await game.get("continue-game").fire("click");
+  const endTurn = game.get("end-turn");
+  endTurn.focus();
+  endTurn.fire("click");
+  await new Promise(setImmediate);
+  assert.equal(game.document.activeElement, endTurn);
+  assert.equal(endTurn.disabled, false);
+
+  const offline = game.get("offline-end-turn");
+  offline.focus();
+  offline.fire("click");
+  await new Promise(setImmediate);
+  assert.equal(game.document.activeElement, endTurn, "hidden offline button falls back to End turn");
+  aiAvailable = true;
+  endTurn.fire("click");
+  await new Promise(setImmediate);
+  assert.equal(game.document.activeElement, endTurn);
+});
+
+test("a delayed turn response does not steal focus after the player navigates elsewhere", async () => {
+  let resolveResponse;
+  const game = setup(null, null, () => new Promise(resolve => { resolveResponse = resolve; }));
+  await game.get("continue-game").fire("click");
+  const endTurn = game.get("end-turn");
+  endTurn.focus();
+  endTurn.fire("click");
+  const menu = game.get("main-menu-button");
+  menu.focus();
+  resolveResponse({ ok: true, headers: { get: () => "application/json" }, json: async () => game.snapshot });
+  await new Promise(setImmediate);
+  assert.equal(game.document.activeElement, menu);
+});
+
+test("a winning action focuses Play again when its original control is disabled", async () => {
+  const game = setup(null, null, () => {
+    game.document.activeElement = game.document.body;
+    game.snapshot.state.captured = true;
+    game.snapshot.state.capture_status = "CAPTURED";
+    return null;
+  });
+  await game.get("continue-game").fire("click");
+  const endTurn = game.get("end-turn");
+  endTurn.focus();
+  endTurn.fire("click");
+  await new Promise(setImmediate);
+  assert.equal(endTurn.disabled, true);
+  assert.equal(game.document.activeElement, game.get("victory-restart"));
 });
 
 test("speed persists, restores, and off disables per-frame drawing", async () => {
