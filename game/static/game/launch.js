@@ -7,6 +7,8 @@ export function createLaunchUI({ api, onStart, onResume, onLeaveGame }) {
   const catalogTitle = document.getElementById("catalog-title");
   const catalogKicker = document.getElementById("catalog-kicker");
   const gameTitle = document.getElementById("game-title");
+  const startTitle = document.getElementById("start-title");
+  const menuTitle = document.getElementById("menu-title");
   const briefingCopy = document.getElementById("briefing-copy");
   const missionLabel = document.getElementById("mission-label");
   const continueButton = document.getElementById("continue-game");
@@ -21,6 +23,7 @@ export function createLaunchUI({ api, onStart, onResume, onLeaveGame }) {
     mainMenu.hidden = screen !== mainMenu;
     catalogScreen.hidden = screen !== catalogScreen;
     gameScreen.hidden = true;
+    (screen === startScreen ? startTitle : screen === mainMenu ? menuTitle : catalogTitle).focus();
   }
 
   function enterGame(snapshot) {
@@ -35,6 +38,7 @@ export function createLaunchUI({ api, onStart, onResume, onLeaveGame }) {
     catalogRequest++;
     launchError.hidden = true;
     continueButton.hidden = false;
+    gameTitle.focus();
   }
 
   function renderCatalogMessage(message, isError = false) {

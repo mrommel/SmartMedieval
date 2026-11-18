@@ -1033,6 +1033,23 @@ test("mobile pinch scales around its midpoint, pans with both fingers, and ignor
   assert.equal(orders.length, 1);
 });
 
+test("screen transitions focus the destination heading, including back and resume", async () => {
+  const game = setup(null, () => []);
+  game.get("play-game").focus();
+  game.get("play-game").fire("click");
+  assert.equal(game.document.activeElement, game.get("menu-title"));
+  await game.get("catalog-scenarios").fire("click");
+  assert.equal(game.document.activeElement, game.get("catalog-title"));
+  game.get("catalog-back").fire("click");
+  assert.equal(game.document.activeElement, game.get("menu-title"));
+  game.get("menu-back").fire("click");
+  assert.equal(game.document.activeElement, game.get("start-title"));
+  await game.get("continue-game").fire("click");
+  assert.equal(game.document.activeElement, game.get("game-title"));
+  game.get("main-menu-button").fire("click");
+  assert.equal(game.document.activeElement, game.get("menu-title"));
+});
+
 test("catalog navigation renders linked games and starts a selected scenario", async () => {
   const game = setup(null, () => [{ id: 8, name: "Siege", description: "Hold fast",
     games: [{ id: 3, name: "Gate", description: "Break through" }] }]);

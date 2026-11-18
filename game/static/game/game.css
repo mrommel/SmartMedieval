@@ -32,6 +32,7 @@ button { font: inherit; }
 .launch-card { padding: clamp(26px, 6vw, 52px); border: 1px solid rgba(224,219,194,.18); background: linear-gradient(145deg, rgba(39,51,43,.98), rgba(24,34,30,.98)); box-shadow: 0 24px 80px rgba(0,0,0,.32); }
 .launch-brand { margin-bottom: 48px; }
 .launch-card h1 { margin: 7px 0 12px; font: 600 clamp(32px, 7vw, 46px)/1.1 "Playfair Display", Georgia, serif; }
+.launch-card h1:focus-visible, #game-title:focus-visible { outline: 2px solid #e6c374; outline-offset: 4px; }
 .launch-copy { max-width: 430px; margin: 0 0 28px; color: #b6bcae; font: 15px/1.7 "Playfair Display", Georgia, serif; }
 .launch-primary { min-width: 180px; padding: 12px 20px; border: 1px solid #e0c58f; color: #1c261f; background: #d6bb84; font-size: 12px; font-weight: 700; cursor: pointer; }
 .launch-primary:hover, .launch-primary:focus-visible { background: #ead29e; }
