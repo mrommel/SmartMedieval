@@ -120,9 +120,11 @@ import { previewMovement } from "./path_preview.js";
     const crew = selectedCrew();
     const medic = selectedMedic();
     const nearbyFlames = medic ? simulation.fire.filter(flame =>
-      Math.abs(medic.x - flame.x) + Math.abs(medic.y - flame.y) <= 1 &&
       medic.z === renderer.tileHeight(flame.x, flame.y) &&
-      (medic.x === flame.x && medic.y === flame.y || canMeleeAttack(medic, flame))) : [];
+      (medic.x === flame.x && medic.y === flame.y || canMeleeAttack(medic, flame) ||
+        Math.abs(medic.x - flame.x) + Math.abs(medic.y - flame.y) === 2 &&
+        medic.tools?.includes("bucket") &&
+        hasLineOfSight([medic.x, medic.y], [flame.x, flame.y], true))) : [];
     const previousFlame = fireTarget.value;
     fireTarget.replaceChildren(...nearbyFlames.map(flame => {
       const option = document.createElement("option");
@@ -462,9 +464,10 @@ import { previewMovement } from "./path_preview.js";
     sendAction({ type: melee ? "attack" : "ranged_attack", unit_id: attacker.id, target_id: target.id });
   }
 
-  function hasLineOfSight(start, end) {
-    if ([...simulation.smoke, ...simulation.fire].some(cloud => (cloud.x === start[0] && cloud.y === start[1]) ||
-      (cloud.x === end[0] && cloud.y === end[1]))) return false;
+  function hasLineOfSight(start, end, allowBurningTarget = false) {
+    if ([...simulation.smoke, ...simulation.fire].some(cloud =>
+      (cloud.x === start[0] && cloud.y === start[1]) ||
+      (!allowBurningTarget && cloud.x === end[0] && cloud.y === end[1]))) return false;
     const interior = houseAt(...start);
     if (interior !== houseAt(...end)) return false;
     let [x, y] = start;
@@ -618,7 +621,8 @@ import { previewMovement } from "./path_preview.js";
         detailRow("Tools", unit.tools?.length ? unit.tools.map(tool =>
           tool === "torch" && mapData?.night ? `torch (${unit.torch_lit === false ? "unlit" : "lit"})` :
           tool === "spyglass" && mapData?.fog_of_war && !mapData?.night ? "spyglass (8-tile daylight sight)" :
-          tool === "quiver" ? "quiver (bow/crossbow reload −1 turn on firing)" : tool).join(", ") : "none"),
+          tool === "quiver" ? "quiver (bow/crossbow reload −1 turn on firing)" :
+          tool === "bucket" ? "bucket (extinguish visible fire up to two tiles away through clear space; 1 FP)" : tool).join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(gear.length ? [detailRow("Equipment here", gear.map(equipmentName).join(", "))] : []),
         ...(groundTools.length ? [detailRow("Tools here", groundTools.map(item => item.name).join(", "))] : []),

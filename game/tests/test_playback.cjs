@@ -697,6 +697,37 @@ test("burning tiles add movement cost and can be extinguished from an adjacent t
   assert.deepEqual(game.actions.at(-1), { type: "extinguish_fire", unit_id: 0, x: 1, y: 0 });
 });
 
+test("bucket offers clear two-tile fires but not blocked or hidden ones", async () => {
+  const game = setup();
+  game.snapshot.state.units[0].z = 0;
+  game.snapshot.state.units[0].tools = ["bucket"];
+  game.snapshot.state.fire = [{ x: 2, y: 0, turns: 3 }];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /bucket \(extinguish visible fire up to two tiles away/);
+  assert.equal(game.get("fire-target").value, "2,0");
+  assert.equal(game.get("extinguish-fire").disabled, false);
+  await game.get("extinguish-fire").fire("click");
+  assert.deepEqual(game.actions.at(-1), { type: "extinguish_fire", unit_id: 0, x: 2, y: 0 });
+
+  game.snapshot.map.objects = [{ x: 1, y: 0, type: "rock" }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").disabled, true);
+  game.snapshot.map.objects = [];
+  game.snapshot.state.smoke = [{ x: 1, y: 0, turns: 2 }];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").disabled, true);
+  game.snapshot.state.smoke[0].x = 0;
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").disabled, true);
+  game.snapshot.state.smoke = [];
+  game.snapshot.state.units[0].tools = [];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").disabled, true);
+  game.snapshot.state.fire = [];
+  await game.get("continue-game").fire("click");
+  assert.equal(game.get("extinguish-fire").hidden, true);
+});
+
 test("renderer draws reachable route steps and unreachable markers", () => {
   const game = setup();
   const renderer = game.createRenderer(game.get("battlefield-canvas"));

@@ -1272,13 +1272,21 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
         unit = next((unit for unit in next_state["units"] if unit["id"] == action["unit_id"]
                      and unit.get("side", "attackers") == "attackers"), None)
         tile = (action["x"], action["y"])
+        start = (unit["x"], unit["y"]) if unit else None
+        distance = abs(start[0] - tile[0]) + abs(start[1] - tile[1]) if start else None
+        # A bucket reaches farther, but cannot throw water through walls, smoke,
+        # other flames or house walls. Ignore only the burning target.
+        bucket_map = {**map_data, "smoke_tiles": map_data["smoke_tiles"] - {tile}}
+        reachable = (distance == 0 or
+                     distance == 1 and can_step(start, tile, map_data) or
+                     distance == 2 and "bucket" in unit.get("tools", ()) and
+                     has_line_of_sight(start, tile, bucket_map) and
+                     (not map_data.get("fog_of_war") or tile in visible_tiles(next_state, map_data)))
         if (unit is None or unit["fight_points"] < 1 or
                 not any((fire["x"], fire["y"]) == tile for fire in next_state["fire"]) or
-                abs(unit["x"] - tile[0]) + abs(unit["y"] - tile[1]) > 1 or
                 unit["z"] != tile_height(*tile, map_data) or
-                ((unit["x"], unit["y"]) != tile and
-                 not can_step((unit["x"], unit["y"]), tile, map_data))):
-            raise InvalidAction("Extinguishing a fire requires one fight point on or beside a reachable burning tile.")
+                not reachable):
+            raise InvalidAction("Extinguishing a fire requires one fight point and a reachable burning tile (or a clear two-tile throw with a bucket).")
         next_state["fire"] = [fire for fire in next_state["fire"] if (fire["x"], fire["y"]) != tile]
         unit["fight_points"] -= 1
         next_state["history"] = (next_state["history"] + [{

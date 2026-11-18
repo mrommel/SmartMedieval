@@ -63,6 +63,79 @@ class FireHazardTests(TestCase):
         with self.assertRaises(InvalidAction):
             apply_action(result, order, self.battlefield)
 
+    def test_bucket_extinguishes_two_tiles_away_but_not_through_obstacles(self):
+        state = self.fire_catapult(self.state)
+        unit = state["units"][0]
+        unit.update(x=3, y=6, tools=["bucket"])
+        order = {"type": "extinguish_fire", "unit_id": 0, "x": 5, "y": 6}
+        result = apply_action(state, order, self.battlefield)
+        self.assertEqual(result["fire"], [])
+        self.assertEqual(result["units"][0]["fight_points"], 0)
+        self.assertEqual(result["history"][-1]["type"], "extinguish_fire")
+        self.assertEqual(state["fire"][0]["turns"], 3)
+
+        unit["tools"] = []
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        unit["tools"] = ["bucket"]
+        unit["x"] = 2
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        unit["x"] = 3
+        unit["fight_points"] = 0
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        unit["fight_points"] = 1
+        for obstruction in ("rock", "fence"):
+            self.battlefield["objects"] = [{"x": 4, "y": 6, "type": obstruction}]
+            if obstruction == "rock":
+                with self.assertRaises(InvalidAction):
+                    apply_action(state, order, self.battlefield)
+            else:
+                self.assertEqual(apply_action(state, order, self.battlefield)["fire"], [])
+        self.battlefield["objects"] = []
+        state["smoke"].append({"x": 4, "y": 6, "turns": 2})
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        state["smoke"][0]["x"] = 3
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+
+    def test_bucket_requires_same_height_and_cannot_reach_through_house_walls(self):
+        state = self.fire_catapult(self.state)
+        state["units"][0].update(x=3, y=6, tools=["bucket"])
+        order = {"type": "extinguish_fire", "unit_id": 0, "x": 5, "y": 6}
+        self.battlefield["elevation"] = [{"x": 5, "y": 6, "height": 1, "access": "ladder"}]
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+        self.battlefield["elevation"] = []
+        self.battlefield["houses"] = [{"left": 4, "right": 5, "top": 5, "bottom": 6,
+                                       "door": {"x": 4, "y": 6}}]
+        with self.assertRaises(InvalidAction):
+            apply_action(state, order, self.battlefield)
+
+    def test_bucket_does_not_extinguish_hidden_fire_and_pickup_drop_changes_range(self):
+        state = self.fire_catapult(self.state)
+        state["units"][0].update(x=3, y=6, tools=[])
+        order = {"type": "extinguish_fire", "unit_id": 0, "x": 5, "y": 6}
+        state["items"].append({"id": 80, "type": "tool", "name": "bucket",
+                               "carrier_id": None, "x": 3, "y": 6})
+        picked = apply_action(state, {"type": "pickup_tool", "unit_id": 0, "item_id": 80}, self.battlefield)
+        self.assertIn("bucket", picked["units"][0]["tools"])
+        picked["units"][0]["fight_points"] = 1
+        self.assertEqual(apply_action(picked, order, self.battlefield)["fire"], [])
+        dropped = apply_action(picked, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, self.battlefield)
+        dropped["units"][0]["fight_points"] = 1
+        with self.assertRaises(InvalidAction):
+            apply_action(dropped, order, self.battlefield)
+
+        self.battlefield.update(fog_of_war=True, night=True)
+        picked["units"] = [picked["units"][0]]
+        picked["units"][0].update(tools=["bucket", "shield"], shield_raised=True)
+        self.assertNotIn((5, 6), visible_tiles(picked, self.battlefield))
+        with self.assertRaises(InvalidAction):
+            apply_action(picked, order, self.battlefield)
+
     def test_fire_damages_armor_and_drops_gear_on_casualty(self):
         state = initial_state(self.battlefield)
         state["units"][0].update(x=5, y=6, health=1, armor="leather", armor_equipped=True)
