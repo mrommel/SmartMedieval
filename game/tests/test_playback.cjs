@@ -1360,6 +1360,69 @@ test("combat history renders on resume and updates after an action", async () =>
   assert.match(list.children[3].textContent, /2 damage \(ambush \+1\)/);
 });
 
+test("combat announcements report only new combat, including when history rolls over", async () => {
+  const game = setup();
+  game.snapshot.state.history = Array.from({ length: 100 }, (_, turn) => ({
+    turn, type: "promote", actor_id: 0, actor_side: "attackers", morale_change: -2
+  }));
+  await game.get("continue-game").fire("click");
+  const announcement = game.get("combat-announcement");
+  assert.equal(announcement.textContent, "", "old history is available in the list but not replayed");
+  game.snapshot.state.history.shift();
+  game.snapshot.state.history.push({ turn: 101, type: "fire_damage", target_id: 0,
+    target_side: "attackers", damage: 1, killed: false });
+  await game.get("end-turn").fire("click");
+  assert.match(announcement.textContent, /1 new combat event.*Fire burned attacker #1 for 1 damage/);
+  game.snapshot.state.history.shift();
+  game.snapshot.state.history.push({ turn: 102, type: "promote", actor_id: 0,
+    actor_side: "attackers", morale_change: -2 });
+  await game.get("end-turn").fire("click");
+  assert.doesNotMatch(announcement.textContent, /promoted/, "noncombat entries do not replace combat status");
+  game.snapshot.state.history.shift();
+  game.snapshot.state.history.push({ turn: 103, type: "ranged_attack", actor_id: 1,
+    actor_side: "defenders", target_id: 0, target_side: "attackers", damage: 2,
+    killed: false, morale_changes: [] });
+  game.snapshot.state.history.shift();
+  game.snapshot.state.history.push({ turn: 103, type: "promote", actor_id: 0,
+    actor_side: "attackers", morale_change: -2 });
+  await game.get("end-turn").fire("click");
+  assert.match(announcement.textContent, /shot attacker #1 for 2 damage/);
+  assert.doesNotMatch(announcement.textContent, /promoted/);
+  game.snapshot.state.history.splice(0, 4);
+  for (let id = 0; id < 4; id++) game.snapshot.state.history.push({
+    turn: 104, type: "fire_damage", target_id: id, target_side: "attackers",
+    damage: 1, killed: false
+  });
+  await game.get("end-turn").fire("click");
+  assert.match(announcement.textContent, /4 new combat events\. Latest:/);
+  assert.doesNotMatch(announcement.textContent, /attacker #1 for 1 damage/);
+  assert.match(announcement.textContent, /attacker #4 for 1 damage/);
+  game.snapshot.id = 2;
+  await game.get("continue-game").fire("click");
+  assert.equal(announcement.textContent, "", "entering a match does not announce stored history");
+});
+
+test("failed actions do not announce combat and fog announcements use filtered history", async () => {
+  let fails = true;
+  const game = setup(null, null, () => fails ? {
+    ok: false, status: 503, headers: { get: () => "application/json" },
+    json: async () => ({ error: "AI unavailable" })
+  } : null);
+  game.snapshot.map.fog_of_war = true;
+  await game.get("continue-game").fire("click");
+  const announcement = game.get("combat-announcement");
+  await game.get("end-turn").fire("click");
+  assert.equal(announcement.textContent, "");
+  fails = false;
+  // The API has already removed unwitnessed events from this fogged snapshot.
+  game.snapshot.state.history = [{ turn: 1, type: "attack", actor_id: 0,
+    actor_side: "attackers", target_id: 1, target_side: "defenders",
+    damage: 1, killed: false, morale_changes: [] }];
+  await game.get("end-turn").fire("click");
+  assert.match(announcement.textContent, /struck defender #2 for 1 damage/);
+  assert.doesNotMatch(announcement.textContent, /unwitnessed/);
+});
+
 test("selected soldier displays remaining stats and carried equipment after actions", async () => {
   const game = setup();
   game.snapshot.state.units[0].tools = ["rope"];

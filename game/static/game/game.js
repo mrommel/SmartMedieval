@@ -57,6 +57,7 @@ import { previewMovement } from "./path_preview.js";
   const reduceMotionInput = document.getElementById("reduce-motion");
   const selectedStats = document.getElementById("selected-stats");
   const historyList = document.getElementById("combat-history-list");
+  const combatAnnouncement = document.getElementById("combat-announcement");
   const cursorStatus = document.getElementById("cursor-status");
   const routeStatus = document.getElementById("route-status");
   const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
@@ -68,6 +69,7 @@ import { previewMovement } from "./path_preview.js";
   let startingAttackerCount = 0;
   let instanceId = null;
   let revision = 0;
+  let displayedHistory = [];
   let pendingAction = false;
   let tileW = 56;
   let tileH = 28;
@@ -637,6 +639,7 @@ import { previewMovement } from "./path_preview.js";
 
   function renderHistory(history) {
     const entries = history || [];
+    displayedHistory = entries.map(event => ({ ...event }));
     if (!entries.length) {
       const empty = document.createElement("li");
       empty.textContent = "No combat yet.";
@@ -854,6 +857,8 @@ import { previewMovement } from "./path_preview.js";
   async function sendAction(action) {
     if (pendingAction || !instanceId || paused || simulation.captured || simulation.defeated) return;
     const focusedControl = document.activeElement;
+    const previousInstance = instanceId;
+    const previousHistory = displayedHistory.map(event => JSON.stringify(event));
     const aiTurn = action.type === "end_turn" && !action.offline;
     const startedAt = aiTurn ? performance.now() : null;
     let waitTimer = null;
@@ -874,6 +879,18 @@ import { previewMovement } from "./path_preview.js";
       const wasCaptured = simulation.captured;
       const combat = combatSummary(simulation.units, snapshot.state.units, snapshot.state.history);
       applySnapshot(snapshot);
+      if (instanceId === previousInstance) {
+        const currentHistory = displayedHistory.map(event => JSON.stringify(event));
+        let overlap = Math.min(previousHistory.length, currentHistory.length);
+        while (overlap && previousHistory.slice(-overlap).some((entry, index) => entry !== currentHistory[index])) overlap--;
+        const descriptions = displayedHistory.slice(overlap).flatMap((event, index) =>
+          ["attack", "ranged_attack", "fire_damage", "catapult_wall", "catapult_miss"].includes(event.type)
+            ? [historyList.children[overlap + index].textContent] : []);
+        if (descriptions.length) {
+          combatAnnouncement.textContent = `${descriptions.length} new combat ${descriptions.length === 1 ? "event" : "events"}. ` +
+            `${descriptions.length > 3 ? "Latest: " : ""}${descriptions.slice(-3).join(" ")}`;
+        }
+      }
       if (aiTurn) {
         aiTurnCount++;
         aiTurnTotal += duration;
@@ -940,6 +957,7 @@ import { previewMovement } from "./path_preview.js";
 
   function enterGame(snapshot) {
     const { entry, kind } = snapshot;
+    combatAnnouncement.textContent = "";
     groupSelection = false;
     groupSelectButton.setAttribute("aria-pressed", "false");
     currentEntryId = entry.id;
