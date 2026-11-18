@@ -143,6 +143,13 @@
       <div class="roster">
         <div class="roster-heading">YOUR COMPANY <span id="roster-count">6 SOLDIERS</span></div>
         <div id="roster-list"></div>
+        <div class="soldier-picker">
+          <label for="soldier-select">Select a soldier</label>
+          <select id="soldier-select" aria-describedby="soldier-select-help" disabled>
+            <option value="">Choose a soldier</option>
+          </select>
+          <p id="soldier-select-help">Choose a soldier without navigating the battlefield. Shift-select on the battlefield to form a group.</p>
+        </div>
         <h2 class="roster-heading" id="selected-unit-title">SELECTED SOLDIER</h2>
         <div class="selected-stats" id="selected-stats" role="group" aria-labelledby="selected-unit-title" aria-live="polite" aria-atomic="true">Select a soldier to inspect their condition and equipment.</div>
         <div class="enemy-roster">GREYWATCH GARRISON <span id="enemy-count">0 DEFENDERS</span></div>
@@ -170,7 +177,7 @@
         <p>Defeating an enemy raises the victor's morale; nearby allies lose morale when a soldier falls. At 0–1 morale, units lose one move point next turn; at 5, they gain one. Select one recruit with 5 morale and press Promote to become a veteran: morale returns to 3, with one extra move and fight point each following turn.</p>
         <p>Drag the battlefield to pan (one finger on touchscreens). Pinch with two fingers to zoom and pan together, or use the mouse wheel or zoom buttons to zoom. Two-finger gestures do not issue orders.</p>
         <p>Select one soldier and hover over a destination, or focus the battlefield and use the arrow keys, to see the cheapest route. Green steps are available this turn; gold steps need later turns. On foot, roads cost 1 MP, grass 2, mud 3, and swamp 4; unmarked tiles cost 1. Longer-turn estimates assume the path stays clear; group orders spread soldiers to nearby tiles and have no single route preview.</p>
-        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, order movement, or confirm an aimed catapult target. Hold Shift while selecting to add or remove a soldier. Tab to the turn controls, including potion actions and their target selector, or the zoom buttons.</p>
+        <p id="keyboard-help">Keyboard: Tab to the battlefield, then use arrow keys to choose a tile. Press Enter or Space to select a soldier, attack a defender, order movement, or confirm an aimed catapult target. Hold Shift while selecting to add or remove a soldier. Alternatively, Tab to Select a soldier in the roster to choose one by name and condition. Tab to the turn controls, including potion actions and their target selector, or the zoom buttons.</p>
       </div>
       <div class="playback-settings">
         <label for="animation-speed">Animation speed</label>

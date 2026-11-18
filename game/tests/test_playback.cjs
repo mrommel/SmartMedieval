@@ -138,6 +138,49 @@ test("admin playtest opens the saved session match directly", async () => {
   assert.equal(ordinary.get("game-title").textContent, "");
 });
 
+test("soldier picker selects an individual without a server action and follows battlefield selection", async () => {
+  const game = setup();
+  game.snapshot.map.startPositions.push({ x: 1, y: 0 });
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, x: 1, weapon: "longbow", health: 2 });
+  await game.get("continue-game").fire("click");
+  const picker = game.get("soldier-select");
+  assert.equal(picker.disabled, false);
+  assert.equal(picker.value, "0");
+  assert.match(picker.children[2].textContent, /Soldier #2, longbow, 2\/3 HP/);
+  picker.value = "1";
+  picker.fire("change");
+  assert.match(game.get("selected-stats").textContent, /Soldier #2/);
+  assert.equal(game.postCount(), 0);
+  await game.get("reserve-reaction").fire("click");
+  assert.equal(game.actions.at(-1).unit_id, 1);
+  await game.get("continue-game").fire("click");
+  assert.equal(picker.value, "1");
+
+  const canvas = game.get("battlefield-canvas");
+  canvas.fire("focus");
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  assert.equal(picker.value, "0");
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  canvas.fire("keydown", { key: "Enter", shiftKey: true, preventDefault() {} });
+  assert.equal(picker.value, "");
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  picker.value = "1";
+  picker.fire("change");
+  assert.match(game.get("selected-stats").textContent, /Soldier #2/);
+});
+
+test("soldier picker drops fallen soldiers and disables when no attackers remain", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  game.snapshot.state.units = [];
+  game.snapshot.state.defeated = true;
+  await game.get("continue-game").fire("click");
+  const picker = game.get("soldier-select");
+  assert.equal(picker.disabled, true);
+  assert.equal(picker.value, "");
+  assert.equal(picker.children.length, 1);
+});
+
 test("exit withdrawal sends the selected soldier and debriefs evacuated gear", async () => {
   const game = setup();
   game.snapshot.map.exit = { x: 0, y: 0 };

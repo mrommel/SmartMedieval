@@ -12,6 +12,7 @@ import { previewMovement } from "./path_preview.js";
   const rosterCount = document.getElementById("roster-count");
   const enemyCount = document.getElementById("enemy-count");
   const rosterList = document.getElementById("roster-list");
+  const soldierSelect = document.getElementById("soldier-select");
   const statusNode = document.getElementById("objective-status");
   const progressNode = document.getElementById("capture-progress");
   const toastNode = document.getElementById("toast");
@@ -101,6 +102,8 @@ import { previewMovement } from "./path_preview.js";
 
   function updateControls() {
     const ended = simulation.captured || simulation.defeated;
+    soldierSelect.disabled = pendingAction || paused || ended ||
+      !simulation.units.some(unit => unit.side !== "defenders");
     const crew = selectedCrew();
     const medic = selectedMedic();
     const nearbyFlames = medic ? simulation.fire.filter(flame =>
@@ -564,6 +567,7 @@ import { previewMovement } from "./path_preview.js";
   function updatePromotion() {
     const selected = simulation.units.filter(unit => unit.side !== "defenders" && simulation.selected.has(unit.id));
     const unit = selected.length === 1 ? selected[0] : null;
+    soldierSelect.value = unit ? String(unit.id) : "";
     const crew = selectedCrew();
     const potions = unit ? simulation.items.filter(item => item.type === "healing_potion" && item.carrier_id === unit.id).length : 0;
     const gear = unit ? simulation.items.filter(item => ["weapon", "armor"].includes(item.type) &&
@@ -758,6 +762,15 @@ import { previewMovement } from "./path_preview.js";
       row.append(swatch, copy, dot);
       return row;
     }));
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Choose a soldier";
+    soldierSelect.replaceChildren(placeholder, ...attackers.map(unit => {
+      const option = document.createElement("option");
+      option.value = String(unit.id);
+      option.textContent = `Soldier #${unit.id + 1}, ${unit.weapon || "unarmed"}, ${unit.health}/${unit.max_health} HP, ${unit.move_points} MP, ${unit.fight_points} FP`;
+      return option;
+    }));
     statusNode.textContent = snapshot.state.capture_status;
     progressNode.style.width = `${Math.round(simulation.captureProgress * 100)}%`;
     countNode.textContent = `${String(attackers.length).padStart(2, "0")} / ${String(startingAttackerCount).padStart(2, "0")}`;
@@ -941,6 +954,13 @@ import { previewMovement } from "./path_preview.js";
   let currentEntryId = null;
   let currentKind = null;
   let currentGameId = null;
+  soldierSelect.addEventListener("change", () => {
+    if (soldierSelect.disabled) return;
+    const unit = simulation.units.find(item => item.side !== "defenders" && String(item.id) === soldierSelect.value);
+    simulation.selected = new Set(unit ? [unit.id] : []);
+    updateSelection();
+    draw();
+  });
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);
   endTurnButton.addEventListener("click", () => sendAction({ type: "end_turn" }));

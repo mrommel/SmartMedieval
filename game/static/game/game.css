@@ -134,6 +134,11 @@ h1 { margin: 0; font: 600 26px/1.15 "Playfair Display", Georgia, serif; letter-s
 .roster { padding: 12px 0 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .roster-heading { display: flex; justify-content: space-between; color: #d2bd8c; font-size: 8px; font-weight: 700; letter-spacing: .12em; }
 .roster-heading span { color: #8e998e; font-size: 7px; }
+.soldier-picker { margin: 12px 0; }
+.soldier-picker label { display: block; margin-bottom: 6px; color: #d2bd8c; font-size: 10px; font-weight: 700; }
+.soldier-picker select { width: 100%; padding: 8px; border: 1px solid #879385; border-radius: 3px; color: var(--ink); background: var(--panel-deep); font: inherit; }
+.soldier-picker select:focus-visible { outline: 2px solid #e6c374; outline-offset: 2px; }
+.soldier-picker p { margin: 6px 0 0; color: #aeb5a8; font-size: 10px; }
 .roster-unit { display: flex; align-items: center; gap: 9px; padding: 10px 0 7px; }
 .unit-swatch { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 2px; color: #e9dfc6; font-size: 14px; }
 .unit-swatch.sword { background: #775247; }
