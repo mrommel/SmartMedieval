@@ -36,6 +36,61 @@ class EditorToBattleLifecycleTests(TestCase):
                                 data=json.dumps({"revision": revision, "action": action}),
                                 content_type="application/json")
 
+    def test_every_seeded_scenario_launches_plays_and_resumes(self):
+        scenarios = (
+            ("siege-of-greywatch", "greywatch-assault", False),
+            ("capture-the-king", "greywatch-throne-room", False),
+            ("through-the-hamlet", "greywatch-hamlet", False),
+            ("scout-greywatch", "greywatch-reconnaissance", True),
+            ("night-watch-greywatch", "greywatch-night-watch", True),
+            ("shieldwall-greywatch", "greywatch-shieldwall", True),
+        )
+        catalog = {entry["slug"]: entry for entry in self.player.get(reverse("scenarios-api")).json()}
+        for scenario_slug, game_slug, fogged in scenarios:
+            with self.subTest(scenario=scenario_slug):
+                scenario = Scenario.objects.get(slug=scenario_slug)
+                game = SingleGame.objects.get(slug=game_slug)
+                self.assertIn(game.pk, [entry["id"] for entry in catalog[scenario_slug]["games"]])
+                response = self.player.post(reverse("start-game", args=["scenarios", scenario.pk]),
+                                            data="{}", content_type="application/json")
+                self.assertEqual(response.status_code, 201)
+                started = response.json()
+                self.assertEqual(started["game_id"], game.pk)
+                self.assertEqual(started["map"].get("fog_of_war", False), fogged)
+                self.assertEqual(started["revision"], 0)
+                self.assertEqual(started["state"]["turn"], 1)
+                if fogged:
+                    for field in ("enemyStartPositions", "items", "horses"):
+                        self.assertNotIn(field, started["map"])
+
+                # This first step is open in all six authored encounters.
+                moved_response = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
+                self.assertEqual(moved_response.status_code, 200, moved_response.content)
+                moved = moved_response.json()
+                self.assertEqual((moved["state"]["units"][0]["x"], moved["state"]["units"][0]["y"]),
+                                 (3, 6))
+                self.assertEqual(moved["revision"], 1)
+
+                ended_response = self.action(1, {"type": "end_turn", "offline": True})
+                self.assertEqual(ended_response.status_code, 200, ended_response.content)
+                ended = ended_response.json()
+                self.assertEqual(ended["revision"], 2)
+                self.assertEqual(ended["state"]["turn"], 2)
+                self.assertEqual(ended["id"], started["id"])
+                if fogged:
+                    self.assertNotIn("enemyStartPositions", ended["map"])
+                    self.assertNotIn("witnessed", json.dumps(ended))
+
+                reloaded = Client()
+                reloaded.cookies.update(self.player.cookies)
+                self.player = reloaded
+                self.assertEqual(self.player.get(reverse("current-game")).json(),
+                                 {key: value for key, value in ended.items() if key != "combat_events"})
+                instance = GameInstance.objects.get(pk=started["id"])
+                self.assertEqual(instance.revision, 2)
+                self.assertEqual(instance.state["turn"], 2)
+                self.assertEqual(instance.map_definition, normalize_map(game.map_definition))
+
     def test_authored_scenario_survives_edits_ai_failures_and_resume_until_restart(self):
         original = default_map()
         original.update(fog_of_war=True,
