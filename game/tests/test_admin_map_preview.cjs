@@ -24,10 +24,11 @@ function setup(fetch) {
   editor.value = JSON.stringify(map);
   const canvas = nodes.get("map-preview-canvas");
   let draws = 0;
-  canvas.getContext = () => ({ fillRect() { draws++; }, strokeRect() {}, fillText() {} });
+  const labels = [];
+  canvas.getContext = () => ({ fillRect() { draws++; }, strokeRect() {}, fillText(text) { labels.push(text); } });
   vm.runInNewContext(script, { document: { getElementById: id => nodes.get(id) },
     fetch, URLSearchParams, AbortController });
-  return { nodes, editor, panel, canvas, get draws() { return draws; },
+  return { nodes, editor, panel, canvas, labels, get draws() { return draws; },
     click: () => nodes.get("preview-map-button").click() };
 }
 
@@ -47,6 +48,16 @@ test("previews unsaved JSON with CSRF and invalidates on editing", async () => {
   ui.editor.input();
   assert.equal(ui.nodes.get("map-preview-result").hidden, true);
   assert.match(ui.nodes.get("map-preview-status").textContent, /Map changed/);
+});
+
+test("previews water, bridges and fords with a river tile count", async () => {
+  const withRivers = { ...map, rivers: [{ x: 2, y: 1, type: "water" },
+    { x: 2, y: 2, type: "bridge" }, { x: 2, y: 3, type: "ford" }] };
+  const ui = setup(async () => ({ ok: true, json: async () => ({ map: withRivers }) }));
+  await ui.click();
+  assert.match(ui.nodes.get("map-preview-summary").textContent, /3 river tiles/);
+  assert.ok(ui.labels.includes("B"));
+  assert.ok(ui.labels.includes("F"));
 });
 
 test("invalid maps never display stale previews", async () => {

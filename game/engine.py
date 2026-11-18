@@ -28,6 +28,8 @@ MAP = {
 MOVE_POINTS = 4
 TERRAIN_COSTS = {"road": 1, "grass": 2, "mud": 3, "swamp": 4}
 MOUNTED_TERRAIN_COSTS = {"road": 1, "grass": 2, "mud": 4}
+RIVER_COSTS = {"bridge": 1, "ford": 3}
+MOUNTED_RIVER_COSTS = {"bridge": 1, "ford": 4}
 HORSE_MOVE_POINTS = 6
 HORSE_HEALTH = 2
 MAX_HEALTH = 3
@@ -134,7 +136,7 @@ def default_map():
 
 def validate_map(map_data):
     required = set(MAP) - {"enemyStartPositions", "catapults"}
-    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "horses", "fog_of_war", "night", "watchfires", "exit"}:
+    if not isinstance(map_data, dict) or not required <= set(map_data) <= set(MAP) | {"elevation", "objects", "strongpoints", "mission", "houses", "lanes", "items", "terrain", "rivers", "horses", "fog_of_war", "night", "watchfires", "exit"}:
         raise InvalidMap("Map must contain cols, rows, keep, gate, objective and startPositions.")
     if "fog_of_war" in map_data and type(map_data["fog_of_war"]) is not bool:
         raise InvalidMap("fog_of_war must be true or false.")
@@ -212,6 +214,12 @@ def validate_map(map_data):
                     or not is_rectangle_edge(door["x"], door["y"], house)):
                 raise InvalidMap("A house door needs a perimeter tile.")
         rectangles.append(house)
+    rivers = map_data.get("rivers", [])
+    if (not isinstance(rivers, list) or len(rivers) > min(cols * rows, 256)
+            or any(not isinstance(tile, dict) or set(tile) != {"x", "y", "type"}
+                   or type(tile["x"]) is not int or type(tile["y"]) is not int
+                   or tile["type"] not in ("water", "bridge", "ford") for tile in rivers)):
+        raise InvalidMap("Rivers must be at most 256 water, bridge or ford tiles with integer coordinates.")
     objects = map_data.get("objects", [])
     if not isinstance(objects, list) or len(objects) > 256:
         raise InvalidMap("Objects must be a list of at most 256 trees, rocks, fences and wells.")
@@ -288,6 +296,39 @@ def validate_map(map_data):
                 or not is_walkable(tile["x"], tile["y"], map_data)):
             raise InvalidMap("Terrain tiles must be distinct open ground tiles of type road, grass, mud or swamp.")
         seen_terrain.add((tile["x"], tile["y"]))
+    river_tiles = {}
+    for tile in rivers:
+        point = (tile["x"], tile["y"])
+        if (point in river_tiles or point in seen or point in seen_terrain or point in seen_lanes
+                or not (0 <= point[0] < cols and 0 <= point[1] < rows)
+                or is_wall(*point, map_data) or is_house(*point, map_data)
+                or point in object_tiles or point in seen_fires
+                or point == (map_data["objective"]["x"], map_data["objective"]["y"])
+                or ("exit" in map_data and point == (map_data["exit"]["x"], map_data["exit"]["y"]))):
+            raise InvalidMap("River tiles must be distinct open, flat outdoor tiles without other terrain or lanes.")
+        river_tiles[point] = tile["type"]
+    if river_tiles:
+        connected = {next(iter(river_tiles))}
+        frontier = list(connected)
+        while frontier:
+            for point in neighbors(*frontier.pop()):
+                if point in river_tiles and point not in connected:
+                    connected.add(point)
+                    frontier.append(point)
+        if len(connected) != len(river_tiles):
+            raise InvalidMap("River tiles must form one connected channel.")
+        for (x, y), kind in river_tiles.items():
+            if kind == "water":
+                continue
+            # A crossing spans a one-tile-wide channel, with dry banks at both ends.
+            if not any(river_tiles.get((x + dx, y + dy)) == "water"
+                           and river_tiles.get((x - dx, y - dy)) == "water"
+                           and (x + dy, y + dx) not in river_tiles
+                           and (x - dy, y - dx) not in river_tiles
+                           and is_walkable(x + dy, y + dx, map_data)
+                           and is_walkable(x - dy, y - dx, map_data)
+                           for dx, dy in ((1, 0), (0, 1))):
+                raise InvalidMap("Bridge and ford tiles need water on opposite sides and two open banks.")
     objective = map_data["objective"]
     if is_house(objective["x"], objective["y"], map_data) or not is_walkable(objective["x"], objective["y"], map_data):
         raise InvalidMap("The objective must be on an open tile.")
@@ -328,8 +369,8 @@ def validate_map(map_data):
                     or not is_walkable(position["x"], position["y"], map_data)):
                 raise InvalidMap("Every starting unit needs an open tile and a supported weapon.")
             tile = (position["x"], position["y"])
-            if tile in occupied:
-                raise InvalidMap("Starting units must have distinct tiles.")
+            if tile in occupied or tile in river_tiles:
+                raise InvalidMap("Starting units must have distinct tiles away from rivers.")
             occupied.add(tile)
             if name == "enemyStartPositions":
                 kings += position.get("is_king", False)
@@ -361,7 +402,8 @@ def validate_map(map_data):
                 or not is_walkable(point["x"], point["y"], map_data)
                 or tile_height(point["x"], point["y"], map_data) != 0
                 or (point["x"], point["y"]) == (objective["x"], objective["y"])
-                or (point["x"], point["y"]) in seen_catapults):
+                or (point["x"], point["y"]) in seen_catapults
+                or (point["x"], point["y"]) in river_tiles):
             raise InvalidMap("Catapults need distinct open ground tiles away from the objective.")
         seen_catapults.add((point["x"], point["y"]))
     horses = map_data.get("horses", [])
@@ -376,6 +418,7 @@ def validate_map(map_data):
                 or tile_height(point["x"], point["y"], map_data) != 0
                 or (point["x"], point["y"]) == (objective["x"], objective["y"])
                 or (point["x"], point["y"]) in seen_horses
+                or (point["x"], point["y"]) in river_tiles
                 or any(tile["x"] == point["x"] and tile["y"] == point["y"] and tile["type"] == "swamp"
                        for tile in terrain)):
             raise InvalidMap("Horses need distinct open, flat, outdoor tiles away from the objective and swamps.")
@@ -395,7 +438,8 @@ def validate_map(map_data):
                             and 0 < len(item["name"]) <= 40))
                 or not is_walkable(item["x"], item["y"], map_data)
                 or tile_height(item["x"], item["y"], map_data) != 0
-                or (item["x"], item["y"]) in seen_items):
+                or (item["x"], item["y"]) in seen_items
+                or (item["x"], item["y"]) in river_tiles):
             raise InvalidMap("Items need valid types and names on distinct walkable ground tiles.")
         seen_items.add((item["x"], item["y"]))
     if "enemyStartPositions" not in map_data:
@@ -459,7 +503,9 @@ def blocks_sight(x, y, map_data=MAP, interior=None):
 def is_walkable(x, y, map_data=MAP):
     return (0 <= x < map_data["cols"] and 0 <= y < map_data["rows"]
             and not is_wall(x, y, map_data) and (not is_house(x, y, map_data) or house_at(x, y, map_data) is not None)
-            and not is_object(x, y, map_data))
+            and not is_object(x, y, map_data)
+            and not any(tile["x"] == x and tile["y"] == y and tile["type"] == "water"
+                        for tile in map_data.get("rivers", ())))
 
 
 def elevation_index(map_data):
@@ -684,6 +730,9 @@ def terrain_cost_index(map_data, mounted=False):
     costs = MOUNTED_TERRAIN_COSTS if mounted else TERRAIN_COSTS
     result = {(tile["x"], tile["y"]): costs.get(tile["type"])
               for tile in map_data.get("terrain", ())}
+    crossing_costs = MOUNTED_RIVER_COSTS if mounted else RIVER_COSTS
+    result.update({(tile["x"], tile["y"]): crossing_costs.get(tile["type"])
+                   for tile in map_data.get("rivers", ())})
     for tile in map_data.get("fire_tiles", ()):
         if result.get(tile, 1) is not None:
             result[tile] = result.get(tile, 1) + FIRE_MOVE_COST

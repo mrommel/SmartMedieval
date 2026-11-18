@@ -25,7 +25,8 @@ Check off only shipped, tested behavior. The **Completed baseline** records exis
 
 ### Outdoor map authoring
 
-- [ ] Design connected rivers (banks/crossings), vegetation (pine, cactus, willow, hedges, flowers), sloped hills and new terrain (swamp, desert, gravel, grass, plains). Decide tile versus edge placement, decorative versus blocking features, movement costs, sight/cover, fire and horse restrictions; preserve existing road/mud rules.
+- [x] Add cardinally connected, flat outdoor river channels with open-water blockers and bridge/ford crossings; validate geometry and overlaps, use foot/mounted crossing costs in movement and AI, and show rivers in game and editor previews. Broader vegetation, slopes and other terrain remain open below.
+- [ ] Design richer riverbank/edge shapes beyond the shipped tile channels, vegetation (pine, cactus, willow, hedges, flowers), sloped hills and new terrain (desert, gravel, plains). Decide tile versus edge placement, decorative versus blocking features, movement costs, sight/cover, fire and horse restrictions; preserve existing road/mud/swamp/grass rules.
 - [ ] Extend the map schema and validation for joined river segments, crossings, continuous adjacent slopes and terrain on hills. Reject invalid overlap with map bounds, walls, houses, objectives, starts, objects and elevation; keep older authored maps and active match snapshots playable.
 - [ ] Update pathfinding, defender AI, line of sight, fog snapshots, movement costs and route previews for the new features; test foot/mounted routes, crossings, elevation and mixed terrain in engine and API tests.
 - [ ] Render joined rivers, crossings, vegetation, flowers, hill faces/slopes and each ground type; keep isometric picking and route highlights accurate, with renderer/browser tests.

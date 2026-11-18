@@ -2344,6 +2344,62 @@ class CatapultTests(TestCase):
         self.assertNotIn(6, [unit["id"] for unit in lost["units"]])
 
 
+class RiverTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield["rivers"] = [
+            {"x": 6, "y": y, "type": "bridge" if y == 6 else "water"}
+            for y in range(self.battlefield["rows"])
+        ]
+
+    def test_connected_river_crossing_routes_and_sight(self):
+        validate_map(self.battlefield)
+        self.assertFalse(is_walkable(6, 5, self.battlefield))
+        self.assertTrue(has_line_of_sight((5, 5), (7, 5), self.battlefield))
+        self.assertIsNone(find_path((5, 5), (6, 5), self.battlefield))
+        path = find_path((5, 6), (7, 6), self.battlefield)
+        self.assertEqual(path, [(6, 6), (7, 6)])
+        self.assertEqual(find_path((5, 6), (7, 6), self.battlefield, mounted=True), path)
+        state = initial_state(self.battlefield)
+        state["units"] = [state["units"][0]]
+        state["units"][0].update(x=5, y=6, move_points=4)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 7, "y": 6}, self.battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["move_points"]), (7, 2))
+
+    def test_ford_cost_and_unaffordable_crossing(self):
+        self.battlefield["rivers"][6]["type"] = "ford"
+        validate_map(self.battlefield)
+        state = initial_state(self.battlefield)
+        state["units"] = [state["units"][0]]
+        state["units"][0].update(x=5, y=6, move_points=4)
+        moved = apply_action(state, {"type": "move", "units": [0], "x": 7, "y": 6}, self.battlefield)
+        self.assertEqual((moved["units"][0]["x"], moved["units"][0]["move_points"]), (7, 0))
+        self.assertIsNone(find_path((5, 6), (7, 6), self.battlefield, max_step_cost=2))
+        self.assertEqual(find_path((5, 6), (7, 6), self.battlefield, mounted=True),
+                         [(6, 6), (7, 6)])
+
+    def test_rejects_bad_river_geometry_and_overlaps(self):
+        validate_map(self.battlefield)
+        original = self.battlefield["rivers"]
+        for tiles in ("water", [{"x": 6, "y": 5, "type": "lake"}],
+                      [{"x": 6, "y": 5, "type": "water", "cost": 1}],
+                      [{"x": True, "y": 5, "type": "water"}],
+                      [original[0], original[0]],
+                      [*original, {"x": 8, "y": 1, "type": "water"}],
+                      [*original, {"x": 11, "y": 3, "type": "water"}],
+                      [*original, {"x": 5, "y": 7, "type": "water"}]):
+            self.battlefield["rivers"] = tiles
+            with self.subTest(tiles=tiles), self.assertRaises(InvalidMap):
+                validate_map(self.battlefield)
+        self.battlefield["rivers"] = [tile for tile in original if tile["y"] != 5]
+        with self.assertRaises(InvalidMap):
+            validate_map(self.battlefield)
+        self.battlefield["rivers"] = original
+        self.battlefield["terrain"] = [{"x": 6, "y": 6, "type": "road"}]
+        with self.assertRaises(InvalidMap):
+            validate_map(self.battlefield)
+
+
 class TerrainMovementTests(TestCase):
     def test_terrain_validation_rejects_bad_types_positions_and_untraversable_rosters(self):
         battlefield = default_map()

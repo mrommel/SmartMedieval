@@ -11,6 +11,7 @@ export function createBattlefieldRenderer(canvas) {
   let doors = new Set();
   let lanes = new Set();
   let terrain = new Map();
+  let rivers = new Map();
   let breaches = new Set();
   let wallDamage = new Set();
   let tileW = 56, tileH = 28, originX = 0, originY = 0, width = 0, height = 0;
@@ -39,6 +40,7 @@ export function createBattlefieldRenderer(canvas) {
     }
     lanes = new Set((map.lanes || []).map(tile => `${tile.x},${tile.y}`));
     terrain = new Map((map.terrain || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
+    rivers = new Map((map.rivers || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
     breaches = new Set((map.breaches || []).map(point => `${point.x},${point.y}`));
     wallDamage = new Set((map.wall_damage || []).map(point => `${point.x},${point.y}`));
   }
@@ -123,10 +125,53 @@ export function createBattlefieldRenderer(canvas) {
           x >= point.left && x <= point.right && y >= point.top && y <= point.bottom);
         const path = lanes.has(`${x},${y}`) || (x > 5 && x < KEEP.left && y >= 5 && y <= 9) || (x >= 12 && x <= 16 && y >= 4 && y <= 9);
         const type = terrain.get(`${x},${y}`);
+        const river = rivers.get(`${x},${y}`);
         const palette = type === "road" ? colors.path : type === "grass" ? colors.grass :
           type === "mud" ? ["#685642", "#765f47"] : type === "swamp" ? ["#465f53", "#526b5b"] :
           path ? colors.path : colors.grass;
         polygon(tile, palette[hash(x, y) % palette.length], castle ? "rgba(53,53,43,.25)" : colors.grassLine, .7);
+
+        if (river) {
+          polygon(tile, river === "bridge" ? "#9b8060" : river === "ford" ? "#62919a" : "#377486",
+            river === "water" ? null : "#285a69", 1);
+          if (river === "water") {
+            for (const [nx, ny, first, last] of [
+              [x - 1, y, 3, 0], [x, y - 1, 0, 1],
+              [x + 1, y, 1, 2], [x, y + 1, 2, 3]
+            ]) {
+              if (rivers.has(`${nx},${ny}`)) continue;
+              ctx.strokeStyle = "#285a69";
+              ctx.lineWidth = Math.max(1, tileW * .035);
+              ctx.beginPath();
+              ctx.moveTo(...tile[first]);
+              ctx.lineTo(...tile[last]);
+              ctx.stroke();
+            }
+          }
+          const center = project(x, y, 0);
+          if (river === "bridge") {
+            // Planks run across the water, perpendicular to its neighboring segments.
+            const vertical = rivers.has(`${x},${y - 1}`) && rivers.has(`${x},${y + 1}`);
+            ctx.strokeStyle = "#594b3b";
+            ctx.lineWidth = Math.max(2, tileW * .045);
+            for (const offset of [-.16, 0, .16]) {
+              ctx.beginPath();
+              if (vertical) {
+                ctx.moveTo(center.x - tileW * .3, center.y + tileH * (.5 + offset));
+                ctx.lineTo(center.x + tileW * .3, center.y + tileH * (.5 + offset));
+              } else {
+                ctx.moveTo(center.x + offset * tileW, center.y + tileH * .25);
+                ctx.lineTo(center.x + offset * tileW, center.y + tileH * .75);
+              }
+              ctx.stroke();
+            }
+          } else {
+            ctx.fillStyle = "rgba(220,244,238,.5)";
+            ctx.beginPath();
+            ctx.ellipse(center.x, center.y + tileH * .5, tileW * .23, tileH * .09, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
 
         if (type === "mud" || type === "swamp") {
           const center = project(x, y, 0);

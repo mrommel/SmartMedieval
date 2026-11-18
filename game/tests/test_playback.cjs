@@ -821,6 +821,23 @@ test("renderer draws reachable route steps and unreachable markers", () => {
   assert.equal(game.draws(), 2);
 });
 
+test("river preview avoids water and accounts for bridge and ford costs", () => {
+  const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
+    gate: { x: 6, y: 7 }, objective: { x: 6, y: 6 },
+    rivers: [{ x: 1, y: 0, type: "water" }, { x: 1, y: 1, type: "ford" },
+      { x: 1, y: 2, type: "water" }] };
+  const unit = { id: 0, x: 0, y: 1, move_points: 3, move_capacity: 4, next_move_capacity: 4 };
+  assert.equal(previewMovement(map, [unit], unit, { x: 1, y: 0 }).status, "unreachable");
+  const ford = previewMovement(map, [unit], unit, { x: 2, y: 1 });
+  assert.deepEqual(Array.from(ford.path, p => [p.x, p.y]), [[1, 1], [2, 1]]);
+  assert.equal(ford.totalCost, 4);
+  assert.equal(ford.thisTurn, 1);
+  const mounted = { ...unit, mount_id: 0, move_points: 6, move_capacity: 6, next_move_capacity: 6 };
+  assert.equal(previewMovement(map, [mounted], mounted, { x: 2, y: 1 }).totalCost, 5);
+  map.rivers[1].type = "bridge";
+  assert.equal(previewMovement(map, [unit], unit, { x: 2, y: 1 }).totalCost, 2);
+});
+
 test("route preview obeys house doors, objects, and elevation access in both directions", () => {
   const map = { cols: 8, rows: 8, keep: { left: 5, right: 7, top: 5, bottom: 7 },
     gate: { x: 6, y: 7 }, objective: { x: 6, y: 6 },

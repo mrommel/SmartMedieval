@@ -360,7 +360,8 @@ import { previewMovement } from "./path_preview.js";
   function isWalkable(x, y) {
     return x >= 0 && x < COLS && y >= 0 && y < ROWS &&
       !renderer.isWall(x, y) && (!renderer.isHouse(x, y) || renderer.isEnterableHouse(x, y)) &&
-      !objects.has(`${x},${y}`);
+      !objects.has(`${x},${y}`) && !mapData?.rivers?.some(tile =>
+        tile.x === x && tile.y === y && tile.type === "water");
   }
 
   function houseAt(x, y) {
@@ -534,6 +535,8 @@ import { previewMovement } from "./path_preview.js";
         renderer.isEnterableHouse(cursor.x, cursor.y) ? "house interior" :
         renderer.isHouse(cursor.x, cursor.y) ? "house" : cursor.x === OBJECTIVE.x && cursor.y === OBJECTIVE.y
         ? mapData?.mission === "capture_king" ? "throne" : "courtyard objective" :
+        ({ water: "river, impassable", bridge: "bridge, 1 MP", ford: "ford, 3 MP on foot or 4 mounted" })[
+          mapData?.rivers?.find(tile => tile.x === cursor.x && tile.y === cursor.y)?.type] ||
         mapData?.terrain?.find(tile => tile.x === cursor.x && tile.y === cursor.y)?.type ||
         (mapData?.lanes?.some(tile => tile.x === cursor.x && tile.y === cursor.y) ? "lane" : "open ground"))}.`;
   }

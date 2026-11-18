@@ -35,6 +35,27 @@ class GameInstanceApiTests(TestCase):
             content_type="application/json",
         )
 
+    def test_river_crossing_persists_through_fogged_launch_move_and_resume(self):
+        battlefield = default_map()
+        battlefield["fog_of_war"] = True
+        battlefield["rivers"] = [
+            {"x": 6, "y": y, "type": "bridge" if y == 6 else "water"}
+            for y in range(battlefield["rows"])
+        ]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["map"]["rivers"], battlefield["rivers"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).map_definition["rivers"],
+                         battlefield["rivers"])
+        blocked = self.action(0, {"type": "move", "units": [0], "x": 6, "y": 5})
+        self.assertEqual(blocked.status_code, 400)
+        crossing = self.action(0, {"type": "move", "units": [0], "x": 6, "y": 6})
+        self.assertEqual(crossing.status_code, 200)
+        self.assertEqual(crossing.json()["map"]["rivers"], battlefield["rivers"])
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"], crossing.json()["state"])
+
     def test_defender_ai_only_sees_spotted_horses_on_initial_request_and_retry(self):
         battlefield = default_map()
         battlefield.update(fog_of_war=True,

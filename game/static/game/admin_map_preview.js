@@ -30,6 +30,7 @@
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("This browser cannot draw the map preview.");
     const terrain = new Map((map.terrain || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
+    const rivers = new Map((map.rivers || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
     const elevation = new Map((map.elevation || []).map(tile => [`${tile.x},${tile.y}`, tile]));
     const objects = new Map((map.objects || []).map(tile => [`${tile.x},${tile.y}`, tile.type]));
     const attackers = tiles(map.startPositions);
@@ -47,6 +48,11 @@
         const key = `${x},${y}`;
         let color = terrainColors[terrain.get(key)] || (lanes.has(key) ? "#ded4b3" : "#e9e9d8");
         let label = "";
+        if (rivers.has(key)) {
+          const kind = rivers.get(key);
+          color = kind === "water" ? "#377486" : kind === "bridge" ? "#9b8060" : "#62919a";
+          label = kind === "water" ? "" : kind === "bridge" ? "B" : "F";
+        }
         if (elevation.has(key)) {
           color = "#769fd2";
           label = String(elevation.get(key).height);
@@ -83,7 +89,7 @@
       `Gate (${map.gate.x}, ${map.gate.y}); objective (${map.objective.x}, ${map.objective.y}). ` +
       `${attackers.size} attackers, ${defenders.size || 1} defenders, ` +
       `${(map.houses || []).length} houses, ${(map.strongpoints || []).length} strongpoints, ` +
-      `${objects.size} objects, ${(map.items || []).length} supplies.` +
+      `${objects.size} objects, ${(map.items || []).length} supplies, ${rivers.size} river tiles.` +
       (map.exit ? ` Exit (${map.exit.x}, ${map.exit.y}).` : "") +
       (map.fog_of_war ? " Fog of war enabled." : "") +
       (map.night ? " Night enabled." : "");

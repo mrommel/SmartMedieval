@@ -15,6 +15,9 @@ export function previewMovement(map, units, unit, destination) {
   const costs = mounted ? { road: 1, grass: 2, mud: 4, swamp: Infinity } :
     { road: 1, grass: 2, mud: 3, swamp: 4 };
   const terrain = new Map((map.terrain || []).map(tile => [key(tile.x, tile.y), costs[tile.type]]));
+  const rivers = new Map((map.rivers || []).map(tile => [key(tile.x, tile.y), tile.type]));
+  for (const [position, type] of rivers) terrain.set(position,
+    type === "water" ? Infinity : type === "bridge" ? 1 : mounted ? 4 : 3);
   const fire = new Set((map.fire || []).map(tile => key(tile.x, tile.y)));
   const costAt = tile => (terrain.get(key(tile.x, tile.y)) || 1) + (fire.has(key(tile.x, tile.y)) ? 2 : 0);
   const objects = new Set((map.objects || []).map(tile => key(tile.x, tile.y)));
@@ -31,7 +34,8 @@ export function previewMovement(map, units, unit, destination) {
       (x === point.left || x === point.right || y === point.top || y === point.bottom) &&
       (x !== point.gate.x || y !== point.gate.y));
   const walkable = (x, y) => x >= 0 && x < cols && y >= 0 && y < rows &&
-    !isWall(x, y) && (!houses.has(key(x, y)) || houseAt(x, y) !== null) && !objects.has(key(x, y));
+    !isWall(x, y) && (!houses.has(key(x, y)) || houseAt(x, y) !== null) &&
+    !objects.has(key(x, y)) && rivers.get(key(x, y)) !== "water";
   const canStep = (from, to) => {
     if (!walkable(to.x, to.y)) return false;
     const before = houseAt(from.x, from.y), after = houseAt(to.x, to.y);
