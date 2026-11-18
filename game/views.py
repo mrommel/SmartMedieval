@@ -101,6 +101,10 @@ def serialize_instance(instance):
                          if (flame["x"], flame["y"]) in visible],
                 "burned": [tile for tile in state.get("burned", [])
                            if (tile["x"], tile["y"]) in visible],
+                "wall_damage": [tile for tile in state.get("wall_damage", [])
+                                if (tile["x"], tile["y"]) in visible],
+                "breaches": [tile for tile in state.get("breaches", [])
+                             if (tile["x"], tile["y"]) in visible],
                 "horses": [horse for horse in state.get("horses", [])
                            if (horse["x"], horse["y"]) in visible],
                 "visible": [{"x": x, "y": y} for x, y in sorted(visible)],

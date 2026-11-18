@@ -134,3 +134,49 @@ class EditorToBattleLifecycleTests(TestCase):
         self.assertEqual(self.player.get(reverse("current-game")).json(), restarted)
         self.assertEqual(self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6}).status_code, 400)
         self.assertEqual(GameInstance.objects.get(pk=started["id"]).map_definition, normalize_map(original))
+
+    def test_fogged_match_hides_unseen_wall_changes_on_launch_and_resume(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 16, "y": 8, "weapon": "sword"}])
+        game = self.save_game(battlefield)
+        started = self.player.post(reverse("start-game", args=["single-games", game.pk]),
+                                   data="{}", content_type="application/json").json()
+        instance = GameInstance.objects.get(pk=started["id"])
+        # Older match states can lack these keys; a new turn may later add unseen damage.
+        instance.state.pop("wall_damage")
+        instance.state.pop("breaches")
+        instance.save(update_fields=["state"])
+        resumed = self.player.get(reverse("current-game")).json()
+        self.assertEqual(resumed["state"]["wall_damage"], [])
+        self.assertEqual(resumed["state"]["breaches"], [])
+
+        damage = {"x": 11, "y": 7, "damage": 1}
+        breach = {"x": 11, "y": 8}
+        instance.state["wall_damage"] = [damage]
+        instance.state["breaches"] = [breach]
+        instance.save(update_fields=["state"])
+        hidden = self.player.get(reverse("current-game")).json()
+        self.assertEqual(hidden["state"]["wall_damage"], [])
+        self.assertEqual(hidden["state"]["breaches"], [])
+        self.assertEqual(hidden["state"]["units"], started["state"]["units"])
+        self.assertEqual(GameInstance.objects.get(pk=started["id"]).state["breaches"], [breach])
+
+        moved = self.action(hidden["revision"], {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertEqual(moved.status_code, 200)
+        self.assertEqual(moved.json()["state"]["wall_damage"], [])
+        self.assertEqual(moved.json()["state"]["breaches"], [])
+        instance.refresh_from_db()
+        instance.state["units"][0].update(x=8, y=7)
+        instance.save(update_fields=["state"])
+        observed = self.player.get(reverse("current-game")).json()
+        self.assertEqual(observed["state"]["wall_damage"], [damage])
+        self.assertEqual(observed["state"]["breaches"], [breach])
+        self.assertEqual(self.player.get(reverse("current-game")).json(), observed)
+
+        instance.state["units"][0].update(x=2, y=6)
+        instance.save(update_fields=["state"])
+        out_of_sight = self.player.get(reverse("current-game")).json()
+        self.assertEqual(out_of_sight["state"]["wall_damage"], [])
+        self.assertEqual(out_of_sight["state"]["breaches"], [])
