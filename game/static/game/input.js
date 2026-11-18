@@ -8,6 +8,7 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   let pinch = null;
   let hoveredTile = null;
   let keyboardPreview = false;
+  let inspectTouch = false;
 
   function previewDestination() {
     return hoveredTile || (cursor.visible && keyboardPreview ? { x: cursor.x, y: cursor.y } : null);
@@ -127,6 +128,12 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     const rect = canvas.getBoundingClientRect();
     const px = (event.clientX - rect.left - camera.x) / camera.zoom;
     const py = (event.clientY - rect.top - camera.y) / camera.zoom;
+    if (event.pointerType === "touch" && inspectTouch) {
+      const tile = pickTile(px, py);
+      const map = getMap();
+      setHover(tile.x >= 0 && tile.x < map.cols && tile.y >= 0 && tile.y < map.rows ? tile : null);
+      return;
+    }
     if (isAiming()) {
       const tile = pickTile(px, py);
       onAim(tile.x, tile.y);
@@ -265,7 +272,9 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     else if (!touches.size) pinch = null;
     if (activePointer?.id === event.pointerId) activePointer = null;
   });
-  canvas.addEventListener("pointerleave", () => setHover(null));
+  canvas.addEventListener("pointerleave", event => {
+    if (event.pointerType !== "touch") setHover(null);
+  });
   canvas.addEventListener("focus", () => {
     cursor.visible = true;
     keyboardPreview = !activePointer;
@@ -328,5 +337,6 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   });
 
   return { camera, cursor, clampCamera, resetCamera, resetCursor, focusTile, describeCursor, previewDestination,
+    setInspectTouch(enabled) { inspectTouch = enabled; setHover(null); },
     cancelPointer() { activePointer = null; touches.clear(); pinch = null; setHover(null); } };
 }

@@ -1014,6 +1014,62 @@ test("mobile tap orders, drag pans, and two-finger pinch zooms without accidenta
   assert.equal(game.actions.length, orders + 1, "a new tap after the gesture must order normally");
 });
 
+test("touch inspection previews routes without orders and resets for a new match", async () => {
+  const game = setup();
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const toggle = game.get("inspect-touch");
+  const touch = (type, pointerId, clientX, clientY) => canvas.fire(type,
+    { button: 0, pointerType: "touch", pointerId, clientX, clientY });
+  const tap = (id, x, y) => {
+    touch("pointerdown", id, x, y);
+    touch("pointerup", id, x, y);
+  };
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "true");
+  tap(1, 268, 219.2);
+  assert.match(game.get("route-status").textContent, /Route to tile 1, 2: 1 tile · 1 MP total/);
+  assert.equal(game.actions.length, 0);
+  canvas.fire("pointerleave", { pointerType: "touch" });
+  assert.match(game.get("route-status").textContent, /Route to tile 1, 2/);
+  tap(2, 268, 219.2);
+  assert.equal(game.actions.length, 0, "repeated inspection must not submit an order");
+  game.snapshot.map.catapults = [{ x: 0, y: 0 }];
+  game.snapshot.state.catapults = [{ id: 0, x: 0, y: 0, ammo: 3, reload_turns: 0, aim: null }];
+  await game.get("continue-game").fire("click");
+  game.get("aim-catapult").fire("click");
+  tap(8, 268, 219.2);
+  assert.equal(game.actions.length, 0, "inspection must not aim a catapult");
+  game.get("aim-catapult").fire("click");
+  touch("pointerdown", 3, 250, 200);
+  touch("pointermove", 3, 270, 200);
+  touch("pointerup", 3, 270, 200);
+  assert.equal(game.actions.length, 0, "dragging must still pan, not order");
+  touch("pointerdown", 4, 250, 200);
+  touch("pointerdown", 5, 350, 200);
+  touch("pointermove", 5, 390, 200);
+  touch("pointerup", 5, 390, 200);
+  touch("pointerup", 4, 250, 200);
+  assert.equal(game.actions.length, 0, "pinching must not order");
+  game.get("pause-game").fire("click");
+  assert.equal(toggle.disabled, true);
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "true");
+  game.get("pause-game").fire("click");
+  assert.equal(toggle.disabled, false);
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "false");
+  // Use the unit's own tile so no camera movement can change which tile gets tapped.
+  tap(6, 300, 205.2);
+  assert.equal(game.actions.length, 0, "ordinary touch selection is restored");
+  toggle.fire("click");
+  game.snapshot.id = 2;
+  await game.get("continue-game").fire("click");
+  assert.equal(toggle["aria-pressed"], "false");
+  tap(7, 268, 219.2);
+  assert.equal(game.actions.at(-1)?.type, "move", "a new match starts with normal touch orders");
+});
+
 test("mobile pinch scales around its midpoint, pans with both fingers, and ignores canceled taps", () => {
   const game = setup();
   const canvas = game.get("battlefield-canvas");

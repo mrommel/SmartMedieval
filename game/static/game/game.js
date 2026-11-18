@@ -15,6 +15,7 @@ import { previewMovement } from "./path_preview.js";
   const soldierSelect = document.getElementById("soldier-select");
   const findSoldierButton = document.getElementById("find-soldier");
   const groupSelectButton = document.getElementById("group-select");
+  const inspectTouchButton = document.getElementById("inspect-touch");
   const statusNode = document.getElementById("objective-status");
   const progressNode = document.getElementById("capture-progress");
   const toastNode = document.getElementById("toast");
@@ -90,6 +91,7 @@ import { previewMovement } from "./path_preview.js";
   let userReducedMotion = false;
   let paused = false;
   let groupSelection = false;
+  let inspectingTouch = false;
   let animationTime = 0;
   let lastFrameTime = null;
   let previewMap = null;
@@ -110,6 +112,7 @@ import { previewMovement } from "./path_preview.js";
 
   function updateControls() {
     const ended = simulation.captured || simulation.defeated;
+    inspectTouchButton.disabled = pendingAction || paused || ended;
     soldierSelect.disabled = pendingAction || paused || ended ||
       !simulation.units.some(unit => unit.side !== "defenders");
     groupSelectButton.disabled = soldierSelect.disabled;
@@ -429,7 +432,7 @@ import { previewMovement } from "./path_preview.js";
     } else {
       routeStatus.textContent = selected.length > 1 && destination ? "Select one soldier to preview their route; group orders spread to nearby tiles." :
         selected.length === 0 && destination ? "Select a soldier to preview a route." :
-        "Hover over a tile, or focus the battlefield and use arrow keys, to preview a route.";
+        "Hover over a tile, use arrow keys on the battlefield, or turn on Inspect touch routes and tap a tile to preview a route.";
     }
     draw();
   }
@@ -696,6 +699,9 @@ import { previewMovement } from "./path_preview.js";
       aiTurnTotal = 0;
       aiWaitNode.hidden = true;
       input.cancelPointer();
+      inspectingTouch = false;
+      input.setInspectTouch(false);
+      inspectTouchButton.setAttribute("aria-pressed", "false");
       renderer.clearProjectiles();
       paused = false;
     }
@@ -1033,6 +1039,12 @@ import { previewMovement } from "./path_preview.js";
     if (groupSelectButton.disabled) return;
     groupSelection = !groupSelection;
     groupSelectButton.setAttribute("aria-pressed", String(groupSelection));
+  });
+  inspectTouchButton.addEventListener("click", () => {
+    if (inspectTouchButton.disabled) return;
+    inspectingTouch = !inspectingTouch;
+    input.setInspectTouch(inspectingTouch);
+    inspectTouchButton.setAttribute("aria-pressed", String(inspectingTouch));
   });
   findSoldierButton.addEventListener("click", () => {
     const unit = selectedMedic();
