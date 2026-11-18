@@ -612,7 +612,8 @@ import { previewMovement } from "./path_preview.js";
         detailRow("Armor", unit.armor ? `${unit.armor} · ${unit.armor_equipped ? "worn" : "carried"} · ${unit.armor_remaining ?? 0}/${unit.armor === "mail" ? 2 : 1} protection left this turn · weight ${unit.armor === "mail" ? 3 : 1}` : "none"),
         detailRow("Tools", unit.tools?.length ? unit.tools.map(tool =>
           tool === "torch" && mapData?.night ? `torch (${unit.torch_lit === false ? "unlit" : "lit"})` :
-          tool === "spyglass" && mapData?.fog_of_war && !mapData?.night ? "spyglass (8-tile daylight sight)" : tool).join(", ") : "none"),
+          tool === "spyglass" && mapData?.fog_of_war && !mapData?.night ? "spyglass (8-tile daylight sight)" :
+          tool === "quiver" ? "quiver (bow/crossbow reload −1 turn on firing)" : tool).join(", ") : "none"),
         detailRow("Potions", `${potions}/2`),
         ...(gear.length ? [detailRow("Equipment here", gear.map(equipmentName).join(", "))] : []),
         ...(groundTools.length ? [detailRow("Tools here", groundTools.map(item => item.name).join(", "))] : []),

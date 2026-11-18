@@ -119,6 +119,80 @@ class FireHazardTests(TestCase):
         self.assertNotIn((8, 6), {(f["x"], f["y"]) for f in state["fire"]})
 
 
+class QuiverTests(TestCase):
+    def setUp(self):
+        self.battlefield = default_map()
+        self.battlefield.update(
+            startPositions=[{"x": 2, "y": 6, "weapon": "crossbow", "tools": ["quiver"]}],
+            enemyStartPositions=[{"x": 6, "y": 6, "weapon": "sword"}],
+        )
+        validate_map(self.battlefield)
+
+    def test_quiver_shortens_crossbow_reload_without_changing_existing_cooldown(self):
+        state = initial_state(self.battlefield)
+        shot = apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, self.battlefield)
+        self.assertEqual(shot["units"][0]["reload_turns"], 2)
+        self.assertEqual(state["units"][0]["reload_turns"], 0)
+        with self.assertRaises(InvalidAction):
+            apply_action(shot, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, self.battlefield)
+        shot["units"][0]["fight_points"] = 1
+        dropped = apply_action(shot, {"type": "drop_tool", "unit_id": 0, "tool_index": 0}, self.battlefield)
+        self.assertEqual(dropped["units"][0]["reload_turns"], 2)
+        dropped["units"][0]["fight_points"] = 1
+        recovered = apply_action(dropped, {"type": "pickup_tool", "unit_id": 0,
+                                           "item_id": dropped["items"][-1]["id"]}, self.battlefield)
+        self.assertEqual(recovered["units"][0]["reload_turns"], 2)
+        waiting = apply_action(recovered, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(waiting["units"][0]["reload_turns"], 1)
+        ready = apply_action(waiting, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(ready["units"][0]["reload_turns"], 0)
+
+        without_quiver = initial_state(self.battlefield)
+        without_quiver["units"][0]["tools"] = []
+        plain_shot = apply_action(without_quiver, {"type": "ranged_attack", "unit_id": 0,
+                                                   "target_id": 1}, self.battlefield)
+        self.assertEqual(plain_shot["units"][0]["reload_turns"], 3)
+        self.assertEqual(apply_action(plain_shot, {"type": "end_turn"}, self.battlefield)
+                         ["units"][0]["reload_turns"], 2)
+
+    def test_quiver_works_for_bows_and_reserved_reaction_shots(self):
+        self.battlefield["startPositions"][0]["weapon"] = "longbow"
+        state = initial_state(self.battlefield)
+        shot = apply_action(state, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, self.battlefield)
+        self.assertEqual(shot["units"][0]["reload_turns"], 1)
+
+        self.battlefield["startPositions"][0]["weapon"] = "crossbow"
+        self.battlefield["enemyStartPositions"][0]["x"] = 9
+        state = initial_state(self.battlefield)
+        reserved = apply_action(state, {"type": "reserve_reaction", "unit_id": 0,
+                                        "reserved": True}, self.battlefield)
+        after = apply_action(reserved, {"type": "end_turn"}, self.battlefield,
+                             enemy_orders=[{"unit_id": 1, "x": 6, "y": 6}])
+        self.assertTrue(any(event.get("reaction") for event in after["history"]))
+        self.assertEqual(after["units"][0]["reload_turns"], 1)
+
+    def test_picking_up_ground_quiver_affects_future_shots(self):
+        self.battlefield["startPositions"][0]["tools"] = []
+        self.battlefield["items"] = [{"x": 2, "y": 6, "type": "tool", "name": "quiver"}]
+        validate_map(self.battlefield)
+        state = initial_state(self.battlefield)
+        picked = apply_action(state, {"type": "pickup_tool", "unit_id": 0, "item_id": 0}, self.battlefield)
+        self.assertEqual(picked["units"][0]["tools"], ["quiver"])
+        picked["units"][0]["fight_points"] = 1
+        shot = apply_action(picked, {"type": "ranged_attack", "unit_id": 0, "target_id": 1}, self.battlefield)
+        self.assertEqual(shot["units"][0]["reload_turns"], 2)
+
+    def test_defender_quiver_and_legacy_toolless_defender(self):
+        self.battlefield["startPositions"][0]["weapon"] = "sword"
+        self.battlefield["enemyStartPositions"][0].update(weapon="crossbow", tools=["quiver"])
+        state = initial_state(self.battlefield)
+        after = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after["units"][1]["reload_turns"], 2)
+        state["units"][1].pop("tools")  # Old saved unit without a tools field.
+        after = apply_action(state, {"type": "end_turn"}, self.battlefield)
+        self.assertEqual(after["units"][1]["reload_turns"], 3)
+
+
 class SpyglassTests(TestCase):
     def setUp(self):
         self.battlefield = default_map()

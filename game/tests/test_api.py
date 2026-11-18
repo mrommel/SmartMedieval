@@ -972,6 +972,24 @@ class GameInstanceApiTests(TestCase):
                           ended.json()["state"]["units"][0]["fight_points"]), (5, 2))
         self.assertNotIn("combat_events", self.client.get(reverse("current-game")).json())
 
+    def test_authored_quiver_reload_survives_actions_and_resume(self):
+        battlefield = default_map()
+        battlefield["startPositions"] = [{"x": 2, "y": 6, "weapon": "crossbow", "tools": ["quiver"]}]
+        battlefield["enemyStartPositions"] = [{"x": 6, "y": 6, "weapon": "sword"}]
+        self.game.map_definition = battlefield
+        self.game.full_clean()
+        self.game.save()
+        started = self.start().json()
+        self.assertEqual(started["state"]["units"][0]["tools"], ["quiver"])
+        attacked = self.action(0, {"type": "ranged_attack", "unit_id": 0, "target_id": 1})
+        self.assertEqual(attacked.status_code, 200)
+        self.assertEqual(attacked.json()["state"]["units"][0]["reload_turns"], 2)
+        self.assertEqual(self.client.get(reverse("current-game")).json()["state"]["units"][0]
+                         ["reload_turns"], 2)
+        ended = self.action(1, {"type": "end_turn"})
+        self.assertEqual(ended.status_code, 200)
+        self.assertEqual(ended.json()["state"]["units"][0]["reload_turns"], 1)
+
     def test_ranged_attack_persists_damage_and_reload_state(self):
         started = self.start().json()
         instance = GameInstance.objects.get(pk=started["id"])

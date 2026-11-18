@@ -70,6 +70,12 @@ WATCHFIRE_LIGHT_RANGE = 3
 LEGACY_WEAPONS = {"vanguard": "sword", "longbow": "longbow", "crossbow": "crossbow", "king": None}
 
 
+def ranged_reload_turns(unit):
+    """A carried quiver speeds the next shot, not a reload already in progress."""
+    return max(1, RANGED_WEAPON_STATS[unit["weapon"]]["reload_turns"]
+               - ("quiver" in unit.get("tools", ())))
+
+
 def normalize_position(position):
     point = {key: value for key, value in position.items() if key != "type"}
     if "type" in position:
@@ -626,7 +632,7 @@ def trigger_reactions(state, target, map_data, combat_events=None):
             continue
         attacker["reaction_reserved"] = False
         if ranged:
-            attacker["reload_turns"] = RANGED_WEAPON_STATS[attacker["weapon"]]["reload_turns"]
+            attacker["reload_turns"] = ranged_reload_turns(attacker)
             if combat_events is not None:
                 combat_events.append({
                     "type": "projectile", "weapon": attacker["weapon"],
@@ -1733,7 +1739,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             if not has_line_of_sight((attacker["x"], attacker["y"]),
                                      (target["x"], target["y"]), map_data):
                 raise InvalidAction("An obstacle blocks the line of sight.")
-            attacker["reload_turns"] = RANGED_WEAPON_STATS[attacker["weapon"]]["reload_turns"]
+            attacker["reload_turns"] = ranged_reload_turns(attacker)
             if combat_events is not None:
                 combat_events.append({
                     "type": "projectile", "weapon": attacker["weapon"],
@@ -1834,7 +1840,7 @@ def apply_action(state, action, map_data=MAP, enemy_orders=(), combat_events=Non
             ))
             defender["fight_points"] -= 1
             if ranged:
-                defender["reload_turns"] = RANGED_WEAPON_STATS[defender["weapon"]]["reload_turns"]
+                defender["reload_turns"] = ranged_reload_turns(defender)
                 if combat_events is not None:
                     combat_events.append({
                         "type": "projectile", "weapon": defender["weapon"],

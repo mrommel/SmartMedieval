@@ -1398,6 +1398,13 @@ test("spyglass sight is explained only on daylight fog maps", async () => {
   assert.doesNotMatch(game.get("selected-stats").textContent, /8-tile daylight sight/);
 });
 
+test("quiver reload benefit appears in the selected soldier's tools", async () => {
+  const game = setup();
+  game.snapshot.state.units[0].tools = ["quiver"];
+  await game.get("continue-game").fire("click");
+  assert.match(game.get("selected-stats").textContent, /quiver \(bow\/crossbow reload −1 turn on firing\)/);
+});
+
 test("armor protection, weight and equip action update with the snapshot", async () => {
   const game = setup();
   const soldier = game.snapshot.state.units[0];
