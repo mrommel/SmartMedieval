@@ -13,6 +13,7 @@ import { previewMovement } from "./path_preview.js";
   const enemyCount = document.getElementById("enemy-count");
   const rosterList = document.getElementById("roster-list");
   const soldierSelect = document.getElementById("soldier-select");
+  const findSoldierButton = document.getElementById("find-soldier");
   const statusNode = document.getElementById("objective-status");
   const progressNode = document.getElementById("capture-progress");
   const toastNode = document.getElementById("toast");
@@ -104,6 +105,7 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     soldierSelect.disabled = pendingAction || paused || ended ||
       !simulation.units.some(unit => unit.side !== "defenders");
+    findSoldierButton.disabled = pendingAction || paused || ended || !selectedMedic();
     const crew = selectedCrew();
     const medic = selectedMedic();
     const nearbyFlames = medic ? simulation.fire.filter(flame =>
@@ -960,6 +962,10 @@ import { previewMovement } from "./path_preview.js";
     simulation.selected = new Set(unit ? [unit.id] : []);
     updateSelection();
     draw();
+  });
+  findSoldierButton.addEventListener("click", () => {
+    const unit = selectedMedic();
+    if (unit && !findSoldierButton.disabled) input.focusTile(unit.x, unit.y);
   });
   document.getElementById("restart").addEventListener("click", restart);
   document.getElementById("victory-restart").addEventListener("click", restart);

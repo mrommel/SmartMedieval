@@ -29,6 +29,7 @@ function element() {
     setAttribute(name, value) { this[name] = value; },
     querySelector() { return element(); },
     getBoundingClientRect() { return { width: 600, height: 400, left: 0, top: 0 }; },
+    focus() { this.focused = true; this.fire("focus"); },
     setPointerCapture() {}, append(...children) { this.children = [...(this.children || []), ...children]; },
     replaceChildren(...children) { text = ""; this.children = children; },
     fire(type, event = {}) { return listeners[type]?.(event); }
@@ -167,6 +168,47 @@ test("soldier picker selects an individual without a server action and follows b
   picker.value = "1";
   picker.fire("change");
   assert.match(game.get("selected-stats").textContent, /Soldier #2/);
+});
+
+test("find selected soldier focuses the canvas at the selected tile for keyboard orders", async () => {
+  const game = setup();
+  game.snapshot.map.startPositions.push({ x: 1, y: 0 });
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, x: 1 });
+  await game.get("continue-game").fire("click");
+  const finder = game.get("find-soldier");
+  const picker = game.get("soldier-select");
+  const canvas = game.get("battlefield-canvas");
+  assert.equal(finder.disabled, false);
+  picker.value = "1";
+  picker.fire("change");
+  finder.fire("click");
+  assert.equal(canvas.focused, true);
+  assert.match(game.get("cursor-status").textContent, /Tile 2, 1: friendly.*selected/);
+  assert.match(game.get("route-status").textContent, /already on this tile/);
+  assert.equal(game.postCount(), 0);
+  canvas.fire("keydown", { key: "ArrowRight", preventDefault() {} });
+  assert.match(game.get("cursor-status").textContent, /Tile 3, 1/);
+  canvas.fire("keydown", { key: "Enter", preventDefault() {} });
+  assert.equal(game.actions.at(-1).type, "move");
+  assert.equal(game.actions.at(-1).x, 2);
+  assert.equal(game.actions.at(-1).y, 0);
+  await new Promise(resolve => setImmediate(resolve));
+
+  canvas.fire("keydown", { key: "ArrowLeft", preventDefault() {} });
+  canvas.fire("keydown", { key: "ArrowLeft", preventDefault() {} });
+  canvas.fire("keydown", { key: "Enter", shiftKey: true, preventDefault() {} });
+  assert.equal(finder.disabled, true);
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  picker.value = "1";
+  picker.fire("change");
+  assert.equal(finder.disabled, false);
+  game.get("pause-game").fire("click");
+  assert.equal(finder.disabled, true);
+  game.get("pause-game").fire("click");
+  assert.equal(finder.disabled, false);
+  picker.value = "";
+  picker.fire("change");
+  assert.equal(finder.disabled, true);
 });
 
 test("soldier picker drops fallen soldiers and disables when no attackers remain", async () => {

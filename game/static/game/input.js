@@ -164,6 +164,17 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     describeCursor();
   }
 
+  function focusTile(x, y) {
+    resetCursor(x, y);
+    cursor.visible = true;
+    keyboardPreview = true;
+    setHover(null);
+    revealCursor();
+    canvas.focus();
+    onPreviewChange();
+    onDraw();
+  }
+
   function revealCursor() {
     const { width, height, tileH } = getLayout();
     const point = renderer.project(cursor.x, cursor.y);
@@ -303,6 +314,6 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     zoomAt(width / 2, height / 2, 1 / 1.15);
   });
 
-  return { camera, cursor, clampCamera, resetCamera, resetCursor, describeCursor, previewDestination,
+  return { camera, cursor, clampCamera, resetCamera, resetCursor, focusTile, describeCursor, previewDestination,
     cancelPointer() { activePointer = null; touches.clear(); pinch = null; setHover(null); } };
 }
