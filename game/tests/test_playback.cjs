@@ -182,6 +182,82 @@ test("focused battlefield zooms with keyboard without issuing orders or stealing
   assert.equal(input.camera.zoom, .7);
 });
 
+test("Home and End jump the battlefield cursor without selecting or issuing an order", async () => {
+  const game = setup();
+  game.snapshot.map.cols = 5;
+  game.snapshot.map.rows = 5;
+  game.snapshot.map.keep = { left: 1, right: 3, top: 1, bottom: 3 };
+  game.snapshot.map.gate = { x: 2, y: 3 };
+  game.snapshot.map.objective = { x: 2, y: 2 };
+  game.snapshot.map.startPositions.push({ x: 1, y: 0 });
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, x: 1 });
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const picker = game.get("soldier-select");
+  picker.value = "1";
+  picker.fire("change");
+  canvas.fire("focus");
+  const jump = (key, modifiers = {}) => {
+    let prevented = false;
+    canvas.fire("keydown", { key, preventDefault() { prevented = true; }, ...modifiers });
+    return prevented;
+  };
+  assert.equal(jump("End"), true);
+  assert.match(game.get("cursor-status").textContent, /Tile 3, 3: courtyard objective/);
+  assert.equal(jump("Home"), true);
+  assert.match(game.get("cursor-status").textContent, /Tile 2, 1: friendly.*selected/);
+  assert.equal(picker.value, "1");
+  assert.equal(game.postCount(), 0);
+  assert.equal(jump("End", { metaKey: true }), false);
+  assert.equal(jump("Home", { ctrlKey: true }), false);
+  assert.match(game.get("cursor-status").textContent, /Tile 2, 1/);
+
+  // Hidden tiles must remain undescribed even when reached with the shortcut.
+  game.snapshot.map.fog_of_war = true;
+  game.snapshot.state.visible = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  game.snapshot.state.explored = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  await game.get("continue-game").fire("click");
+  canvas.fire("focus");
+  assert.equal(jump("End"), true);
+  assert.match(game.get("cursor-status").textContent, /Tile 3, 3: unexplored/);
+  assert.doesNotMatch(game.get("cursor-status").textContent, /courtyard/);
+});
+
+test("keyboard jumps reveal distant tiles and ignore Home when no soldier is selected", () => {
+  const game = setup();
+  const canvas = element();
+  const map = { cols: 40, rows: 40, elevation: [], objective: { x: 38, y: 38 } };
+  const simulation = { units: [{ id: 4, side: "attackers", x: 1, y: 1 }], selected: new Set() };
+  let orders = 0;
+  const renderer = { project: (x, y) => ({ x: 300 + (x - y) * 28, y: 80 + (x + y) * 14 }) };
+  const input = game.createInput({
+    canvas, renderer, simulation, getMap: () => map,
+    getLayout: () => ({ width: 600, height: 400, tileW: 56, tileH: 28, originX: 300, originY: 80 }),
+    canOrder: () => true, isWalkable: () => true, isAiming: () => false,
+    onAim() { orders++; }, onMove() { orders++; }, onAttack() { orders++; },
+    onSelection() {}, onBlocked() {}, onDraw() {}, onCursor() {}
+  });
+  const jump = key => {
+    let prevented = false;
+    canvas.fire("keydown", { key, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  canvas.fire("focus");
+  assert.equal(jump("Home"), false);
+  assert.equal(input.cursor.x, 0);
+  assert.equal(jump("End"), true);
+  assert.deepEqual({ x: input.cursor.x, y: input.cursor.y }, map.objective);
+  let point = renderer.project(input.cursor.x, input.cursor.y);
+  assert.ok((point.y + 14) * input.camera.zoom + input.camera.y <= 368);
+  simulation.selected.add(4);
+  assert.equal(jump("Home"), true);
+  assert.equal(input.cursor.x, 1);
+  assert.equal(input.cursor.y, 1);
+  point = renderer.project(input.cursor.x, input.cursor.y);
+  assert.ok((point.y + 14) * input.camera.zoom + input.camera.y >= 32);
+  assert.equal(orders, 0);
+});
+
 test("admin playtest opens the saved session match directly", async () => {
   const game = setup(null, null, null, { playtest: true });
   await new Promise(resolve => setImmediate(resolve));
@@ -1249,17 +1325,28 @@ test("AI wait readout measures pending, completed and failed requests without co
     new Promise(resolve => { resolveResponse = resolve; }));
   await game.get("continue-game").fire("click");
   const status = game.get("ai-wait-status");
+  const announcement = game.get("ai-turn-announcement");
+  const html = fs.readFileSync(path.join(__dirname, "../templates/game/game.html"), "utf8");
+  assert.match(html, /id="ai-wait-status"[^>]*aria-live="off"/);
+  assert.match(html, /id="ai-turn-announcement"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.doesNotMatch(html, /id="ai-turn-announcement"[^>]*hidden/);
+  assert.equal(announcement.textContent, "");
   const endTurn = game.get("end-turn");
   const response = () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => game.snapshot });
 
   endTurn.fire("click");
   assert.equal(status.hidden, false);
   assert.match(status.textContent, /0s elapsed/);
+  assert.match(announcement.textContent, /Waiting for defender AI/);
+  assert.equal(game.get("toast")["aria-live"], "off", "AI status should not be read twice");
+  const waitingAnnouncement = announcement.textContent;
   game.advance(2400);
   assert.match(status.textContent, /2s elapsed/);
+  assert.equal(announcement.textContent, waitingAnnouncement, "elapsed seconds must not be announced");
   resolveResponse(response());
   await new Promise(setImmediate);
   assert.match(status.textContent, /2\.4s · session average: 2\.4s \(1 turn\)/);
+  assert.match(announcement.textContent, /Defender AI turn complete\. Turn 1 begins/);
   assert.equal(game.activeIntervals(), 0);
 
   endTurn.fire("click");
@@ -1274,10 +1361,14 @@ test("AI wait readout measures pending, completed and failed requests without co
     json: async () => ({ error: "Enemy AI is unavailable." }) });
   await new Promise(setImmediate);
   assert.match(status.textContent, /failed after 5\.0s/);
+  assert.match(announcement.textContent, /turn has not advanced\. Retry End turn or use End turn without AI/);
   assert.equal(game.activeIntervals(), 0);
   await game.get("offline-end-turn").fire("click");
   await new Promise(setImmediate);
   assert.match(status.textContent, /failed after 5\.0s/);
+  assert.equal(announcement.textContent, "", "offline feedback comes from the toast");
+  assert.equal(game.get("toast")["aria-live"], "polite");
+  assert.match(game.get("toast").textContent, /Offline turn.*defenders held position/);
   assert.equal(game.activeIntervals(), 0);
 
   endTurn.fire("click");
@@ -1289,6 +1380,7 @@ test("AI wait readout measures pending, completed and failed requests without co
   game.snapshot.id = 2;
   await game.get("continue-game").fire("click");
   assert.equal(status.hidden, true);
+  assert.equal(announcement.textContent, "", "old match status must not replay on resume");
   endTurn.fire("click");
   game.advance(3000);
   resolveResponse(response());
@@ -1353,6 +1445,7 @@ test("a winning action focuses Play again when its original control is disabled"
   await new Promise(setImmediate);
   assert.equal(endTurn.disabled, true);
   assert.equal(game.document.activeElement, game.get("victory-restart"));
+  assert.match(game.get("ai-turn-announcement").textContent, /Victory; review the battle outcome/);
 });
 
 test("speed persists, restores, and off disables per-frame drawing", async () => {

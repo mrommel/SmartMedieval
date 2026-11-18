@@ -22,6 +22,7 @@ import { previewMovement } from "./path_preview.js";
   const victoryNode = document.getElementById("victory");
   const turnNode = document.getElementById("turn-status");
   const aiWaitNode = document.getElementById("ai-wait-status");
+  const aiTurnAnnouncement = document.getElementById("ai-turn-announcement");
   const endTurnButton = document.getElementById("end-turn");
   const offlineEndTurnButton = document.getElementById("offline-end-turn");
   const reactionButton = document.getElementById("reserve-reaction");
@@ -702,6 +703,7 @@ import { previewMovement } from "./path_preview.js";
       aiTurnCount = 0;
       aiTurnTotal = 0;
       aiWaitNode.hidden = true;
+      aiTurnAnnouncement.textContent = "";
       input.cancelPointer();
       inspectingTouch = false;
       input.setInspectTouch(false);
@@ -872,13 +874,15 @@ import { previewMovement } from "./path_preview.js";
     const aiTurn = action.type === "end_turn" && !action.offline;
     const startedAt = aiTurn ? performance.now() : null;
     let waitTimer = null;
+    const report = message => showToast(message, !aiTurn);
     pendingAction = true;
     updateControls();
     updateMovementPreview();
-    if (action.type === "end_turn") showToast(action.offline ? "Defenders are holding position..." : "Defenders are taking their turn...");
+    if (action.type === "end_turn") report(action.offline ? "Defenders are holding position..." : "Defenders are taking their turn...");
     if (aiTurn) {
       aiWaitNode.hidden = false;
       aiWaitNode.textContent = "Waiting for defender AI · 0s elapsed";
+      aiTurnAnnouncement.textContent = "Waiting for defender AI to take its turn.";
       waitTimer = setInterval(() => {
         aiWaitNode.textContent = `Waiting for defender AI · ${Math.floor((performance.now() - startedAt) / 1000)}s elapsed`;
       }, 1000);
@@ -906,32 +910,40 @@ import { previewMovement } from "./path_preview.js";
         aiTurnTotal += duration;
         aiWaitNode.textContent = `Defender AI turn request: ${duration.toFixed(1)}s · session average: ${(aiTurnTotal / aiTurnCount).toFixed(1)}s (${aiTurnCount} turn${aiTurnCount === 1 ? "" : "s"}).`;
         aiWaitNode.hidden = false;
+        aiTurnAnnouncement.textContent = simulation.captured || simulation.defeated
+          ? `Defender AI turn complete. ${simulation.defeated ? "Defeat" : "Victory"}; review the battle outcome.`
+          : `Defender AI turn complete. Turn ${snapshot.state.turn} begins.`;
+      } else if (action.offline) {
+        aiTurnAnnouncement.textContent = "";
       }
       if (animationsEnabled()) renderer.queueProjectiles(snapshot.combat_events, animationTime);
-      if (!wasCaptured && simulation.captured) showToast(snapshot.state.capture_status === "WITHDRAWN" ? "Survivors escaped through the exit." : mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
-      else if (simulation.defeated) showToast(mapData.mission === "capture_king" &&
+      if (!wasCaptured && simulation.captured) report(snapshot.state.capture_status === "WITHDRAWN" ? "Survivors escaped through the exit." : mapData.mission === "capture_king" ? "The king has been captured alive." : "Greywatch courtyard secured.");
+      else if (simulation.defeated) report(mapData.mission === "capture_king" &&
         (mapData.fog_of_war ? snapshot.state.king_fallen : !simulation.units.some(unit => unit.is_king)) ?
         "The king was killed. Mission failed." : "Your company has been defeated.");
-      else if (action.offline) showToast(`Offline turn ${snapshot.state.turn}: defenders held position but could still attack.`);
-      else showToast(combat || (action.type === "extinguish_fire" ? "Fire extinguished." : action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
+      else if (action.offline) report(`Offline turn ${snapshot.state.turn}: defenders held position but could still attack.`);
+      else report(combat || (action.type === "extinguish_fire" ? "Fire extinguished." : action.type === "withdraw" ? "Soldier evacuated with carried equipment." : action.type === "end_turn" ? `Defenders have taken their turn. Turn ${snapshot.state.turn} begins.` : action.type === "reserve_movement" ? action.reserved ? "Remaining movement reserved for an escape." : "Movement reservation cancelled; points restored." : action.type === "reserve_reaction" ? action.reserved ? "One fight point reserved for a reaction attack." : "Reaction cancelled; fight point restored." : action.type === "promote" ? "Recruit promoted to veteran; bonus points begin next turn." : action.type === "mount" ? "Mounted (one fight point)." : action.type === "dismount" ? "Dismounted (one fight point)." : action.type === "equip_armor" ? "Armor changed (one fight point)." : action.type === "pickup_equipment" ? "Equipment recovered." : action.type === "drop_weapon" || action.type === "drop_armor" ? "Equipment dropped." : action.type === "aim_catapult" ? "Catapult aimed. A crew member can fire when ready." : action.type === "fire_catapult" ? "Catapult fired." : action.type === "pickup_item" ? "Potion collected." : action.type === "drop_item" ? "Potion dropped." : action.type === "use_item" ? "Ally healed." : snapshot.state.history?.at(-1)?.horse_hit ? "The horse took the blow." : snapshot.state.history?.at(-1)?.armor_blocked ? "Armor absorbed the hit." : "Order received."));
     } catch (error) {
       if (aiTurn) {
         aiWaitNode.textContent = `Defender AI turn request failed after ${(Math.max(0, performance.now() - startedAt) / 1000).toFixed(1)}s. No time added to the session average.`;
+        aiTurnAnnouncement.textContent = error.status === 502 || error.status === 503
+          ? "Defender AI failed. The turn has not advanced. Retry End turn or use End turn without AI."
+          : `Defender AI turn request failed: ${error.message}`;
       }
       if (action.type === "end_turn" && !action.offline && (error.status === 502 || error.status === 503)) {
         offlineEndTurnButton.hidden = false;
-        showToast(`AI failed: ${error.message} Retry End turn or use End turn without AI (defenders hold).`);
+        report(`AI failed: ${error.message} Retry End turn or use End turn without AI (defenders hold).`);
         return;
       }
       if (error.status === 409) {
         try {
           applySnapshot(await api("/api/games/current/"));
         } catch (refreshError) {
-          showToast(`Could not refresh game: ${refreshError.message}`);
+          report(`Could not refresh game: ${refreshError.message}`);
           return;
         }
       }
-      showToast(`Order failed: ${error.message}`);
+      report(`Order failed: ${error.message}`);
     } finally {
       if (waitTimer !== null) clearInterval(waitTimer);
       pendingAction = false;
@@ -949,7 +961,8 @@ import { previewMovement } from "./path_preview.js";
     }
   }
 
-  function showToast(message) {
+  function showToast(message, announce = true) {
+    toastNode.setAttribute("aria-live", announce ? "polite" : "off");
     toastNode.textContent = message;
     toastNode.classList.add("visible");
     clearTimeout(toastTimer);

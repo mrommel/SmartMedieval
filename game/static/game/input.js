@@ -294,7 +294,21 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
     const directions = {
       ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]
     };
-    if (directions[event.key]) {
+    if (event.key === "Home" || event.key === "End") {
+      const tile = event.key === "Home"
+        ? simulation.units.find(unit => unit.side !== "defenders" && simulation.selected.has(unit.id))
+        : getMap().objective;
+      if (!tile) return;
+      event.preventDefault();
+      cursor.x = tile.x;
+      cursor.y = tile.y;
+      keyboardPreview = true;
+      setHover(null);
+      describeCursor();
+      onPreviewChange();
+      revealCursor();
+      onDraw();
+    } else if (directions[event.key]) {
       event.preventDefault();
       const [dx, dy] = directions[event.key];
       const map = getMap();
