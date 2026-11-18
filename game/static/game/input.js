@@ -1,5 +1,6 @@
 export function createBattlefieldInput({ canvas, renderer, simulation, getMap, getLayout,
-  canOrder, isWalkable, isAiming, onAim, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor, onPreviewChange = () => {} }) {
+  canOrder, isWalkable, isAiming, onAim, onMove, onAttack, onSelection, onBlocked, onDraw, onCursor,
+  isGroupSelection = () => false, onPreviewChange = () => {} }) {
   const camera = { x: 0, y: 0, zoom: 1 };
   const cursor = { x: 0, y: 0, visible: false };
   let activePointer = null;
@@ -107,7 +108,7 @@ export function createBattlefieldInput({ canvas, renderer, simulation, getMap, g
   }
 
   function select(unit, shiftKey) {
-    if (shiftKey) {
+    if (shiftKey || isGroupSelection()) {
       if (simulation.selected.has(unit.id)) simulation.selected.delete(unit.id);
       else simulation.selected.add(unit.id);
     } else {

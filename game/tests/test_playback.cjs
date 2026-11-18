@@ -212,6 +212,56 @@ test("soldier picker selects an individual without a server action and follows b
   assert.match(game.get("selected-stats").textContent, /Soldier #2/);
 });
 
+test("group selection supports touch taps and the roster picker without a keyboard", async () => {
+  const game = setup();
+  game.snapshot.map.startPositions.push({ x: 0, y: 1 });
+  game.snapshot.state.units.push({ ...game.snapshot.state.units[0], id: 1, y: 1 });
+  await game.get("continue-game").fire("click");
+  const canvas = game.get("battlefield-canvas");
+  const picker = game.get("soldier-select");
+  const toggle = game.get("group-select");
+  const tap = (id, x, y) => {
+    const event = { button: 0, pointerType: "touch", pointerId: id, clientX: x, clientY: y };
+    canvas.fire("pointerdown", event);
+    canvas.fire("pointerup", event);
+  };
+  assert.equal(toggle.disabled, false);
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "true");
+  picker.value = "1";
+  picker.fire("change");
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  assert.equal(picker.value, "");
+  assert.equal(game.get("find-soldier").disabled, true);
+  tap(1, 268, 205.2);
+  assert.match(game.get("selected-stats").textContent, /Soldier #1/);
+  tap(2, 268, 205.2);
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  picker.value = "1";
+  picker.fire("change");
+  assert.match(game.get("selected-stats").textContent, /Soldier #1/);
+  picker.value = "1";
+  picker.fire("change");
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  canvas.fire("pointerdown", { button: 0, pointerType: "touch", pointerId: 3, clientX: 268, clientY: 205.2 });
+  canvas.fire("pointercancel", { pointerType: "touch", pointerId: 3 });
+  canvas.fire("pointerup", { pointerType: "touch", pointerId: 3, clientX: 268, clientY: 205.2 });
+  assert.match(game.get("selected-stats").textContent, /2 soldiers selected/);
+  game.get("pause-game").fire("click");
+  assert.equal(toggle.disabled, true);
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "true");
+  game.get("pause-game").fire("click");
+  toggle.fire("click");
+  assert.equal(toggle["aria-pressed"], "false");
+  tap(4, 268, 205.2);
+  assert.match(game.get("selected-stats").textContent, /Soldier #2/);
+  toggle.fire("click");
+  await game.get("continue-game").fire("click");
+  assert.equal(toggle["aria-pressed"], "false");
+  assert.equal(game.postCount(), 0);
+});
+
 test("find selected soldier focuses the canvas at the selected tile for keyboard orders", async () => {
   const game = setup();
   game.snapshot.map.startPositions.push({ x: 1, y: 0 });

@@ -148,8 +148,9 @@
           <select id="soldier-select" aria-describedby="soldier-select-help" disabled>
             <option value="">Choose a soldier</option>
           </select>
+          <button id="group-select" type="button" aria-pressed="false" aria-describedby="soldier-select-help" disabled>Add/remove group members</button>
           <button id="find-soldier" type="button" disabled>Find selected soldier on battlefield</button>
-          <p id="soldier-select-help">Choose a soldier without navigating the battlefield, then use Find selected soldier to focus their tile. Shift-select on the battlefield to form a group.</p>
+          <p id="soldier-select-help">Choose a soldier without navigating the battlefield, then use Find selected soldier to focus their tile. Turn on Add/remove group members to toggle soldiers by tapping the battlefield or choosing them from this list. Turn it off to select one soldier at a time. Shift-select also works on the battlefield.</p>
         </div>
         <h2 class="roster-heading" id="selected-unit-title">SELECTED SOLDIER</h2>
         <div class="selected-stats" id="selected-stats" role="group" aria-labelledby="selected-unit-title" aria-live="polite" aria-atomic="true">Select a soldier to inspect their condition and equipment.</div>
@@ -163,7 +164,7 @@
       </section>
       <div class="howto">
         <div class="roster-heading">HOW TO PLAY</div>
-        <p><kbd>Click</kbd> a soldier to select. <kbd>Shift</kbd> + click to add or remove a soldier.</p>
+        <p><kbd>Click</kbd> a soldier to select. <kbd>Shift</kbd> + click, or turn on Add/remove group members, to add or remove a soldier. On touchscreens, tap soldiers while group selection is on.</p>
         <p id="mission-help">Click open ground to spend move points. Move next to a blue defender, then click it to spend a fight point and deal melee damage. End the turn to let defenders move and counterattack, restore points, and advance courtyard capture. Health bars show remaining health.</p>
         <p>Walls, trees, and rocks beside a ground-level target can block the first ranged hit each turn when they face the shooter. The shot still spends a fight point and reloads. Attack from another direction or use melee to bypass cover.</p>
         <p>Select one armed soldier and press Reserve attack to set aside one fight point. The highlighted tiles show where a moving, visible defender can trigger a sword strike or bow shot before it attacks. Press Cancel reaction to reclaim the point before ending the turn. Unused reservations expire when the next turn begins.</p>

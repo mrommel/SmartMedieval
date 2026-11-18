@@ -14,6 +14,7 @@ import { previewMovement } from "./path_preview.js";
   const rosterList = document.getElementById("roster-list");
   const soldierSelect = document.getElementById("soldier-select");
   const findSoldierButton = document.getElementById("find-soldier");
+  const groupSelectButton = document.getElementById("group-select");
   const statusNode = document.getElementById("objective-status");
   const progressNode = document.getElementById("capture-progress");
   const toastNode = document.getElementById("toast");
@@ -83,6 +84,7 @@ import { previewMovement } from "./path_preview.js";
   let animationSpeed = 1;
   let userReducedMotion = false;
   let paused = false;
+  let groupSelection = false;
   let animationTime = 0;
   let lastFrameTime = null;
   let previewMap = null;
@@ -105,6 +107,7 @@ import { previewMovement } from "./path_preview.js";
     const ended = simulation.captured || simulation.defeated;
     soldierSelect.disabled = pendingAction || paused || ended ||
       !simulation.units.some(unit => unit.side !== "defenders");
+    groupSelectButton.disabled = soldierSelect.disabled;
     findSoldierButton.disabled = pendingAction || paused || ended || !selectedMedic();
     const crew = selectedCrew();
     const medic = selectedMedic();
@@ -898,6 +901,8 @@ import { previewMovement } from "./path_preview.js";
 
   function enterGame(snapshot) {
     const { entry, kind } = snapshot;
+    groupSelection = false;
+    groupSelectButton.setAttribute("aria-pressed", "false");
     currentEntryId = entry.id;
     currentKind = kind;
     currentGameId = snapshot.game_id;
@@ -936,6 +941,7 @@ import { previewMovement } from "./path_preview.js";
     getMap: () => mapData,
     getLayout: () => ({ width, height, tileW, tileH, originX, originY }),
     canOrder: () => gameIsVisible && !simulation.captured && !simulation.defeated && !pendingAction && !paused,
+    isGroupSelection: () => groupSelection,
     isWalkable, onMove: moveSelected, onAttack: attackSelected, onSelection: updateSelection,
     isAiming: () => aimingCatapult, onAim: aimCatapultAt,
     onBlocked: () => showToast("An obstacle bars the way. Choose an open tile."),
@@ -959,9 +965,17 @@ import { previewMovement } from "./path_preview.js";
   soldierSelect.addEventListener("change", () => {
     if (soldierSelect.disabled) return;
     const unit = simulation.units.find(item => item.side !== "defenders" && String(item.id) === soldierSelect.value);
-    simulation.selected = new Set(unit ? [unit.id] : []);
+    if (groupSelection && unit) {
+      if (simulation.selected.has(unit.id)) simulation.selected.delete(unit.id);
+      else simulation.selected.add(unit.id);
+    } else if (!groupSelection) simulation.selected = new Set(unit ? [unit.id] : []);
     updateSelection();
     draw();
+  });
+  groupSelectButton.addEventListener("click", () => {
+    if (groupSelectButton.disabled) return;
+    groupSelection = !groupSelection;
+    groupSelectButton.setAttribute("aria-pressed", String(groupSelection));
   });
   findSoldierButton.addEventListener("click", () => {
     const unit = selectedMedic();
