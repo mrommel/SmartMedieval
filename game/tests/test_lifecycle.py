@@ -226,3 +226,95 @@ class EditorToBattleLifecycleTests(TestCase):
         out_of_sight = self.player.get(reverse("current-game")).json()
         self.assertEqual(out_of_sight["state"]["wall_damage"], [])
         self.assertEqual(out_of_sight["state"]["breaches"], [])
+
+    def test_legacy_fogged_match_survives_unlisting_and_failed_ai_retries(self):
+        battlefield = default_map()
+        battlefield.update(fog_of_war=True,
+                           startPositions=[{"x": 2, "y": 6, "weapon": "sword"}],
+                           enemyStartPositions=[{"x": 16, "y": 8, "weapon": "sword"}])
+        game = self.save_game(battlefield)
+        response = self.editor.post(reverse("admin:game_scenario_add"), {
+            "name": "Scout campaign", "slug": "scout-campaign", "description": "Explore.",
+            "introduction": "", "sort_order": 0, "is_available": "on",
+            "games": [game.pk], "_save": "Save",
+        })
+        self.assertEqual(response.status_code, 302)
+        scenario = Scenario.objects.get(slug="scout-campaign")
+        launch_url = reverse("start-game", args=["scenarios", scenario.pk])
+        started = self.player.post(launch_url, data="{}", content_type="application/json").json()
+        instance = GameInstance.objects.get(pk=started["id"])
+
+        # Simulate an older saved match with a fog map and no newer state fields.
+        legacy_map = deepcopy(instance.map_definition)
+        for roster in ("startPositions", "enemyStartPositions"):
+            for position in legacy_map[roster]:
+                position["type"] = "vanguard"
+                del position["weapon"]
+        instance.map_definition = legacy_map
+        legacy_state = instance.state
+        for field in ("items", "next_item_id", "horses", "catapults", "withdrawn", "smoke", "fire",
+                      "burned", "wall_damage", "breaches", "extinguished_watchfires", "explored"):
+            legacy_state.pop(field, None)
+        for unit in legacy_state["units"]:
+            unit["type"] = "vanguard"
+            for field in ("weapon", "tools", "armor", "armor_equipped", "mount_id",
+                          "move_capacity", "reaction_reserved", "move_reserved", "crouched",
+                          "shield_raised", "torch_lit", "wound_turns"):
+                unit.pop(field, None)
+        instance.state = legacy_state
+        instance.save(update_fields=["map_definition", "state"])
+
+        game.is_available = False
+        game.save(update_fields=["is_available"])
+        scenario.is_available = False
+        scenario.save(update_fields=["is_available"])
+        self.assertNotIn(scenario.pk, [entry["id"] for entry in self.player.get(reverse("scenarios-api")).json()])
+        self.assertNotIn(game.pk, [entry["id"] for entry in self.player.get(reverse("single-games-api")).json()])
+        self.assertEqual(self.player.post(launch_url, data="{}", content_type="application/json").status_code, 404)
+
+        reloaded = Client()
+        reloaded.cookies = self.player.cookies.copy()
+        self.player = reloaded
+        resumed = self.player.get(reverse("current-game")).json()
+        self.assertEqual(resumed["id"], started["id"])
+        self.assertEqual(resumed["revision"], 0)
+        self.assertNotIn("enemyStartPositions", resumed["map"])
+        self.assertEqual([unit["id"] for unit in resumed["state"]["units"]], [0])
+        self.assertEqual(resumed["state"]["items"], [])
+        self.assertEqual(resumed["state"]["units"][0]["weapon"], "sword")
+
+        moved_response = self.action(0, {"type": "move", "units": [0], "x": 3, "y": 6})
+        self.assertEqual(moved_response.status_code, 200)
+        moved = moved_response.json()
+        self.assertEqual(moved["state"]["units"][0]["x"], 3)
+        self.assertEqual(moved["revision"], 1)
+        self.assertEqual(self.player.get(reverse("current-game")).json(),
+                         {key: value for key, value in moved.items() if key != "combat_events"})
+        instance.refresh_from_db()
+        before_ai = deepcopy(instance.state)
+
+        invalid_response = json.dumps({"choices": [{"message": {"content": "not JSON"}}]}).encode()
+        with patch("game.enemy_ai.urlopen") as ai:
+            ai.return_value.__enter__.return_value.read.return_value = invalid_response
+            failed = self.action(1, {"type": "end_turn"})
+            self.assertEqual(failed.status_code, 502)
+            self.assertEqual(ai.call_count, 2)
+            self.assertEqual(self.player.get(reverse("current-game")).json(),
+                             {key: value for key, value in moved.items() if key != "combat_events"})
+            instance.refresh_from_db()
+            self.assertEqual(instance.revision, 1)
+            self.assertEqual(instance.state, before_ai)
+
+        offline = self.action(1, {"type": "end_turn", "offline": True})
+        self.assertEqual(offline.status_code, 200)
+        advanced = offline.json()
+        self.assertEqual(advanced["revision"], 2)
+        self.assertEqual(advanced["state"]["turn"], 2)
+        self.assertNotIn("enemyStartPositions", advanced["map"])
+        self.assertEqual([unit["id"] for unit in advanced["state"]["units"]], [0])
+        self.assertEqual(self.player.get(reverse("current-game")).json(),
+                         {key: value for key, value in advanced.items() if key != "combat_events"})
+        self.assertEqual(self.action(1, {"type": "end_turn", "offline": True}).status_code, 409)
+        instance.refresh_from_db()
+        self.assertEqual(instance.map_definition, legacy_map)
+        self.assertEqual(instance.state["units"][0]["weapon"], "sword")
